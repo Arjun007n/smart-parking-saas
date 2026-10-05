@@ -2,14 +2,15 @@ const AppError = require("../utils/AppError");
 const audit = require("../services/auditService");
 const { dayRange } = require("../utils/time");
 const { locationScopedFilter, getAccessibleLocation, locationIdFromQuery } = require("../utils/scope");
-const { hasPermission, PERMISSIONS } = require("../config/permissions");
+const { PERMISSIONS } = require("../config/permissions");
+const { can } = require("../middleware/permission");
 const { shiftTotals, reconcile } = require("../services/collectionService");
 const { notify } = require("../services/notificationService");
 const Shift = require("../models/Shift");
 const User = require("../models/User");
 const Location = require("../models/Location");
 
-const isAdmin = (req) => hasPermission(req.user.role, PERMISSIONS.LOCATION_MANAGE);
+const isAdmin = (req) => can(req, PERMISSIONS.LOCATION_MANAGE);
 const isOwn = (req, shift) => String(shift.operatorId) === String(req.user._id);
 
 // A shift is visible to its operator, and to admins of its location.
@@ -127,7 +128,7 @@ const addAdjustment = async (req, res) => {
 // Admins and report viewers see every shift in their locations; others see their own.
 const listShifts = async (req, res) => {
   const conditions = [locationScopedFilter(req)];
-  const seesAll = isAdmin(req) || hasPermission(req.user.role, PERMISSIONS.REPORT_VIEW);
+  const seesAll = isAdmin(req) || can(req, PERMISSIONS.REPORT_VIEW);
   if (!seesAll) conditions.push({ operatorId: req.user._id });
 
   const locationId = locationIdFromQuery(req);

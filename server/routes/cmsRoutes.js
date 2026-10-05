@@ -4,6 +4,7 @@ const { protect } = require("../middleware/auth");
 const { tenant } = require("../middleware/tenant");
 const { requirePermission } = require("../middleware/permission");
 const { validateBody, validateIdParam } = require("../middleware/validate");
+const rateLimit = require("../middleware/rateLimit");
 const { PERMISSIONS } = require("../config/permissions");
 
 // Website content is managed by the platform owner (Super Admin) only.
@@ -44,4 +45,25 @@ blog.put("/:id", validateIdParam(), admin, validateBody(postFields(false)), cont
 blog.delete("/:id", validateIdParam(), admin, controller.deletePost);
 blog.get("/:slug", controller.getPost);
 
-module.exports = { faq, blog };
+// ---- /api/testimonials
+const testimonials = express.Router();
+const testimonialFields = (isCreate) => ({
+  quote: { type: "string", required: isCreate, min: 10, max: 600 },
+  name: { type: "string", required: isCreate, min: 2, max: 100 },
+  role: { type: "string", max: 100 },
+  company: { type: "string", max: 150 },
+  order: { type: "number", integer: true, min: 0, max: 10000 },
+  isPublished: { type: "boolean" },
+});
+
+testimonials.get("/", controller.listTestimonials);
+testimonials.get("/all", admin, controller.listAllTestimonials);
+testimonials.post("/", admin, validateBody(testimonialFields(true)), controller.createTestimonial);
+testimonials.put("/:id", validateIdParam(), admin, validateBody(testimonialFields(false)), controller.updateTestimonial);
+testimonials.delete("/:id", validateIdParam(), admin, controller.deleteTestimonial);
+
+// ---- /api/public/stats
+const stats = express.Router();
+stats.get("/", rateLimit({ windowMs: 60 * 1000, max: 60 }), controller.publicStats);
+
+module.exports = { faq, blog, testimonials, stats };

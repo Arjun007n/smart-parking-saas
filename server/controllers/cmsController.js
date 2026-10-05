@@ -3,6 +3,9 @@ const audit = require("../services/auditService");
 const { uniqueSlug, slugify } = require("../utils/slug");
 const FAQ = require("../models/FAQ");
 const Blog = require("../models/Blog");
+const Testimonial = require("../models/Testimonial");
+const Location = require("../models/Location");
+const ParkingSession = require("../models/ParkingSession");
 
 const PAGE_SIZE = 12;
 
@@ -116,7 +119,74 @@ const deletePost = async (req, res) => {
   res.json({ success: true, data: { _id: post._id } });
 };
 
+// ------------------------------------------------------------ Testimonials ----
+
+// GET /api/testimonials   (public: published quotes)
+const listTestimonials = async (req, res) => {
+  const items = await Testimonial.find({ isPublished: true }).sort({ order: 1, createdAt: -1 }).limit(50);
+  res.json({ success: true, data: items });
+};
+
+// GET /api/testimonials/all   (Super Admin: includes unpublished)
+const listAllTestimonials = async (req, res) => {
+  const items = await Testimonial.find().sort({ order: 1, createdAt: -1 }).limit(200);
+  res.json({ success: true, data: items });
+};
+
+const createTestimonial = async (req, res) => {
+  const item = await Testimonial.create(req.body);
+  await audit.record(req, "TESTIMONIAL_CREATE", { entity: "Testimonial", entityId: item._id });
+  res.status(201).json({ success: true, data: item });
+};
+
+const updateTestimonial = async (req, res) => {
+  const item = await Testimonial.findById(req.params.id);
+  if (!item) throw new AppError("Testimonial not found", 404);
+  Object.assign(item, req.body);
+  await item.save();
+  await audit.record(req, "TESTIMONIAL_UPDATE", { entity: "Testimonial", entityId: item._id });
+  res.json({ success: true, data: item });
+};
+
+const deleteTestimonial = async (req, res) => {
+  const item = await Testimonial.findByIdAndDelete(req.params.id);
+  if (!item) throw new AppError("Testimonial not found", 404);
+  await audit.record(req, "TESTIMONIAL_DELETE", { entity: "Testimonial", entityId: item._id, meta: { name: item.name } });
+  res.json({ success: true, data: { _id: item._id } });
+};
+
+// ---------------------------------------------------------------- Stats ----
+
+// Real figures for the home page: open parking locations and vehicles that entered in the last
+// 30 days, across every company. Kept for ten minutes so the public page costs the database little.
+let statsCache = { at: 0, data: null };
+const STATS_TTL_MS = 10 * 60 * 1000;
+
+const computeStats = async () => {
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const [locations, vehicles30d] = await Promise.all([
+    Location.countDocuments({ isActive: true }),
+    ParkingSession.countDocuments({ entryTime: { $gte: since } }),
+  ]);
+  return { locations, vehicles30d };
+};
+
+// GET /api/public/stats
+const publicStats = async (req, res) => {
+  if (!statsCache.data || Date.now() - statsCache.at > STATS_TTL_MS) {
+    statsCache = { at: Date.now(), data: await computeStats() };
+  }
+  res.json({ success: true, data: statsCache.data });
+};
+
+// For tests: forget the saved figures.
+const resetStatsCache = () => {
+  statsCache = { at: 0, data: null };
+};
+
 module.exports = {
+  listTestimonials, listAllTestimonials, createTestimonial, updateTestimonial, deleteTestimonial,
+  publicStats, resetStatsCache,
   listFaqs, listAllFaqs, createFaq, updateFaq, deleteFaq,
   listPosts, getPost, listAllPosts, createPost, updatePost, deletePost,
 };

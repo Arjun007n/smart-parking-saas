@@ -19,7 +19,8 @@ const Location = require("../models/Location");
 
 const TRANSITIONS = Object.freeze({
   ACTIVE: ["PAYMENT_PENDING", "COMPLETED", "PASS_EXIT", "CANCELLED", "MANUAL_OVERRIDE"],
-  PAYMENT_PENDING: ["PAYMENT_PENDING", "COMPLETED", "LOST_TICKET", "ACTIVE", "MANUAL_OVERRIDE"],
+  // PASS_EXIT from here: the fee was quoted, then the vehicle's pass was sold or renewed.
+  PAYMENT_PENDING: ["PAYMENT_PENDING", "COMPLETED", "LOST_TICKET", "PASS_EXIT", "ACTIVE", "MANUAL_OVERRIDE"],
   COMPLETED: [],
   CANCELLED: [],
   LOST_TICKET: [],

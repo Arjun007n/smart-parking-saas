@@ -1,3 +1,5 @@
+import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -5,7 +7,7 @@ import { companyApi } from '../../services/api'
 import { useAuth } from '../../hooks/useAuth'
 import { companySchema } from '../../validators/schemas'
 import { errorMessage } from '../../utils/errors'
-import { Alert, Badge, Button, Card, Field, PageLoader } from '../../components/ui'
+import { Alert, Badge, Button, Card, Checkbox, Field, PageLoader } from '../../components/ui'
 
 const toForm = (c) => ({
   name: c.name || '',
@@ -85,6 +87,57 @@ function CompanyForm({ company }) {
   )
 }
 
+const splitAddresses = (text) => text.split(/[\s,;]+/).map((a) => a.trim().toLowerCase()).filter(Boolean)
+
+// Switch the end-of-day report email on or off, choose who gets it and when.
+function ReportEmail({ companyId }) {
+  const queryClient = useQueryClient()
+  const query = useQuery({ queryKey: ['company', companyId, 'report-email'], queryFn: () => companyApi.reportEmail(companyId) })
+  const [draft, setDraft] = useState(null)
+  const saved = query.data
+  const form = draft || (saved && { enabled: saved.enabled, recipients: saved.recipients.join(', '), sendAt: saved.sendAt })
+
+  const save = useMutation({
+    mutationFn: (v) => companyApi.updateReportEmail(companyId, { enabled: v.enabled, recipients: splitAddresses(v.recipients), sendAt: v.sendAt }),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(['company', companyId, 'report-email'], updated)
+      setDraft(null)
+    },
+  })
+  const test = useMutation({ mutationFn: () => companyApi.testReportEmail(companyId) })
+
+  if (query.isLoading) return <PageLoader />
+  if (query.error) return <Alert>{errorMessage(query.error)}</Alert>
+  const change = (patch) => setDraft({ ...form, ...patch })
+
+  return (
+    <div className="space-y-4">
+      {!saved.emailAvailable && <Alert type="info">Email is not set up on the server yet, so nothing can be sent. You can still choose the settings.</Alert>}
+      <p className="text-sm text-slate-600">
+        Every day, at the time you choose, we email what happened that day at each location: vehicles in and out, money collected by method,
+        passes sold and vehicles still inside.
+      </p>
+      <Checkbox label="Send me the end-of-day report" checked={form.enabled} onChange={(e) => change({ enabled: e.target.checked })} />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Send at (local time)" type="time" value={form.sendAt} onChange={(e) => change({ sendAt: e.target.value })} />
+        <Field
+          label="Send to" placeholder="a@example.com, b@example.com" value={form.recipients}
+          hint="Separate addresses with commas. Leave empty to send to every company admin."
+          onChange={(e) => change({ recipients: e.target.value })}
+        />
+      </div>
+      <Alert>{save.error && errorMessage(save.error)}</Alert>
+      <Alert>{test.error && errorMessage(test.error)}</Alert>
+      <Alert type="success">{save.isSuccess && !draft && 'Saved.'}</Alert>
+      <Alert type="success">{test.isSuccess && `A test report was sent to ${test.data.sentTo.join(', ')}.`}</Alert>
+      <div className="flex flex-wrap gap-3">
+        <Button onClick={() => save.mutate(form)} loading={save.isPending} disabled={!draft}>Save</Button>
+        <Button variant="secondary" onClick={() => test.mutate()} loading={test.isPending} disabled={Boolean(draft)}>Email me a test report</Button>
+      </div>
+    </div>
+  )
+}
+
 export default function Company() {
   const { company: sessionCompany } = useAuth()
   const { data: company, isLoading, error } = useQuery({
@@ -99,7 +152,7 @@ export default function Company() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-slate-900">Company</h1>
 
-      <Card title="Plan and subscription">
+      <Card title="Plan and subscription" action={<Link to="/dashboard/billing" className="text-sm font-semibold text-blue-700 hover:underline">Buy or renew a plan</Link>}>
         <dl className="grid gap-4 text-sm sm:grid-cols-4">
           <div>
             <dt className="text-slate-500">Status</dt>
@@ -118,6 +171,10 @@ export default function Company() {
             <dd className="mt-1 font-semibold text-slate-900">{company.plan.maxUsers}</dd>
           </div>
         </dl>
+      </Card>
+
+      <Card title="Daily report email">
+        <ReportEmail companyId={company._id} />
       </Card>
 
       <Card title="Company details">

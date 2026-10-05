@@ -1,6 +1,6 @@
 const AppError = require("../utils/AppError");
 const audit = require("../services/auditService");
-const { calculateFee, slabProblem } = require("../services/tariffService");
+const { calculateFee, tariffProblem } = require("../services/tariffService");
 const { findTariffFor } = require("../services/tariffLookup");
 const { locationScopedFilter, getAccessibleLocation, locationIdFromQuery } = require("../utils/scope");
 const Tariff = require("../models/Tariff");
@@ -13,14 +13,8 @@ const findInScope = async (req) => {
 };
 
 const checkRules = (tariff) => {
-  const problem = slabProblem(tariff.slabs);
+  const problem = tariffProblem(tariff);
   if (problem) throw new AppError(problem, 400);
-  if (!tariff.slabs.length && !tariff.additionalPerHour) {
-    throw new AppError("Add at least one slab or an hourly rate", 400);
-  }
-  if (tariff.validFrom && tariff.validTo && tariff.validTo < tariff.validFrom) {
-    throw new AppError("Valid-to date must be after valid-from date", 400);
-  }
 };
 
 const sortSlabs = (slabs) => [...slabs].sort((a, b) => a.uptoMinutes - b.uptoMinutes);
@@ -62,7 +56,10 @@ const createTariff = async (req, res) => {
 };
 
 // Fields that can be cleared by sending null.
-const CLEARABLE = ["maxDailyFee", "overnightFee", "lostTicketFee", "validFrom", "validTo"];
+const CLEARABLE = [
+  "maxDailyFee", "overnightFee", "lostTicketFee", "validFrom", "validTo",
+  "startTime", "endTime", "flatFee", "longStayAfterMinutes", "longStayDailyRate", "eventName",
+];
 
 // PUT /api/tariffs/:id
 const updateTariff = async (req, res) => {
@@ -111,5 +108,5 @@ const previewFee = async (req, res) => {
 };
 
 module.exports = {
-  listTariffs, getTariff, createTariff, updateTariff, deactivateTariff, previewFee,
+  CLEARABLE, listTariffs, getTariff, createTariff, updateTariff, deactivateTariff, previewFee,
 };

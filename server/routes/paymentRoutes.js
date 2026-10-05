@@ -21,6 +21,10 @@ router.post(
     amount: { type: "number", required: true, min: 0, max: 10000000 },
     // UPI or card reference, when there is one.
     transactionId: { type: "string", min: 4, max: 100 },
+    // Which wallet pays, when the method is WALLET.
+    walletId: { type: "objectId" },
+    // Which FASTag to charge, when the method is FASTAG and a FASTag partner is set up.
+    tagId: { type: "string", min: 4, max: 60 },
   }),
   controller.createPayment
 );
@@ -37,5 +41,19 @@ router.post(
 const canSeeMoney = requireAnyPermission(P.PAYMENT_COLLECT, P.REPORT_VIEW);
 router.get("/", canSeeMoney, controller.listPayments);
 router.get("/collection", canSeeMoney, controller.collectionSummary);
+router.get("/options", canSeeMoney, controller.paymentOptions);
+router.get("/:id", validateIdParam(), canSeeMoney, controller.getPayment);
+
+// Stop waiting for an online payment (the customer will pay another way).
+router.post("/:id/cancel", validateIdParam(), requirePermission(P.PAYMENT_COLLECT), controller.cancelPayment);
+
+// Plays the customer's side of an online payment with the simulated gateway (never in production).
+router.post(
+  "/:id/simulate",
+  validateIdParam(),
+  requirePermission(P.PAYMENT_COLLECT),
+  validateBody({ outcome: { type: "string", enum: ["SUCCESS", "FAILED"] } }),
+  controller.simulatePayment
+);
 
 module.exports = router;

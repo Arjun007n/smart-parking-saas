@@ -52,6 +52,19 @@ router.post(
 );
 router.get("/:id", validateIdParam(), controller.getCompany);
 router.get("/:id/onboarding", validateIdParam(), controller.getOnboarding);
+router.get("/:id/report-email", validateIdParam(), requirePermission(PERMISSIONS.COMPANY_MANAGE), controller.getReportEmail);
+router.put(
+  "/:id/report-email",
+  validateIdParam(),
+  requirePermission(PERMISSIONS.COMPANY_MANAGE),
+  validateBody({
+    enabled: { type: "boolean" },
+    recipients: { type: "array", max: 10, of: { type: "email" } },
+    sendAt: { type: "string", pattern: /^([01]\d|2[0-3]):[0-5]\d$/, message: "must look like 22:00" },
+  }),
+  controller.updateReportEmail
+);
+router.post("/:id/report-email/test", validateIdParam(), requirePermission(PERMISSIONS.COMPANY_MANAGE), controller.sendReportEmailTest);
 router.put(
   "/:id",
   validateIdParam(),

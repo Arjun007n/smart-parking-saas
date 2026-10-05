@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { faqApi } from '../../services/api'
+import { DEFAULT_FAQS } from '../../data/site'
 import { errorMessage } from '../../utils/errors'
 import { usePageTitle } from '../../hooks/usePageTitle'
 import { PageHeader } from '../../layouts/PublicLayout'
@@ -10,7 +11,9 @@ import { Alert, Field, PageLoader } from '../../components/ui'
 export default function Faq() {
   usePageTitle('Frequently asked questions')
   const [search, setSearch] = useState('')
-  const { data = [], isLoading, error } = useQuery({ queryKey: ['faq'], queryFn: faqApi.list, staleTime: 5 * 60_000 })
+  const { data: published = [], isLoading, error } = useQuery({ queryKey: ['faq'], queryFn: faqApi.list, staleTime: 5 * 60_000 })
+  // Until questions are added in Dashboard > Website, the built-in answers are shown.
+  const data = published.length > 0 ? published : DEFAULT_FAQS.map((f, i) => ({ ...f, _id: `default-${i}` }))
 
   const words = search.toLowerCase().split(/\s+/).filter(Boolean)
   const matches = data.filter((faq) => {

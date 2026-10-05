@@ -1,10 +1,13 @@
 const AppError = require("../utils/AppError");
 const { ROLES } = require("../config/permissions");
 const audit = require("../services/auditService");
+const reports = require("../services/dailyReportService");
+const email = require("../integrations/email");
 const Company = require("../models/Company");
 const Location = require("../models/Location");
 const Tariff = require("../models/Tariff");
 const User = require("../models/User");
+const { VEHICLE_KEYS } = require("../models/constants");
 
 const isSuperAdmin = (req) => req.user.role === ROLES.SUPER_ADMIN;
 
@@ -83,7 +86,7 @@ const getOnboarding = async (req, res) => {
     Location.countDocuments({
       companyId,
       isActive: true,
-      $or: [{ "capacity.car": { $gt: 0 } }, { "capacity.bike": { $gt: 0 } }, { "capacity.heavy": { $gt: 0 } }],
+      $or: VEHICLE_KEYS.map((key) => ({ [`capacity.${key}`]: { $gt: 0 } })),
     }),
     Tariff.countDocuments({ companyId, isActive: true }),
     User.countDocuments({
@@ -117,4 +120,51 @@ const getOnboarding = async (req, res) => {
   });
 };
 
-module.exports = { listCompanies, getCompany, createCompany, updateCompany, getOnboarding };
+// ---- the end-of-day report email (see services/dailyReportService.js) ----
+
+const reportEmailView = (company) => {
+  const setting = company.reportEmail || {};
+  return {
+    enabled: Boolean(setting.enabled),
+    recipients: setting.recipients || [],
+    sendAt: reports.minutesToText(setting.sendAtMinutes ?? 1320),
+    lastSentFor: setting.lastSentFor || null,
+    // False when the server has no email provider: the setting is kept but nothing is sent.
+    emailAvailable: email.isEnabled(),
+  };
+};
+
+// GET /api/companies/:id/report-email
+const getReportEmail = async (req, res) => {
+  res.json({ success: true, data: reportEmailView(await findAccessible(req)) });
+};
+
+// PUT /api/companies/:id/report-email   { enabled?, recipients?, sendAt? }
+const updateReportEmail = async (req, res) => {
+  const company = await findAccessible(req);
+  const { enabled, recipients, sendAt } = req.body;
+  if (enabled !== undefined) company.reportEmail.enabled = enabled;
+  if (recipients !== undefined) company.reportEmail.recipients = [...new Set(recipients.map((r) => r.toLowerCase()))].slice(0, 10);
+  if (sendAt !== undefined) {
+    const minutes = reports.textToMinutes(sendAt);
+    if (minutes === null) throw new AppError("Send time must look like 22:00", 400);
+    company.reportEmail.sendAtMinutes = minutes;
+  }
+  await company.save();
+  await audit.record(req, "COMPANY_REPORT_EMAIL_UPDATE", {
+    entity: "Company", entityId: company._id, companyId: company._id,
+    meta: { enabled: company.reportEmail.enabled, recipients: company.reportEmail.recipients.length, sendAt: reports.minutesToText(company.reportEmail.sendAtMinutes) },
+  });
+  res.json({ success: true, data: reportEmailView(company) });
+};
+
+// POST /api/companies/:id/report-email/test
+// Sends today's report so far to the person who asked (not to the list), so they can see what it looks like.
+const sendReportEmailTest = async (req, res) => {
+  const company = await findAccessible(req);
+  const result = await reports.sendReport({ company, to: [req.user.email], partial: true });
+  if (!result.sent) throw new AppError(`The test email was not sent: ${result.reason}`, 409);
+  res.json({ success: true, data: { sentTo: result.sentTo } });
+};
+
+module.exports = { getReportEmail, updateReportEmail, sendReportEmailTest, listCompanies, getCompany, createCompany, updateCompany, getOnboarding };

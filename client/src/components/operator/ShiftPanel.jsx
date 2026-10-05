@@ -92,6 +92,12 @@ function OpenShift({ shift, locationName }) {
           {t.adjustments !== 0 ? ` · Adjustments: ${money(t.adjustments)}` : ''}
         </p>
       )}
+      {(t.walletTopups?.count > 0 || t.walletSpent?.count > 0) && (
+        <p className="text-sm text-slate-600">
+          Wallets: {money(t.walletTopups?.amount)} put in ({t.walletTopups?.count || 0}), {money(t.walletSpent?.amount)} paid from wallets ({t.walletSpent?.count || 0}).
+          Money put in is counted above; fees paid from wallets are not new money (a fee later refunded to the wallet still shows here).
+        </p>
+      )}
 
       <form onSubmit={handleSubmit((values) => close.mutate(values))} className="space-y-4 border-t border-slate-200 pt-4" noValidate>
         <h3 className="font-semibold text-slate-900">End shift</h3>

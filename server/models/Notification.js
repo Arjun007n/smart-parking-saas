@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 
 const NOTIFICATION_TYPES = [
   "CAPACITY", "PAYMENT_FAILED", "SUBSCRIPTION_EXPIRY", "HARDWARE_OFFLINE", "SHIFT_DIFFERENCE", "GENERAL",
+  "PASS_EXPIRY", "PAYMENT_ISSUE",
 ];
 const SEVERITIES = ["info", "warning", "critical"];
 

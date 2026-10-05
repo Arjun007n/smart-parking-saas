@@ -62,4 +62,26 @@ const rangeFromQuery = (query, { maxDays = 92, now = new Date() } = {}) => {
   return { start, end, days, from, to };
 };
 
-module.exports = { dayRange, localDateStamp, timezoneString, localDateText, rangeFromQuery, DAY, MINUTE };
+// Midnight (a UTC instant) that starts the local day `date` falls on.
+const startOfLocalDay = (date = new Date()) => dayRange(localDateText(date)).start;
+
+// `instant` is a local midnight; returns the local midnight `months` calendar
+// months later. A day that does not exist in the target month moves to its
+// last day (31 January + 1 month = 28 or 29 February).
+const addMonthsLocal = (instant, months) => {
+  const offset = utcOffset() * MINUTE;
+  const local = new Date(instant.getTime() + offset);
+  const year = local.getUTCFullYear();
+  const target = local.getUTCMonth() + months;
+  const lastDay = new Date(Date.UTC(year, target + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(year, target, Math.min(local.getUTCDate(), lastDay)) - offset);
+};
+
+// `instant` is a local midnight; returns the local midnight `days` days later.
+// The offset is fixed (no daylight saving), so whole days are exact.
+const addDaysLocal = (instant, days) => new Date(instant.getTime() + days * DAY);
+
+module.exports = {
+  dayRange, localDateStamp, timezoneString, localDateText, rangeFromQuery, utcOffsetMinutes: utcOffset, DAY, MINUTE,
+  startOfLocalDay, addMonthsLocal, addDaysLocal,
+};

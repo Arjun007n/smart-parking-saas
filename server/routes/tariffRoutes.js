@@ -5,7 +5,8 @@ const { tenant } = require("../middleware/tenant");
 const { requirePermission } = require("../middleware/permission");
 const { validateBody, validateIdParam, collectCleared } = require("../middleware/validate");
 const { PERMISSIONS } = require("../config/permissions");
-const { VEHICLE_TYPES } = require("../models/constants");
+const { VEHICLE_TYPES, TARIFF_KINDS, TIME_PATTERN } = require("../models/constants");
+const { CLEARABLE } = controller;
 
 const money = { type: "number", min: 0, max: 1000000 };
 const vehicleType = { type: "string", enum: VEHICLE_TYPES };
@@ -36,6 +37,14 @@ const fields = (isCreate) => ({
   daysOfWeek: { type: "array", max: 7, of: { type: "number", integer: true, min: 0, max: 6 } },
   validFrom: { type: "date" },
   validTo: { type: "date" },
+  kind: { type: "string", enum: TARIFF_KINDS },
+  eventName: { type: "string", max: 100 },
+  priority: { type: "number", integer: true, min: 0, max: 100 },
+  startTime: { type: "string", pattern: TIME_PATTERN, message: "must be a time like 18:30", max: 5 },
+  endTime: { type: "string", pattern: TIME_PATTERN, message: "must be a time like 18:30", max: 5 },
+  flatFee: money,
+  longStayAfterMinutes: { type: "number", integer: true, min: 1, max: 100000 },
+  longStayDailyRate: money,
 });
 
 router.use(protect, tenant, requirePermission(PERMISSIONS.TARIFF_MANAGE));
@@ -59,7 +68,7 @@ router.get("/:id", validateIdParam(), controller.getTariff);
 router.put(
   "/:id",
   validateIdParam(),
-  collectCleared(["maxDailyFee", "overnightFee", "lostTicketFee", "validFrom", "validTo"]),
+  collectCleared(CLEARABLE),
   validateBody(fields(false)),
   controller.updateTariff
 );

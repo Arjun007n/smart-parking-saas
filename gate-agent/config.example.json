@@ -1,0 +1,44 @@
+{
+  "serverUrl": "http://localhost:5000",
+  "pollMs": 2000,
+  "heartbeatMs": 15000,
+  "instantWake": true,
+  "devices": [
+    {
+      "name": "Gate 1 barrier",
+      "key": "hwk_PASTE_THE_KEY_SHOWN_WHEN_YOU_ADDED_THE_DEVICE",
+      "type": "BARRIER",
+      "driver": "simulated"
+    },
+    {
+      "name": "Gate 1 printer",
+      "key": "hwk_PASTE_THE_KEY_SHOWN_WHEN_YOU_ADDED_THE_DEVICE",
+      "type": "PRINTER",
+      "driver": "simulated"
+    },
+    {
+      "name": "Gate 1 camera",
+      "key": "hwk_PASTE_THE_KEY_SHOWN_WHEN_YOU_ADDED_THE_DEVICE",
+      "type": "ANPR_CAMERA",
+      "driver": "simulated"
+    },
+    {
+      "name": "Gate 1 RFID",
+      "key": "hwk_PASTE_THE_KEY_SHOWN_WHEN_YOU_ADDED_THE_DEVICE",
+      "type": "RFID_READER",
+      "driver": "simulated"
+    },
+    {
+      "name": "Gate 1 FASTag",
+      "key": "hwk_PASTE_THE_KEY_SHOWN_WHEN_YOU_ADDED_THE_DEVICE",
+      "type": "FASTAG_READER",
+      "driver": "simulated"
+    },
+    {
+      "name": "Gate 1 CCTV",
+      "key": "hwk_PASTE_THE_KEY_SHOWN_WHEN_YOU_ADDED_THE_DEVICE",
+      "type": "CCTV_CAMERA",
+      "driver": "simulated"
+    }
+  ]
+}

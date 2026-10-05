@@ -14,25 +14,47 @@ const REPORTS = {
   vehicles: { label: 'Vehicle history', range: true, search: true, status: true, paged: true },
   occupancy: { label: 'Occupancy', day: true },
   operators: { label: 'Operators', range: true, operator: true },
+  'peak-hours': { label: 'Peak hours', range: true, by: true },
+  'occupancy-trend': { label: 'Occupancy trend', range: true },
+  durations: { label: 'Length of stay', range: true },
+  payments: { label: 'Payment methods', range: true },
+  exceptions: { label: 'Exceptions', range: true, type: true, paged: true },
+  passes: { label: 'Passes', range: true, due: true, paged: true },
+  hardware: { label: 'Hardware', range: true },
+  'frequent-vehicles': { label: 'Repeat vehicles', range: true, min: true, search: true, paged: true },
+  locations: { label: 'Locations', range: true },
 }
 
-const MONEY_KEYS = ['collected', 'tax', 'refunded', 'net', 'amount', 'fee', 'cash']
-const DATE_KEYS = ['paidAt', 'entryTime', 'exitTime']
+const MONEY_KEYS = ['collected', 'tax', 'refunded', 'net', 'amount', 'fee', 'cash', 'fees', 'average', 'passSales', 'perEntry']
+const DATE_KEYS = ['paidAt', 'entryTime', 'exitTime', 'when', 'lastVisit']
+const PERCENT_KEYS = ['utilization', 'peakUtilization', 'share', 'successRate', 'readRate', 'averageConfidence']
+const MINUTE_KEYS = ['durationMinutes', 'averageStayMinutes', 'averageMinutes']
+const NUMBER_KEYS = [
+  'payments', 'refunds', 'entries', 'exits', 'corrections', 'vehicles', 'capacity', 'peakInside', 'failed', 'passVisits',
+  'daysLeft', 'commands', 'acked', 'outages', 'detections', 'corrected', 'averageEntries', 'averageSeconds',
+  'visits', 'locationCount', 'lostTickets', 'insideNow',
+]
+
+const EXCEPTION_TYPES = {
+  CANCELLED: 'Entry cancelled', OVERRIDE: 'Released by admin', LOST_TICKET: 'Lost ticket', REFUND: 'Refund',
+  PAYMENT_FAILED: 'Online payment failed', PAYMENT_PROBLEM: 'Payment problem', STILL_INSIDE: 'Inside for over 24 hours',
+}
+const HARDWARE_TYPES = { ANPR_CAMERA: 'ANPR camera', BARRIER: 'Barrier', PRINTER: 'Printer' }
 
 // Shows a report value the way a person reads it (the CSV keeps raw values).
 function display(key, value) {
   if (value === '' || value === null || value === undefined) return '—'
   if (MONEY_KEYS.includes(key)) return money(value)
   if (DATE_KEYS.includes(key)) return dateTime(value)
-  if (key === 'durationMinutes') return duration(value)
-  if (key === 'utilization') return `${value}%`
+  if (MINUTE_KEYS.includes(key)) return duration(value)
+  if (PERCENT_KEYS.includes(key)) return `${value}%`
   if (key === 'method') return PAYMENT_LABELS[value] || value
-  if (key === 'type') return VEHICLE_LABELS[value] || value
+  if (key === 'type') return VEHICLE_LABELS[value] || HARDWARE_TYPES[value] || value
   if (key === 'status') return SESSION_STATUS[value]?.label || (value === 'REFUNDED' ? 'Refunded' : value === 'SUCCESS' ? 'Paid' : value)
   return String(value)
 }
 
-const isNumeric = (key) => MONEY_KEYS.includes(key) || ['payments', 'refunds', 'entries', 'exits', 'corrections', 'vehicles', 'capacity', 'utilization'].includes(key)
+const isNumeric = (key) => MONEY_KEYS.includes(key) || PERCENT_KEYS.includes(key) || MINUTE_KEYS.includes(key) || NUMBER_KEYS.includes(key)
 
 function buildParams(name, f) {
   const spec = REPORTS[name]
@@ -41,6 +63,10 @@ function buildParams(name, f) {
     ...(spec.day ? { date: f.from } : {}),
     ...(f.locationId ? { locationId: f.locationId } : {}),
     ...(spec.groupBy ? { groupBy: f.groupBy } : {}),
+    ...(spec.by ? { by: f.by } : {}),
+    ...(spec.type && f.exceptionType ? { type: f.exceptionType } : {}),
+    ...(spec.due ? { due: f.due } : {}),
+    ...(spec.min ? { min: f.min } : {}),
     ...(spec.operator && f.operatorId ? { operatorId: f.operatorId } : {}),
     ...(spec.method && f.method ? { method: f.method } : {}),
     ...(spec.search && f.q.trim() ? { q: f.q.trim() } : {}),
@@ -54,6 +80,7 @@ export default function Reports() {
   const [name, setName] = useState('revenue')
   const [filters, setFilters] = useState({
     from: todayInput(), to: todayInput(), locationId: '', groupBy: 'day', operatorId: '', method: '', q: '', status: '', page: 1,
+    by: 'hour', exceptionType: '', due: '30', min: '2',
   })
   const spec = REPORTS[name]
   const params = buildParams(name, filters)
@@ -67,7 +94,7 @@ export default function Reports() {
     placeholderData: keepPreviousData,
     enabled: Boolean(filters.from) && (!spec.range || Boolean(filters.to)),
   })
-  const download = useMutation({ mutationFn: () => reportApi.download(name, params) })
+  const download = useMutation({ mutationFn: (format) => reportApi.download(name, params, format) })
 
   const data = report.data
   const pages = data?.pageSize ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1
@@ -131,6 +158,34 @@ export default function Reports() {
             <option value="location">Location</option>
           </Select>
         )}
+        {spec.by && (
+          <Select label="Show by" name="report-by" value={filters.by} onChange={(event) => set({ by: event.target.value })}>
+            <option value="hour">Hour of the day</option>
+            <option value="weekday">Day of the week</option>
+          </Select>
+        )}
+        {spec.type && (
+          <Select label="What" name="report-exception" value={filters.exceptionType} onChange={(event) => set({ exceptionType: event.target.value })}>
+            <option value="">Everything</option>
+            {Object.entries(EXCEPTION_TYPES).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </Select>
+        )}
+        {spec.due && (
+          <Select label="Ending within" name="report-due" value={filters.due} onChange={(event) => set({ due: event.target.value })}>
+            {[7, 14, 30, 60, 90].map((days) => (
+              <option key={days} value={days}>{days} days</option>
+            ))}
+          </Select>
+        )}
+        {spec.min && (
+          <Select label="At least" name="report-min" value={filters.min} onChange={(event) => set({ min: event.target.value })}>
+            {[2, 3, 5, 10, 20].map((visits) => (
+              <option key={visits} value={visits}>{visits} visits</option>
+            ))}
+          </Select>
+        )}
         {spec.operator && (users.data || []).length > 0 && (
           <Select label="Operator" name="report-operator" value={filters.operatorId} onChange={(event) => set({ operatorId: event.target.value })}>
             <option value="">All operators</option>
@@ -158,9 +213,19 @@ export default function Reports() {
             ))}
           </Select>
         )}
-        <Button variant="secondary" loading={download.isPending} disabled={!data || data.rows.length === 0} onClick={() => download.mutate()}>
-          Download CSV
-        </Button>
+        <div className="flex gap-2" role="group" aria-label="Download this report">
+          {[['csv', 'CSV'], ['xlsx', 'Excel'], ['pdf', 'PDF']].map(([format, label]) => (
+            <Button
+              key={format}
+              variant="secondary"
+              loading={download.isPending && download.variables === format}
+              disabled={!data || data.rows.length === 0 || download.isPending}
+              onClick={() => download.mutate(format)}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
       </div>
 
       {download.error && <Alert>{errorMessage(download.error)}</Alert>}
@@ -212,6 +277,114 @@ export default function Reports() {
               </Card>
             )}
 
+            {name === 'peak-hours' && (
+              <Card title={`Entries by ${data.by === 'hour' ? 'hour' : 'day of the week'}${data.busiest ? ` · busiest ${data.busiest.slot}` : ''}`}>
+                <BarChartCard
+                  data={data.rows}
+                  xKey="slot"
+                  xLabel={data.by === 'hour' ? 'Hour' : 'Day'}
+                  series={[{ key: 'entries', label: 'Entries' }, { key: 'exits', label: 'Exits' }]}
+                  summary={`Entries and exits by ${data.by === 'hour' ? 'hour of the day' : 'day of the week'}. ${data.totalEntries} entries in total.`}
+                />
+              </Card>
+            )}
+
+            {name === 'occupancy-trend' && data.rows.length > 1 && (
+              <Card title={`Most vehicles inside, by day${data.busiest ? ` · busiest ${data.busiest.date} (${data.busiest.peakInside})` : ''}`}>
+                <BarChartCard
+                  data={data.rows}
+                  xKey="date"
+                  xLabel="Date"
+                  series={[{ key: 'peakInside', label: 'Most vehicles inside' }]}
+                  summary={`The most vehicles inside at one time on each day. Capacity is ${data.capacity}.`}
+                />
+              </Card>
+            )}
+
+            {name === 'durations' && (
+              <Card title={`How long vehicles stay · average ${duration(data.averageMinutes)} · ${data.totalVehicles} vehicles`}>
+                <BarChartCard
+                  data={data.rows}
+                  xKey="band"
+                  xLabel="Stay"
+                  series={[{ key: 'vehicles', label: 'Vehicles' }]}
+                  summary={`Number of vehicles by length of stay. ${data.totalVehicles} vehicles in total.`}
+                />
+              </Card>
+            )}
+
+            {name === 'payments' && data.total && (
+              <div className="grid gap-4 sm:grid-cols-3">
+                {[
+                  ['Money taken', money(data.total.amount), `${data.total.payments} payments, passes included`],
+                  ['Refunded', money(data.total.refunded), `${data.total.refundRate}% of the money`],
+                  ['Top online failure', data.failureReasons[0]?.reason || 'None', data.failureReasons[0] ? `${data.failureReasons[0].count} time(s)` : null],
+                ].map(([label, value, hint]) => (
+                  <div key={label} className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+                    <p className="text-sm text-slate-500">{label}</p>
+                    <p className="mt-1 text-xl font-bold text-slate-900">{value}</p>
+                    {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {name === 'frequent-vehicles' && data.summary && (
+              <div className="grid gap-4 sm:grid-cols-3">
+                {[
+                  ['Vehicles that came back', data.summary.repeatVehicles, `of ${data.summary.vehicles} vehicles seen`],
+                  ['Share of all visits', `${data.summary.repeatShare}%`, `${data.summary.repeatVisits} of ${data.summary.visits} visits`],
+                  ['Fees from these vehicles', money(data.summary.repeatFees), 'A regular without a pass may want one'],
+                ].map(([label, value, hint]) => (
+                  <div key={label} className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+                    <p className="text-sm text-slate-500">{label}</p>
+                    <p className="mt-1 text-xl font-bold text-slate-900">{value}</p>
+                    {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {name === 'locations' && data.rows.length > 1 && (
+              <Card title={`Net revenue by location${data.best ? ` · best ${data.best}` : ''}`}>
+                <BarChartCard
+                  data={data.rows}
+                  xKey="location"
+                  xLabel="Location"
+                  series={[{ key: 'net', label: 'Net revenue' }]}
+                  formatValue={(value) => money(value)}
+                  summary={`Net revenue per location: ${money(data.total.net)} in total.`}
+                />
+              </Card>
+            )}
+
+            {name === 'exceptions' && data.counts && Object.keys(data.counts).length > 0 && (
+              <div className="flex flex-wrap gap-2 text-sm">
+                {Object.entries(data.counts).map(([type, count]) => (
+                  <span key={type} className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
+                    {data.types[type]}: <strong>{count}</strong>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {name === 'passes' && data.summary && (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                {[
+                  ['Active passes', data.summary.active, `${data.summary.endingWithin7Days} end within a week`],
+                  ['Ended, not renewed', data.summary.expired, `${data.summary.suspended} suspended`],
+                  ['Sold in this period', `${data.sales.newPasses} new · ${data.sales.renewals} renewals`, `${money(data.sales.amount)}${data.sales.freePasses ? ` · ${data.sales.freePasses} free` : ''}`],
+                  ['Pass visits', data.passVisits, 'free exits in this period'],
+                ].map(([label, value, hint]) => (
+                  <div key={label} className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+                    <p className="text-sm text-slate-500">{label}</p>
+                    <p className="mt-1 text-xl font-bold text-slate-900">{value}</p>
+                    {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+
             <Card>
               {data.rows.length === 0 ? (
                 <p className="text-sm text-slate-500">Nothing found for these filters.</p>
@@ -242,7 +415,7 @@ export default function Reports() {
                   </table>
                 </div>
               )}
-              {spec.paged && data.total > 0 && (
+              {spec.paged && data.total > 0 && data.pageSize && (
                 <div className="mt-4 flex items-center justify-between text-sm text-slate-600">
                   <span>{data.total} rows · page {data.page} of {pages}</span>
                   <div className="flex gap-2">

@@ -293,8 +293,8 @@ it("reports: CSV download", async () => {
   assert.match(csv.type, /text\/csv/);
   assert.match(csv.disposition, /attachment; filename="revenue-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}\.csv"/);
   const lines = csv.text.replace(/^﻿/, "").split("\r\n");
-  assert.equal(lines[0], "Date,Payments,Collected,Tax,Refunds,Refunded,Net");
-  assert.match(lines[1], /^\d{4}-\d{2}-\d{2},4,80,0,1,20,60$/);
+  assert.equal(lines[0], "Date,Payments,Collected,Of which passes,Tax,Refunds,Refunded,Net");
+  assert.match(lines[1], /^\d{4}-\d{2}-\d{2},4,80,0,0,1,20,60$/);
 
   const collection = await raw("/api/reports/collection?format=csv", s.a.token);
   assert.equal(collection.text.replace(/^﻿/, "").split("\r\n").length, 5); // header + 4 payments

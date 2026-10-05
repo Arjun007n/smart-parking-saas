@@ -2,25 +2,35 @@ const AppError = require("../utils/AppError");
 const { dayRange, rangeFromQuery, timezoneString, localDateText, DAY } = require("../utils/time");
 const { locationsInScope, operatorIdFromQuery } = require("../utils/scope");
 const { normalizePlate, escapeRegex } = require("../utils/plate");
-const { sendCsv } = require("../utils/csv");
+const audit = require("../services/auditService");
+const { formatOf, buildReportFile } = require("../services/reportExport");
 const { round2 } = require("../services/collectionService");
 const ParkingSession = require("../models/ParkingSession");
 const Payment = require("../models/Payment");
+const PassPayment = require("../models/PassPayment");
 const User = require("../models/User");
-const { SESSION_STATUSES } = require("../models/constants");
+const { SESSION_STATUSES, sumCounts } = require("../models/constants");
 
 const CSV_LIMIT = 10000;
 const PAGE_SIZE = 100;
-const wantsCsv = (req) => req.query.format === "csv";
+// True for any file download (CSV, Excel or PDF): such answers are not paged.
+const wantsExport = (req) => formatOf(req) !== null;
 const pageFrom = (req) => Math.min(1000, Math.max(1, Number.parseInt(req.query.page, 10) || 1));
 
 // Locations and date range shared by every report.
+// Says which locations a report covers (shown on Excel and PDF downloads).
+const rememberScope = (req, locations) => {
+  req.reportScopeName = req.query.locationId && locations.length === 1 ? locations[0].name : "All locations";
+};
+
 const reportScope = async (req, options) => {
   const locations = await locationsInScope(req);
+  rememberScope(req, locations);
   return {
     locations,
     locationNames: new Map(locations.map((l) => [String(l._id), l.name])),
-    inScope: { locationId: { $in: locations.map((l) => l._id) } },
+    // The company is repeated here so the database can use the company-first indexes.
+    inScope: { ...req.tenantFilter, locationId: { $in: locations.map((l) => l._id) } },
     range: rangeFromQuery(req.query, options),
   };
 };
@@ -30,10 +40,28 @@ const userNames = async (ids) => {
   return new Map(users.map((u) => [String(u._id), u.name]));
 };
 
-// Sends the rows as JSON, or as a CSV download when ?format=csv.
+// Sends the rows as JSON, or as a download when ?format=csv, xlsx or pdf.
+// The report is named by the last part of the route (/api/reports/revenue).
 const respond = (req, res, name, columns, rows, extra = {}) => {
-  if (wantsCsv(req)) return sendCsv(res, `${name}.csv`, columns, rows);
-  return res.json({ success: true, data: { columns, rows, ...extra } });
+  const format = formatOf(req);
+  if (!format) return res.json({ success: true, data: { columns, rows, ...extra } });
+
+  const report = req.path.replace(/^\/+|\/+$/g, "");
+  const file = buildReportFile({
+    format, name, report, columns, rows, extra,
+    company: req.company ? req.company.name : "", scope: req.reportScopeName || "",
+  });
+  // Who downloaded what is part of the audit trail.
+  audit.record(req, "REPORT_EXPORT", {
+    entity: "Report",
+    meta: { report, format, from: extra.from, to: extra.to, locationId: req.query.locationId || undefined, rows: rows.length },
+  });
+  res.set({
+    "Content-Type": file.contentType,
+    "Content-Disposition": `attachment; filename="${file.filename}"`,
+    "Cache-Control": "no-store",
+  });
+  return res.send(file.buffer);
 };
 
 // GET /api/reports/revenue?from=&to=&groupBy=day|week|month|location&locationId=
@@ -45,9 +73,14 @@ const revenueReport = async (req, res) => {
   const keyOf = (field) =>
     groupBy === "location" ? "$locationId" : { $dateToString: { date: field, format: formats[groupBy], timezone: tz } };
 
-  const [paid, refunded] = await Promise.all([
+  const [paid, passPaid, refunded] = await Promise.all([
     Payment.aggregate([
       { $match: { ...inScope, status: { $in: ["SUCCESS", "REFUNDED"] }, paidAt: { $gte: range.start, $lt: range.end } } },
+      { $group: { _id: keyOf("$paidAt"), collected: { $sum: "$amount" }, tax: { $sum: "$tax" }, payments: { $sum: 1 } } },
+    ]),
+    // Pass sales and renewals (free passes are not money).
+    PassPayment.aggregate([
+      { $match: { ...inScope, amount: { $gt: 0 }, paidAt: { $gte: range.start, $lt: range.end } } },
       { $group: { _id: keyOf("$paidAt"), collected: { $sum: "$amount" }, tax: { $sum: "$tax" }, payments: { $sum: 1 } } },
     ]),
     Payment.aggregate([
@@ -59,10 +92,17 @@ const revenueReport = async (req, res) => {
   const byKey = new Map();
   const row = (key) => {
     const k = String(key);
-    if (!byKey.has(k)) byKey.set(k, { key: k, payments: 0, collected: 0, tax: 0, refunds: 0, refunded: 0 });
+    if (!byKey.has(k)) byKey.set(k, { key: k, payments: 0, collected: 0, tax: 0, passes: 0, refunds: 0, refunded: 0 });
     return byKey.get(k);
   };
   for (const p of paid) Object.assign(row(p._id), { payments: p.payments, collected: p.collected, tax: p.tax });
+  for (const p of passPaid) {
+    const r = row(p._id);
+    r.payments += p.payments;
+    r.collected += p.collected;
+    r.tax += p.tax;
+    r.passes += p.collected;
+  }
   for (const r of refunded) Object.assign(row(r._id), { refunds: r.refunds, refunded: r.refunded });
 
   const rows = [...byKey.values()]
@@ -71,6 +111,7 @@ const revenueReport = async (req, res) => {
       payments: r.payments,
       collected: round2(r.collected),
       tax: round2(r.tax),
+      passes: round2(r.passes),
       refunds: r.refunds,
       refunded: round2(r.refunded),
       net: round2(r.collected - r.refunded),
@@ -86,6 +127,7 @@ const revenueReport = async (req, res) => {
     { key: "period", label: groupBy === "location" ? "Location" : groupBy === "day" ? "Date" : groupBy === "week" ? "Week" : "Month" },
     { key: "payments", label: "Payments" },
     { key: "collected", label: "Collected" },
+    { key: "passes", label: "Of which passes" },
     { key: "tax", label: "Tax" },
     { key: "refunds", label: "Refunds" },
     { key: "refunded", label: "Refunded" },
@@ -100,9 +142,9 @@ const collectionReport = async (req, res) => {
   const filter = { ...inScope, status: { $in: ["SUCCESS", "REFUNDED"] }, paidAt: { $gte: range.start, $lt: range.end } };
   const operatorId = operatorIdFromQuery(req);
   if (operatorId) filter.collectedBy = operatorId;
-  if (["CASH", "UPI", "CARD", "GATEWAY"].includes(req.query.method)) filter.method = req.query.method;
+  if (["CASH", "UPI", "CARD", "GATEWAY", "FASTAG", "WALLET"].includes(req.query.method)) filter.method = req.query.method;
 
-  const csv = wantsCsv(req);
+  const csv = wantsExport(req);
   const page = pageFrom(req);
   const [payments, total] = await Promise.all([
     Payment.find(filter).sort({ paidAt: -1 }).skip(csv ? 0 : (page - 1) * PAGE_SIZE).limit(csv ? CSV_LIMIT : PAGE_SIZE),
@@ -155,7 +197,7 @@ const vehicleReport = async (req, res) => {
   if (q) filter.vehicleNumber = { $regex: `^${escapeRegex(normalizePlate(q))}` };
   if (SESSION_STATUSES.includes(req.query.status)) filter.status = req.query.status;
 
-  const csv = wantsCsv(req);
+  const csv = wantsExport(req);
   const page = pageFrom(req);
   const [sessions, total] = await Promise.all([
     ParkingSession.find(filter).sort({ entryTime: -1 }).skip(csv ? 0 : (page - 1) * PAGE_SIZE).limit(csv ? CSV_LIMIT : PAGE_SIZE),
@@ -191,9 +233,10 @@ const vehicleReport = async (req, res) => {
 // For each hour of one day: how many vehicles were inside at some point in it.
 const occupancyReport = async (req, res) => {
   const locations = await locationsInScope(req);
+  rememberScope(req, locations);
   const { start, end } = dayRange(req.query.date);
   const date = localDateText(start);
-  const capacity = locations.reduce((t, l) => t + l.capacity.car + l.capacity.bike + l.capacity.heavy, 0);
+  const capacity = locations.reduce((t, l) => t + sumCounts(l.capacity), 0);
 
   const sessions = await ParkingSession.find({
     locationId: { $in: locations.map((l) => l._id) },
@@ -240,7 +283,7 @@ const operatorReport = async (req, res) => {
   const operatorId = operatorIdFromQuery(req);
   const only = (field) => (operatorId ? { [field]: operatorId } : { [field]: { $ne: null } });
 
-  const [entries, exits, overrides, paid, refunds] = await Promise.all([
+  const [entries, exits, overrides, paid, passSold, refunds] = await Promise.all([
     ParkingSession.aggregate([
       { $match: { ...inScope, entryTime: between, ...only("entryOperatorId") } },
       { $group: { _id: "$entryOperatorId", count: { $sum: 1 } } },
@@ -255,6 +298,10 @@ const operatorReport = async (req, res) => {
     ]),
     Payment.aggregate([
       { $match: { ...inScope, status: { $in: ["SUCCESS", "REFUNDED"] }, paidAt: between, ...only("collectedBy") } },
+      { $group: { _id: "$collectedBy", amount: { $sum: "$amount" }, count: { $sum: 1 }, cash: { $sum: { $cond: [{ $eq: ["$method", "CASH"] }, "$amount", 0] } } } },
+    ]),
+    PassPayment.aggregate([
+      { $match: { ...inScope, amount: { $gt: 0 }, paidAt: between, ...only("collectedBy") } },
       { $group: { _id: "$collectedBy", amount: { $sum: "$amount" }, count: { $sum: 1 }, cash: { $sum: { $cond: [{ $eq: ["$method", "CASH"] }, "$amount", 0] } } } },
     ]),
     Payment.aggregate([
@@ -275,6 +322,12 @@ const operatorReport = async (req, res) => {
   for (const r of exits) row(r._id).exits = r.count;
   for (const r of overrides) row(r._id).corrections = r.count;
   for (const r of paid) Object.assign(row(r._id), { payments: r.count, collected: round2(r.amount), cash: round2(r.cash) });
+  for (const r of passSold) {
+    const o = row(r._id);
+    o.payments += r.count;
+    o.collected = round2(o.collected + r.amount);
+    o.cash = round2(o.cash + r.cash);
+  }
   for (const r of refunds) Object.assign(row(r._id), { refunds: r.count, refunded: round2(r.amount) });
 
   const names = await userNames([...byOperator.values()].map((r) => r.id));
@@ -295,4 +348,6 @@ const operatorReport = async (req, res) => {
   ], rows, { from: range.from, to: range.to });
 };
 
-module.exports = { revenueReport, collectionReport, vehicleReport, occupancyReport, operatorReport };
+module.exports = {
+  CSV_LIMIT, PAGE_SIZE, wantsExport, pageFrom, reportScope, userNames, respond,
+  revenueReport, collectionReport, vehicleReport, occupancyReport, operatorReport };

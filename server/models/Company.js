@@ -28,6 +28,23 @@ const companySchema = new mongoose.Schema(
       maxUsers: { type: Number, default: 10, min: 0 },
     },
     trialEndsAt: Date,
+    // The paid plan (see services/billingService.js). `appliedOrders` makes applying an order safe to repeat.
+    subscription: {
+      currentPeriodStart: Date,
+      currentPeriodEnd: Date,
+      users: Number,
+      months: Number,
+      lastPaidAt: Date,
+      appliedOrders: { type: [mongoose.Schema.Types.ObjectId], select: false },
+    },
+    // The end-of-day report email (see services/dailyReportService.js).
+    reportEmail: {
+      enabled: { type: Boolean, default: false },
+      recipients: [{ type: String, trim: true, lowercase: true }],
+      // Local time of day to send, as minutes after midnight (default 22:00).
+      sendAtMinutes: { type: Number, default: 1320, min: 0, max: 1439 },
+      lastSentFor: String, // the local date ("2026-10-05") the last report covered
+    },
     // Flags for onboarding steps that cannot be derived from other data.
     onboarding: {
       isVerified: { type: Boolean, default: false },

@@ -5,7 +5,7 @@ const { tenant, requireCompany } = require("../middleware/tenant");
 const { requirePermission } = require("../middleware/permission");
 const { validateBody, validateIdParam } = require("../middleware/validate");
 const { PERMISSIONS } = require("../config/permissions");
-const { VEHICLE_TYPES } = require("../models/constants");
+const { VEHICLE_TYPES, VEHICLE_KEYS } = require("../models/constants");
 
 const text = (max = 150) => ({ type: "string", max });
 const count = { type: "number", integer: true, min: 0, max: 100000 };
@@ -26,6 +26,8 @@ const fields = (isCreate) => ({
     fields: {
       lat: { type: "number", min: -90, max: 90 },
       lng: { type: "number", min: -180, max: 180 },
+      // true removes the saved position
+      clear: { type: "boolean" },
     },
   },
   contact: { type: "object", fields: { name: text(100), phone: text(20) } },
@@ -34,7 +36,7 @@ const fields = (isCreate) => ({
     fields: { is24x7: { type: "boolean" }, open: time, close: time },
   },
   vehicleTypes: { type: "array", max: 10, of: { type: "string", enum: VEHICLE_TYPES } },
-  capacity: { type: "object", fields: { car: count, bike: count, heavy: count } },
+  capacity: { type: "object", fields: Object.fromEntries(VEHICLE_KEYS.map((key) => [key, count])) },
   gates: {
     type: "array",
     max: 50,
@@ -43,10 +45,29 @@ const fields = (isCreate) => ({
       fields: {
         name: { type: "string", required: true, max: 50 },
         type: { type: "string", enum: ["ENTRY", "EXIT", "BOTH"] },
+        laneCode: { type: "string", max: 30 },
+        plazaId: { type: "string", max: 30 },
+        fastagLaneId: { type: "string", max: 30 },
       },
     },
   },
   zones: { type: "array", max: 100, of: text(50) },
+  onlineBooking: {
+    type: "object",
+    fields: {
+      enabled: { type: "boolean" },
+      fees: { type: "object", fields: Object.fromEntries(VEHICLE_KEYS.map((key) => [key, { type: "number", min: 0, max: 100000 }])) },
+      note: text(300),
+    },
+  },
+  receiptSettings: {
+    type: "object",
+    fields: {
+      headerNote: text(120), ticketFooter: text(200), receiptFooter: text(200),
+      showAddress: { type: "boolean" }, showGst: { type: "boolean" },
+      showQr: { type: "string", enum: ["DEVICE", "ON", "OFF"] },
+    },
+  },
   ...(isCreate ? {} : { isActive: { type: "boolean" } }),
 });
 

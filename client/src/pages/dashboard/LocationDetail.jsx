@@ -8,10 +8,11 @@ import { Alert, Badge, Card, PageLoader } from '../../components/ui'
 import DetailsForm from '../../components/location/DetailsForm'
 import SlotsPanel from '../../components/location/SlotsPanel'
 import TariffsPanel from '../../components/location/TariffsPanel'
+import ReceiptPanel from '../../components/location/ReceiptPanel'
 
 export default function LocationDetail() {
   const { id } = useParams()
-  const { can } = useAuth()
+  const { can, company } = useAuth()
   const [tab, setTab] = useState('details')
   const { data: location, isLoading, error } = useQuery({
     queryKey: ['location', id],
@@ -26,6 +27,7 @@ export default function LocationDetail() {
     { key: 'details', label: 'Details', show: canManage },
     { key: 'slots', label: 'Slots', show: true },
     { key: 'tariffs', label: 'Tariffs', show: can('TARIFF_MANAGE') },
+    { key: 'receipt', label: 'Receipt', show: canManage },
   ].filter((t) => t.show)
   const current = tabs.some((t) => t.key === tab) ? tab : tabs[0].key
 
@@ -63,6 +65,7 @@ export default function LocationDetail() {
         {current === 'details' && <DetailsForm key={location.updatedAt} location={location} />}
         {current === 'slots' && <SlotsPanel location={location} canManage={canManage} />}
         {current === 'tariffs' && <TariffsPanel location={location} />}
+        {current === 'receipt' && <ReceiptPanel location={location} company={company} />}
       </Card>
     </div>
   )

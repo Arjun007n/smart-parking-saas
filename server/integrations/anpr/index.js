@@ -1,0 +1,90 @@
+// ANPR (number plate recognition) adapter layer (plan, section 22).
+//
+// The server speaks ONE format. Whatever a camera or vendor cloud sends is
+// translated to it by an adapter, so the rest of the platform never knows
+// which brand is installed.
+//
+//   standard format (what POST /api/device/anpr accepts)
+//     plate       text read by the camera ("" or missing if it saw a car but could not read it)
+//     confidence  0..1 or 0..100
+//     eventId     the camera's own id for this event (retries are then harmless)
+//     capturedAt  ISO date-time
+//     imageUrl    http(s) address of the photo
+//     direction   ENTRY | EXIT (needed when the camera is registered for BOTH)
+//
+// To support a vendor whose camera sends something else, add an adapter below
+// that returns the standard format, then select it with device.vendor. Vendors
+// that post XML or multipart pictures are best translated in the gate agent
+// (see gate-agent/), which then sends the standard format.
+
+const { normalizePlate } = require("../../utils/plate");
+
+const PLATE_PATTERN = /^[A-Z0-9]{4,12}$/;
+// The usual shapes of an Indian number plate: state, district, series letters, number (MH12AB1234, DL1CAB1234,
+// RJ14 1234) and the Bharat series (22BH1234AA). A reading of another shape is not refused (foreign and special
+// plates exist) but is marked "check this plate", so a camera's misreading never makes a ticket by itself.
+const INDIAN_PLATE = /^(?:[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{1,4}|\d{2}BH\d{4}[A-Z]{1,2})$/;
+const DEFAULT_MIN_CONFIDENCE = 0.85;
+
+// Accepts 0..1 or 0..100 and returns 0..1 (or undefined when not given).
+const normalizeConfidence = (value) => {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return undefined;
+  const fraction = value > 1 ? value / 100 : value;
+  return Math.min(1, Math.round(fraction * 1000) / 1000);
+};
+
+const adapters = {
+  // Our own standard format: nothing to translate.
+  generic: (body) => body,
+};
+
+const adapterFor = (vendor) => adapters[String(vendor || "").toLowerCase()] || adapters.generic;
+
+// Returns the cleaned detection fields. Does not touch the database.
+const parseDetection = (body, { vendor, minConfidence } = {}) => {
+  const input = adapterFor(vendor)(body || {});
+  const plateRaw = typeof input.plate === "string" ? input.plate.trim().slice(0, 40) : "";
+  const cleaned = normalizePlate(plateRaw);
+  const confidence = normalizeConfidence(input.confidence);
+  const threshold = typeof minConfidence === "number" ? minConfidence : DEFAULT_MIN_CONFIDENCE;
+
+  const reviewReasons = [];
+  let plate = "";
+  if (!cleaned) {
+    reviewReasons.push("No plate could be read");
+  } else if (!PLATE_PATTERN.test(cleaned)) {
+    reviewReasons.push(`"${plateRaw}" does not look like a number plate`);
+  } else {
+    plate = cleaned;
+  }
+  if (plate && !INDIAN_PLATE.test(plate)) {
+    reviewReasons.push(`"${plate}" is not the usual shape of an Indian number plate`);
+  }
+  // A camera that does not say how sure it is cannot be trusted blindly.
+  if (plate && (confidence === undefined || confidence < threshold)) {
+    reviewReasons.push(
+      confidence === undefined
+        ? "The camera did not give a confidence"
+        : `Low confidence (${Math.round(confidence * 100)}%, needs ${Math.round(threshold * 100)}%)`
+    );
+  }
+
+  return {
+    plateRaw, plate, confidence,
+    capturedAt: input.capturedAt instanceof Date ? input.capturedAt : undefined,
+    imageUrl: input.imageUrl, deviceEventId: input.eventId, direction: input.direction,
+    reviewReasons,
+  };
+};
+
+// One duplicate window = the same plate seen at the same gate direction within
+// this many seconds is ONE detection.
+const DUPLICATE_WINDOW_SECONDS = 120;
+
+const dedupeKey = ({ locationId, direction, plate }, now = Date.now(), windowSeconds = DUPLICATE_WINDOW_SECONDS) =>
+  `${locationId}:${direction}:${plate || "UNREAD"}:${Math.floor(now / (windowSeconds * 1000))}`;
+
+module.exports = {
+  DEFAULT_MIN_CONFIDENCE, DUPLICATE_WINDOW_SECONDS, PLATE_PATTERN, INDIAN_PLATE,
+  normalizeConfidence, parseDetection, dedupeKey, adapters,
+};

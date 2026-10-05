@@ -5,7 +5,7 @@ process.env.APP_UTC_OFFSET_MINUTES = "330"; // India
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
-  calculateFee, selectTariff, appliesAt, slabProblem, midnightsCrossed,
+  calculateFee, selectTariff, appliesAt, slabProblem, midnightsCrossed, tariffProblem,
 } = require("../services/tariffService");
 
 // Times are written in IST and converted, so tests read like real visits.
@@ -207,4 +207,103 @@ test("slabProblem: finds slabs that are out of order", () => {
   assert.equal(slabProblem(CAR.slabs), null);
   assert.match(slabProblem([{ uptoMinutes: 60, rate: 20 }, { uptoMinutes: 60, rate: 30 }]), /longer duration/);
   assert.match(slabProblem([{ uptoMinutes: 60, rate: 20 }, { uptoMinutes: 120, rate: 10 }]), /cost less/);
+});
+
+// ---- Phase 4: event and airport tariffs ----
+
+test("event flat fee: one fee for the whole stay, whatever the length", () => {
+  const event = { gracePeriodMinutes: 5, flatFee: 200, taxPercent: 0 };
+  assert.equal(fee(event, "2026-03-07T17:00", "2026-03-07T17:04").total, 0); // grace still applies
+  assert.equal(fee(event, "2026-03-07T17:00", "2026-03-07T17:30").total, 200);
+  assert.equal(fee(event, "2026-03-07T17:00", "2026-03-07T23:30").total, 200);
+  assert.equal(fee(event, "2026-03-07T17:00", "2026-03-09T08:00").total, 200);
+  // A zero flat fee is a free event, not "no price set".
+  assert.equal(fee({ flatFee: 0 }, "2026-03-07T17:00", "2026-03-07T23:30").total, 0);
+});
+
+test("event flat fee still honours the minimum fee, lost ticket and tax", () => {
+  const event = { flatFee: 100, lostTicketFee: 300, taxPercent: 18, taxInclusive: false };
+  const lost = fee(event, "2026-03-07T17:00", "2026-03-07T20:00", { lostTicket: true });
+  assert.equal(lost.breakdown.base, 100);
+  assert.equal(lost.breakdown.lostTicket, 300);
+  assert.equal(lost.total, 472); // 400 + 18%
+});
+
+test("airport long stay: daily rate for each started 24 hours once past the threshold", () => {
+  const airport = {
+    gracePeriodMinutes: 15,
+    slabs: [{ uptoMinutes: 60, rate: 100 }, { uptoMinutes: 240, rate: 300 }],
+    additionalPerHour: 100,
+    longStayAfterMinutes: 480, // after 8 hours
+    longStayDailyRate: 500,
+  };
+  assert.equal(fee(airport, "2026-03-02T10:00", "2026-03-02T10:10").total, 0); // pick-up grace
+  assert.equal(fee(airport, "2026-03-02T10:00", "2026-03-02T11:00").total, 100);
+  assert.equal(fee(airport, "2026-03-02T10:00", "2026-03-02T18:00").total, 700); // 8h: still hourly 300+4*100
+  assert.equal(fee(airport, "2026-03-02T10:00", "2026-03-02T18:01").total, 500); // 481 min: one started day
+  assert.equal(fee(airport, "2026-03-02T10:00", "2026-03-03T10:00").total, 500); // exactly 24h
+  assert.equal(fee(airport, "2026-03-02T10:00", "2026-03-03T10:01").total, 1000); // second day started
+  assert.equal(fee(airport, "2026-03-02T10:00", "2026-03-09T10:00").total, 3500); // a week away
+});
+
+test("long stay needs both numbers, otherwise the normal rates apply", () => {
+  const half = { slabs: [{ uptoMinutes: 60, rate: 20 }], additionalPerHour: 20, longStayDailyRate: 5 };
+  assert.equal(fee(half, "2026-03-02T10:00", "2026-03-04T10:00").total, 20 + 47 * 20);
+});
+
+test("appliesAt: time-of-day window on the entry time, also across midnight", () => {
+  const evening = { startTime: "17:00", endTime: "23:00" };
+  assert.ok(appliesAt(evening, ist("2026-03-02T17:00")));
+  assert.ok(appliesAt(evening, ist("2026-03-02T22:59")));
+  assert.ok(!appliesAt(evening, ist("2026-03-02T23:00")));
+  assert.ok(!appliesAt(evening, ist("2026-03-02T09:00")));
+
+  const night = { startTime: "22:00", endTime: "06:00" };
+  assert.ok(appliesAt(night, ist("2026-03-02T23:30")));
+  assert.ok(appliesAt(night, ist("2026-03-03T05:59")));
+  assert.ok(!appliesAt(night, ist("2026-03-03T06:00")));
+  assert.ok(!appliesAt(night, ist("2026-03-03T12:00")));
+  // Only one of the two set: ignored (the controller refuses to save it).
+  assert.ok(appliesAt({ startTime: "17:00" }, ist("2026-03-02T09:00")));
+});
+
+test("selectTariff: event beats the weekend tariff; priority beats everything", () => {
+  const general = { name: "general", createdAt: "2026-01-01" };
+  const weekend = { name: "weekend", daysOfWeek: [0, 6], createdAt: "2026-01-02" };
+  const event = {
+    name: "match", kind: "EVENT", createdAt: "2026-01-03",
+    validFrom: ist("2026-03-07T00:00"), validTo: ist("2026-03-07T23:59"),
+  };
+  const eveningOnly = { name: "evening", kind: "EVENT", startTime: "18:00", endTime: "23:00", createdAt: "2026-01-04",
+    validFrom: ist("2026-03-07T00:00"), validTo: ist("2026-03-07T23:59") };
+  const all = [general, weekend, event];
+  // 2026-03-07 is a Saturday: the weekend tariff is more specific, but the event wins.
+  assert.equal(selectTariff(all, ist("2026-03-07T10:00")).name, "match");
+  assert.equal(selectTariff(all, ist("2026-03-08T10:00")).name, "weekend");
+  // Two events: the one with the time window is more specific.
+  assert.equal(selectTariff([...all, eveningOnly], ist("2026-03-07T19:00")).name, "evening");
+  assert.equal(selectTariff([...all, eveningOnly], ist("2026-03-07T10:00")).name, "match");
+  // Explicit priority overrides the kind.
+  const boosted = { ...general, name: "boosted", priority: 10 };
+  assert.equal(selectTariff([...all, boosted], ist("2026-03-07T10:00")).name, "boosted");
+});
+
+test("tariffProblem: what may be saved", () => {
+  const ok = { slabs: [{ uptoMinutes: 60, rate: 20 }] };
+  assert.equal(tariffProblem(ok), null);
+  assert.equal(tariffProblem({ flatFee: 0 }), null);
+  assert.match(tariffProblem({}), /slab, an hourly rate or a flat fee/);
+  assert.match(tariffProblem({ ...ok, startTime: "10:00" }), /both the start and the end/);
+  assert.match(tariffProblem({ ...ok, startTime: "10:00", endTime: "10:00" }), /cannot be the same/);
+  assert.match(tariffProblem({ ...ok, longStayAfterMinutes: 600 }), /Long stay needs both/);
+  assert.match(tariffProblem({ ...ok, kind: "EVENT" }), /name/);
+  assert.match(tariffProblem({ ...ok, kind: "EVENT", eventName: "Match" }), /start and an end date/);
+  assert.equal(
+    tariffProblem({ ...ok, kind: "EVENT", eventName: "Match", validFrom: "2026-03-07", validTo: "2026-03-08" }),
+    null
+  );
+  assert.match(
+    tariffProblem({ ...ok, validFrom: "2026-03-08", validTo: "2026-03-07" }),
+    /after valid-from/
+  );
 });

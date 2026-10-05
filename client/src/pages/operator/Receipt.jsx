@@ -1,9 +1,14 @@
 import { Link, useParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { parkingApi } from '../../services/api'
 import { errorMessage } from '../../utils/errors'
 import { PAYMENT_LABELS, SESSION_STATUS, VEHICLE_LABELS, dateTime, duration, money } from '../../utils/format'
+import { printThermal } from '../../utils/print'
 import { Alert, Button, PageLoader } from '../../components/ui'
+import DeviceStatus from '../../components/operator/DeviceStatus'
+import QrCode from '../../components/QrCode'
+import { receiptSettings } from '../../utils/receiptSettings'
+import PhotoPanel from '../../components/operator/PhotoPanel'
 
 function Row({ label, children, strong }) {
   return (
@@ -21,6 +26,9 @@ export default function Receipt() {
     queryFn: () => parkingApi.receipt(id),
   })
 
+  // Sends the receipt to the thermal printer at the gate (if one is set up).
+  const thermal = useMutation({ mutationFn: () => parkingApi.print(id) })
+
   if (isLoading) return <PageLoader />
   if (error) return <Alert>{errorMessage(error)}</Alert>
 
@@ -28,6 +36,7 @@ export default function Receipt() {
     .filter(Boolean)
     .join(', ')
   const b = r.amount.breakdown
+  const look = receiptSettings(r.settings)
 
   return (
     <div className="mx-auto max-w-md space-y-4">
@@ -35,15 +44,39 @@ export default function Receipt() {
         <Link to="/operator/exit" className="text-sm text-blue-700 hover:underline">
           ← Back to exit
         </Link>
-        <Button onClick={() => window.print()}>Print / save as PDF</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" loading={thermal.isPending} onClick={() => thermal.mutate()}>
+            Print on gate printer
+          </Button>
+          <Button variant="secondary" onClick={() => printThermal(80)}>Print 80 mm slip</Button>
+          <Button onClick={() => window.print()}>Print / save as PDF</Button>
+        </div>
       </div>
+      <div className="no-print space-y-2">
+        <Alert>{thermal.error && errorMessage(thermal.error)}</Alert>
+        {thermal.data && (
+          <DeviceStatus
+            key={thermal.data.commandId}
+            hardware={{ print: thermal.data }}
+            sessionId={id}
+            direction="EXIT"
+          />
+        )}
+      </div>
+
+      {r.photos?.length > 0 && (
+        <div className="no-print rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
+          <PhotoPanel sessionId={id} readOnly />
+        </div>
+      )}
 
       <article className="print-area rounded-xl bg-white p-6 text-sm shadow-sm ring-1 ring-slate-200">
         <header className="border-b border-slate-200 pb-4 text-center">
           <h1 className="text-lg font-bold text-slate-900">{r.company.legalName || r.company.name}</h1>
           <p className="text-slate-700">{r.location.name}</p>
-          {address && <p className="text-xs text-slate-500">{address}</p>}
-          {r.company.gstNumber && <p className="text-xs text-slate-500">GSTIN: {r.company.gstNumber}</p>}
+          {look.showAddress && address && <p className="text-xs text-slate-500">{address}</p>}
+          {look.showGst && r.company.gstNumber && <p className="text-xs text-slate-500">GSTIN: {r.company.gstNumber}</p>}
+          {look.headerNote && <p className="mt-1 text-xs text-slate-600">{look.headerNote}</p>}
           <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Parking receipt</p>
         </header>
 
@@ -69,6 +102,12 @@ export default function Receipt() {
             </>
           )}
           <Row label="Total" strong>{money(r.amount.total)}</Row>
+          {r.advance && (
+            <>
+              <Row label={`Advance paid at entry (${PAYMENT_LABELS[r.advance.method] || r.advance.method})`}>{money(r.advance.amount)}</Row>
+              {r.advance.refunded > 0 && <Row label="Advance given back">−{money(r.advance.refunded)}</Row>}
+            </>
+          )}
           <Row label="Paid" strong>{money(r.paid)}</Row>
         </dl>
 
@@ -82,11 +121,18 @@ export default function Receipt() {
           ) : (
             <Row label="Payment">None</Row>
           )}
+          {r.pass && <Row label="Monthly pass">{r.pass.passNumber} · {r.pass.holderName}</Row>}
           {r.note && <Row label="Note">{r.note}</Row>}
           {r.operators.exit && <Row label="Operator">{r.operators.exit}</Row>}
         </dl>
 
-        <p className="text-center text-xs text-slate-500">Reference: {r.reference} · Thank you</p>
+        {look.showQr !== 'OFF' && (
+          <div className="mb-3 flex justify-center">
+            <QrCode value={r.ticketNumber} size={96} label={`QR code for ticket ${r.ticketNumber}`} />
+          </div>
+        )}
+        <p className="text-center text-xs text-slate-500">Reference: {r.reference}</p>
+        <p className="mt-1 text-center text-xs text-slate-500">{look.receiptFooter}</p>
       </article>
     </div>
   )

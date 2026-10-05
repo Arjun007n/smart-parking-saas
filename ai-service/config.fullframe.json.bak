@@ -1,0 +1,29 @@
+{
+  "serverUrl": "http://localhost:5000",
+  "deviceKey": "hwk_e099e24856b9e3995c39be071e4cf9126dfb15bc34d09e5d",
+  "direction": "AUTO",
+  "source": 0,
+  "processFps": 5,
+  "detector": {
+    "kind": "fullframe"
+  },
+  "ocr": {
+    "kind": "easyocr",
+    "languages": [
+      "en"
+    ],
+    "gpu": false
+  },
+  "voting": {
+    "windowSeconds": 3,
+    "minReads": 2,
+    "minConfidence": 0.5,
+    "cooldownSeconds": 30
+  },
+  "preview": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 8090,
+    "publicUrl": ""
+  }
+}

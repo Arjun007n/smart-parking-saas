@@ -4,6 +4,7 @@ require("dotenv").config({ quiet: true });
 process.env.NODE_ENV = "test";
 process.env.JWT_SECRET = process.env.JWT_SECRET || "integration-test-secret-0123456789abcdef";
 process.env.AUTH_RATE_LIMIT_MAX = "1000";
+process.env.API_RATE_LIMIT_MAX = process.env.API_RATE_LIMIT_MAX || "100000";
 process.env.APP_UTC_OFFSET_MINUTES = "330";
 
 const test = require("node:test");
@@ -28,6 +29,22 @@ const api = async (method, path, { token, body, headers } = {}) => {
     body: body ? JSON.stringify(body) : undefined,
   });
   return { status: res.status, body: await res.json() };
+};
+
+// A raw request: any method, headers and body text; returns status, headers and text.
+const send = async (method, path, { headers = {}, body } = {}) => {
+  const res = await fetch(`${state.baseUrl}${path}`, { method, headers, body });
+  return { status: res.status, headers: res.headers, text: await res.text() };
+};
+
+// Sends and receives raw bytes (photo upload and download); returns status, headers and a Buffer.
+const bytes = async (method, path, { token, headers = {}, body } = {}) => {
+  const res = await fetch(`${state.baseUrl}${path}`, {
+    method,
+    headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers },
+    body,
+  });
+  return { status: res.status, headers: res.headers, buffer: Buffer.from(await res.arrayBuffer()) };
 };
 
 // For answers that are not JSON (CSV downloads).
@@ -84,4 +101,4 @@ const setup = () => {
 // A test that is reported as skipped when there is no database.
 const it = (name, fn) => test(name, async (t) => (state.skipReason ? t.skip(state.skipReason) : fn(t)));
 
-module.exports = { setup, it, api, raw, registerCompany, login, assert };
+module.exports = { setup, it, api, raw, send, bytes, registerCompany, login, assert };

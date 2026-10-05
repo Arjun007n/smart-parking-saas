@@ -41,6 +41,8 @@ test("state machine: allowed and refused moves", () => {
   assert.doesNotThrow(() => sessions.assertTransition("ACTIVE", "CANCELLED"));
   assert.deepEqual(sessions.allowedFrom("LOST_TICKET"), ["PAYMENT_PENDING"]);
   assert.deepEqual(sessions.allowedFrom("COMPLETED").sort(), ["ACTIVE", "PAYMENT_PENDING"]);
+  // A pass sold after the fee was quoted still lets the vehicle out as a pass exit.
+  assert.deepEqual(sessions.allowedFrom("PASS_EXIT").sort(), ["ACTIVE", "PAYMENT_PENDING"]);
 });
 
 test("closeSession refuses a status that is not final", async () => {

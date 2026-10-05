@@ -27,3 +27,13 @@ coverage/
 # Temporary
 tmp/
 temp/
+# Database backups (contain all data)
+backups/
+
+# Gate agent: device keys and test output
+gate-agent/config.json
+gate-agent/printed/
+
+server/uploads/
+
+Claude outputs/

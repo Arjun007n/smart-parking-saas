@@ -3,7 +3,7 @@ const controller = require("../controllers/userController");
 const { protect } = require("../middleware/auth");
 const { tenant, requireCompany } = require("../middleware/tenant");
 const { requirePermission } = require("../middleware/permission");
-const { validateBody, validateIdParam } = require("../middleware/validate");
+const { validateBody, validateIdParam, collectCleared } = require("../middleware/validate");
 const { ROLES, PERMISSIONS } = require("../config/permissions");
 
 const role = { type: "string", enum: Object.values(ROLES) };
@@ -29,7 +29,8 @@ router.post(
     email: { type: "email", required: true },
     phone: { type: "string", max: 20 },
     password: { type: "string", required: true, min: 8, max: 72 },
-    role: { ...role, required: true },
+    role,
+    customRoleId: { type: "objectId" },
     locationIds,
     operator,
   }),
@@ -39,11 +40,13 @@ router.get("/:id", validateIdParam(), controller.getUser);
 router.put(
   "/:id",
   validateIdParam(),
+  collectCleared(["customRoleId"]),
   validateBody({
     name: { type: "string", min: 2, max: 100 },
     phone: { type: "string", max: 20 },
     password: { type: "string", min: 8, max: 72 },
     role,
+    customRoleId: { type: "objectId" },
     locationIds,
     isActive: { type: "boolean" },
     operator,

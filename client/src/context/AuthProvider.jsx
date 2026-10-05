@@ -28,6 +28,36 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
+  // Roles can be edited while someone is logged in. The server applies the
+  // change at once; this makes the menus catch up when the person comes back
+  // to the tab, instead of waiting for a reload.
+  const signedIn = Boolean(session.user)
+  useEffect(() => {
+    if (!signedIn) return undefined
+    const refresh = () => {
+      if (document.visibilityState === 'hidden' || !tokenStore.get()) return
+      authApi
+        .me()
+        .then((data) =>
+          setSession((current) => {
+            const same =
+              JSON.stringify([current.permissions, current.user?.role, current.user?.customRole]) ===
+              JSON.stringify([data.permissions, data.user?.role, data.user?.customRole])
+            return same ? current : data
+          }),
+        )
+        .catch(() => {
+          // A failed check is not a reason to sign out; the next request will say if the session ended.
+        })
+    }
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', refresh)
+    }
+  }, [signedIn])
+
   const start = useCallback(({ token, ...rest }) => {
     tokenStore.set(token)
     setSession(rest)
@@ -49,6 +79,7 @@ export function AuthProvider({ children }) {
   }, [queryClient])
 
   const setCompany = useCallback((company) => setSession((s) => ({ ...s, company })), [])
+  const setUser = useCallback((user) => setSession((s) => ({ ...s, user: { ...s.user, ...user } })), [])
 
   const value = useMemo(
     () => ({
@@ -61,8 +92,9 @@ export function AuthProvider({ children }) {
       register,
       logout,
       setCompany,
+      setUser,
     }),
-    [session, loading, login, register, logout, setCompany],
+    [session, loading, login, register, logout, setCompany, setUser],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

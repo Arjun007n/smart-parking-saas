@@ -11,6 +11,7 @@ require("dotenv").config({ quiet: true });
 process.env.NODE_ENV = "test";
 process.env.JWT_SECRET = process.env.JWT_SECRET || "integration-test-secret-0123456789abcdef";
 process.env.AUTH_RATE_LIMIT_MAX = "1000";
+process.env.API_RATE_LIMIT_MAX = "100000";
 
 const test = require("node:test");
 const assert = require("node:assert/strict");

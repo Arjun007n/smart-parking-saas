@@ -1,5 +1,5 @@
 const mongoose = require("mongoose");
-const { VEHICLE_TYPES } = require("./constants");
+const { VEHICLE_TYPES, TARIFF_KINDS, TIME_PATTERN } = require("./constants");
 
 const tariffSchema = new mongoose.Schema(
   {
@@ -27,6 +27,24 @@ const tariffSchema = new mongoose.Schema(
     daysOfWeek: [{ type: Number, min: 0, max: 6 }],
     validFrom: Date,
     validTo: Date,
+    // Event and airport pricing (Phase 4).
+    // STANDARD = everyday tariff, EVENT = a dated event (match, concert, festival),
+    // AIRPORT = long-stay style pricing. The kind decides which tariff wins and
+    // which fields the web form shows; the fee engine reads the fields themselves.
+    kind: { type: String, enum: TARIFF_KINDS, default: "STANDARD" },
+    eventName: { type: String, trim: true, maxlength: 100 },
+    // Higher wins when several tariffs apply. Normally left at 0.
+    priority: { type: Number, default: 0, min: 0, max: 100, validate: Number.isInteger },
+    // Local time window for the ENTRY time, "HH:MM". The window may cross midnight
+    // (22:00 to 06:00). Empty means any time of day.
+    startTime: { type: String, match: TIME_PATTERN },
+    endTime: { type: String, match: TIME_PATTERN },
+    // One fee for the whole stay, instead of slabs (typical for events).
+    flatFee: { type: Number, min: 0 },
+    // Airport long stay: once a stay is longer than this many minutes, it is
+    // charged this rate for every started 24 hours instead of slabs/hourly.
+    longStayAfterMinutes: { type: Number, min: 1 },
+    longStayDailyRate: { type: Number, min: 0 },
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }

@@ -1,7 +1,7 @@
 # Smart Parking SaaS
 
 Multi-tenant parking management platform. This repository follows the
-30-day master work plan. **Status: Day 28 — public website added. Days 26-27 (mobile app) are not started.**
+30-day master work plan. **Status: Day 29 — release candidate, plus gate hardware (cameras, barriers, printers; `docs/hardware.md`). Phase 2 (passes, QR, online payments, advanced reports, photos, custom roles; `docs/phase2.md`) is built. Days 26-27 (mobile app) and Day 30 (deployment) are not started.**
 
 ```
 client/   React + Vite + Tailwind web app
@@ -55,6 +55,30 @@ npm test            # unit + API tests, needs MongoDB
 `npm test` uses the database in `MONGO_URI_TEST` (default
 `mongodb://127.0.0.1:27017/smart_parking_test`). Its name must end in `_test`
 because the tests delete everything in it. Never point it at real data.
+
+## Phase 2
+
+Monthly passes, QR codes and camera scanning, online payments (generic webhook, simulator, Razorpay),
+seven more reports, vehicle photos and company-defined roles. Setup, rules and settings:
+[docs/phase2.md](docs/phase2.md). Its database tests have not been run yet; run `npm test` in `server`.
+
+## Gate hardware (ANPR cameras, boom barriers, thermal printers)
+
+Built early at the owner's request, against a simulator. Admins register devices on the **Hardware**
+page; a small program in `gate-agent/` runs at the site and connects them. Camera plates are
+suggestions an operator confirms; barriers and printers follow entry, exit and payment without ever
+blocking them. See `docs/hardware.md` (setup, simulator, real devices, safety rules).
+
+## Security and testing (Day 29)
+
+The full checklist, what was tested, what was fixed and the known limits are in
+[docs/security.md](docs/security.md).
+
+- Every user can change their own password under **My account**.
+- Ten wrong passwords lock an account for 15 minutes.
+- `npm run backup` saves the whole database to `server/backups/`;
+  `npm run restore -- <folder>` restores it into a separate `_restore`
+  database to prove the backup works.
 
 ## Public website (Day 28)
 
@@ -147,11 +171,10 @@ managing parking locations (Day 8) and users/operators (part of Day 13).
 
 - Password reset emails are not sent yet (Day 25). In development the reset
   link is printed in the API terminal and shown on the forgot-password page.
-- No online payment gateway is connected. Cash, UPI and card are recorded by
-  the operator. The gateway webhook exists and is switched off until
-  `PAYMENT_WEBHOOK_SECRET` is set.
-- Tickets and receipts show the reference as text. A QR image needs a QR
-  library (`npm install qrcode`), planned with the QR work in Phase 2.
+- Online payments work through a signed webhook, a simulator, or Razorpay. The
+  Razorpay adapter has not been tried against Razorpay yet (use test keys first).
+- Vehicle photos are stored on the server's disk (`PHOTO_STORAGE_DIR`); use a
+  persistent volume in production. Custom roles cannot be company-wide.
 - Website: the hardware catalogue is a list of planned integrations with an
   interest form, not a shop (no cart or checkout). The partner page collects
   interest; there is no partner login yet. New enquiries are not emailed to
@@ -165,10 +188,10 @@ managing parking locations (Day 8) and users/operators (part of Day 13).
 - Email, SMS, WhatsApp and push are defined as channels
   (`server/integrations/notifications`) but no provider is connected, so only
   in-app notifications are delivered. Password reset emails are still not sent.
-- There is no hardware yet, so the "hardware offline" alert is never raised.
+- Hardware is built against a simulator (see `docs/hardware.md`). It has not yet been tried with a
+  real camera, barrier or printer; the first real device may need a driver option or camera translator.
 - Reports export CSV. PDF export is not built.
-- Refunds are full refunds of cash, UPI and card payments. Partial refunds
-  and gateway refunds are not supported.
+- Refunds are full refunds only; partial refunds are not supported.
 - Passes are not built yet, so every exit is charged by tariff.
 - Email/OTP verification of new companies is a flag a Super Admin sets.
 - The login token is kept in the browser's localStorage. Review this before

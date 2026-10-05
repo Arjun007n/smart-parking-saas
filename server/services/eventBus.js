@@ -14,6 +14,13 @@ const EVENTS = Object.freeze({
   PAYMENT_RECEIVED: "payment:received",
   PAYMENT_FAILED: "payment:failed",
   NOTIFICATION_NEW: "notification:new",
+  HARDWARE_ONLINE: "hardware:online",
+  HARDWARE_OFFLINE: "hardware:offline",
+  HARDWARE_EVENT: "hardware:event",
+  ANPR_DETECTED: "anpr:detected",
+  // A command was queued for a device (it is woken at once) / a device reported its result.
+  HARDWARE_COMMAND_QUEUED: "hardware:command-queued",
+  HARDWARE_COMMAND_DONE: "hardware:command-done",
 });
 
 const bus = new EventEmitter();

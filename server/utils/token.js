@@ -6,10 +6,13 @@ const env = require("../config/env");
 // change, deactivation) invalidates every token issued before.
 const signToken = (user) =>
   jwt.sign({ sub: String(user._id), tv: user.tokenVersion }, env.jwtSecret, {
+    algorithm: "HS256",
     expiresIn: env.jwtExpiresIn,
   });
 
-const verifyToken = (token) => jwt.verify(token, env.jwtSecret);
+// Only our own signing algorithm is accepted, so a token that names another
+// algorithm (or "none") is always rejected.
+const verifyToken = (token) => jwt.verify(token, env.jwtSecret, { algorithms: ["HS256"] });
 
 const hashToken = (raw) => crypto.createHash("sha256").update(raw).digest("hex");
 

@@ -117,8 +117,8 @@ test("event bus: delivery, isolation of failing listeners, rooms", async () => {
 
 test("external channels report 'not configured' and never throw", async () => {
   const results = await sendExternal({ title: "Test", message: "Hello" });
-  assert.deepEqual(results.map((r) => r.channel), ["email", "sms", "whatsapp", "push"]);
+  assert.deepEqual(results.map((r) => r.channel), ["push"]);
   assert.ok(results.every((r) => r.sent === false && r.reason === "not configured"));
-  assert.equal(channels.email.isConfigured(), false);
+  assert.equal(channels.push.isConfigured(), false);
   assert.deepEqual(await sendExternal({}, ["carrier-pigeon"]), [{ channel: "carrier-pigeon", sent: false, reason: "not configured" }]);
 });

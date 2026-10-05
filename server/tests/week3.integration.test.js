@@ -230,8 +230,14 @@ it("paid exit: fee is calculated, payment is required, then the session complete
   assert.equal(paid.body.data.session.isOpen, false);
   assert.equal((await occupied()).car, 0); // occupancy decreased
 
-  // Duplicate payment and duplicate exit.
-  assert.equal((await pay({ sessionId: s.car1._id, method: "CASH", amount: 40 })).status, 409);
+  // The same payment sent again (a retry) returns the first result and charges nothing more.
+  const retry = await pay({ sessionId: s.car1._id, method: "CASH", amount: 40 });
+  assert.equal(retry.status, 200);
+  assert.equal(retry.body.data.repeated, true);
+  assert.equal(retry.body.data.payment._id, paid.body.data.payment._id);
+  // A different payment for a closed session is refused, and so is a second exit.
+  assert.equal((await pay({ sessionId: s.car1._id, method: "UPI", amount: 40 })).status, 409);
+  assert.equal((await pay({ sessionId: s.car1._id, method: "CASH", amount: 40 }, s.a.token)).status, 409);
   assert.equal((await exit({ ticketNumber: s.car1.ticketNumber })).status, 409);
   assert.equal((await occupied()).car, 0);
 
@@ -366,7 +372,7 @@ it("collection, exits and payments see the completed transactions", async () => 
   assert.equal(payments.body.data.total, 3);
 
   assert.equal((await api("GET", "/api/parking/entries", { token: s.a.token })).body.data.total, 0);
-  assert.deepEqual(await occupied(), { car: 0, bike: 0, heavy: 0 });
+  assert.deepEqual(await occupied(), { car: 0, bike: 0, heavy: 0, taxi: 0, tempo: 0 });
 
   // Access: entry operators do not see money; other companies see nothing.
   assert.equal((await api("GET", "/api/payments/collection", { token: s.entryToken })).status, 403);

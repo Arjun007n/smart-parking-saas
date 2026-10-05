@@ -1,8 +1,10 @@
+const mongoose = require("mongoose");
 const AppError = require("../utils/AppError");
 const { verifyToken } = require("../utils/token");
 const User = require("../models/User");
 const Company = require("../models/Company");
 const { ROLES } = require("../config/permissions");
+const { accessOf } = require("../services/roleService");
 
 const BLOCKED_SUBSCRIPTIONS = ["SUSPENDED", "CANCELLED"];
 
@@ -13,6 +15,11 @@ const protect = async (req, res, next) => {
   if (!token) throw new AppError("Please log in to continue", 401);
 
   const payload = verifyToken(token);
+  // The user id must be a plain id. Anything else (for example an object
+  // that the database would read as a query) is refused outright.
+  if (typeof payload.sub !== "string" || !mongoose.isValidObjectId(payload.sub)) {
+    throw new AppError("Session expired or invalid. Please log in again.", 401);
+  }
 
   const user = await User.findById(payload.sub);
   if (!user || !user.isActive) throw new AppError("Account not found or deactivated", 401);
@@ -30,6 +37,10 @@ const protect = async (req, res, next) => {
   }
 
   req.user = user;
+  // What this user may do right now (custom role or built-in role).
+  const access = await accessOf(user);
+  req.permissions = access.permissions;
+  req.customRole = access.customRole;
   next();
 };
 

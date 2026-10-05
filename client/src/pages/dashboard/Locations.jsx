@@ -9,8 +9,9 @@ import { locationSchema } from '../../validators/schemas'
 import { errorMessage } from '../../utils/errors'
 import { isCompanyWide } from '../../utils/roles'
 import { Alert, Badge, Button, Card, Field, PageLoader } from '../../components/ui'
+import { CAPACITY_FIELDS } from '../../utils/format'
 
-const DEFAULTS = { name: '', line1: '', city: '', state: '', pincode: '', car: 0, bike: 0, heavy: 0 }
+const DEFAULTS = { name: '', line1: '', city: '', state: '', pincode: '', car: 0, bike: 0, heavy: 0, taxi: 0, tempo: 0 }
 
 function CreateLocationForm({ onDone }) {
   const queryClient = useQueryClient()
@@ -22,11 +23,11 @@ function CreateLocationForm({ onDone }) {
   } = useForm({ resolver: zodResolver(locationSchema), defaultValues: DEFAULTS })
 
   const create = useMutation({
-    mutationFn: ({ name, line1, city, state, pincode, car, bike, heavy }) =>
+    mutationFn: ({ name, line1, city, state, pincode, car, bike, heavy, taxi, tempo }) =>
       locationApi.create({
         name,
         address: { line1, city, state, pincode },
-        capacity: { car, bike, heavy },
+        capacity: { car, bike, heavy, taxi, tempo },
       }),
     onSuccess: (location) => {
       queryClient.invalidateQueries({ queryKey: ['locations'] })
@@ -53,7 +54,9 @@ function CreateLocationForm({ onDone }) {
         <div className="grid gap-4 sm:grid-cols-3">
           <Field label="Cars" type="number" min="0" error={errors.car?.message} {...register('car', number)} />
           <Field label="Bikes" type="number" min="0" error={errors.bike?.message} {...register('bike', number)} />
-          <Field label="Heavy vehicles" type="number" min="0" error={errors.heavy?.message} {...register('heavy', number)} />
+          <Field label="Coach / Bus / Truck" type="number" min="0" error={errors.heavy?.message} {...register('heavy', number)} />
+          <Field label="Taxis" type="number" min="0" error={errors.taxi?.message} {...register('taxi', number)} />
+          <Field label="Tempo / SUV / Mini bus" type="number" min="0" error={errors.tempo?.message} {...register('tempo', number)} />
         </div>
       </fieldset>
       <Button type="submit" loading={create.isPending}>
@@ -77,11 +80,7 @@ function LocationCard({ location, canClose }) {
     .filter(Boolean)
     .join(', ')
 
-  const rows = [
-    ['Cars', 'car'],
-    ['Bikes', 'bike'],
-    ['Heavy', 'heavy'],
-  ].filter(([, key]) => location.capacity[key] > 0)
+  const rows = CAPACITY_FIELDS.filter(([, key]) => location.capacity[key] > 0)
 
   return (
     <li className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
@@ -100,7 +99,7 @@ function LocationCard({ location, canClose }) {
       {rows.length === 0 ? (
         <p className="mt-4 text-sm text-slate-500">No capacity set yet.</p>
       ) : (
-        <dl className="mt-4 grid grid-cols-3 gap-3 text-sm">
+        <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
           {rows.map(([label, key]) => (
             <div key={key} className="rounded-lg bg-slate-50 p-3">
               <dt className="text-slate-500">{label}</dt>

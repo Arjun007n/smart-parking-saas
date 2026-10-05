@@ -11,6 +11,13 @@ export default function Contact() {
   // Only short, plain plan names from our own links are used.
   const plan = /^[A-Za-z ]{1,30}$/.test(params.get('plan') || '') ? params.get('plan') : ''
 
+  // The plan calculator adds the number of users and months it priced.
+  const users = Number.parseInt(params.get('users'), 10)
+  const months = Number.parseInt(params.get('months'), 10)
+  const subject = plan
+    ? `${plan} plan${users > 0 && users <= 500 ? ` · ${users} user${users === 1 ? '' : 's'}` : ''}${months > 0 && months <= 60 ? ` · ${months} month${months === 1 ? '' : 's'}` : ''}`
+    : undefined
+
   const details = [
     SITE.email && { label: 'Email', value: SITE.email, href: `mailto:${SITE.email}` },
     SITE.phone && { label: 'Phone', value: SITE.phone, href: `tel:${SITE.phone.replace(/\s/g, '')}` },
@@ -32,7 +39,7 @@ export default function Contact() {
           <div className="mt-5">
             <LeadForm
               type={isDemo ? 'DEMO' : 'CONTACT'}
-              subject={plan ? `${plan} plan` : undefined}
+              subject={subject}
               messageLabel={isDemo ? 'About your parking (locations, capacity, current system)' : 'How can we help?'}
             />
           </div>

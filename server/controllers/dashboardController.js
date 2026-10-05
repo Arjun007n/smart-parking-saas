@@ -5,9 +5,12 @@ const { round2 } = require("../services/collectionService");
 const ParkingSession = require("../models/ParkingSession");
 const ParkingSlot = require("../models/ParkingSlot");
 const Payment = require("../models/Payment");
+const PassPayment = require("../models/PassPayment");
+const { mergeGroups } = require("../services/collectionService");
 const User = require("../models/User");
+const { VEHICLE_KEYS } = require("../models/constants");
 
-const TYPES = ["car", "bike", "heavy"];
+const TYPES = VEHICLE_KEYS;
 const PENDING_TOO_LONG_MINUTES = 30;
 const sumTypes = (counts) => TYPES.reduce((total, key) => total + (counts[key] || 0), 0);
 const percent = (part, whole) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
@@ -32,7 +35,7 @@ const getDashboard = async (req, res) => {
   const [
     entriesByHour, exitsByHour, entriesByLocation, inside, pendingLong, closedByStatus,
     paidByDay, refundedByDay, todayMoney, failedPayments, reserved,
-    entriesByOperator, exitsByOperator,
+    entriesByOperator, exitsByOperator, passPaidByDay, passToday,
   ] = await Promise.all([
     ParkingSession.aggregate([
       { $match: { ...inScope, entryTime: { $gte: today.start, $lt: today.end } } },
@@ -82,6 +85,21 @@ const getDashboard = async (req, res) => {
       { $match: { ...inScope, isOpen: false, exitTime: { $gte: today.start, $lt: today.end }, exitOperatorId: { $ne: null } } },
       { $group: { _id: "$exitOperatorId", count: { $sum: 1 } } },
     ]),
+    // Pass sales and renewals count as revenue too.
+    PassPayment.aggregate([
+      { $match: { ...inScope, amount: { $gt: 0 }, paidAt: { $gte: since, $lt: today.end } } },
+      { $group: { _id: dayOf("$paidAt"), amount: { $sum: "$amount" } } },
+    ]),
+    PassPayment.aggregate([
+      { $match: { ...inScope, amount: { $gt: 0 }, paidAt: { $gte: today.start, $lt: today.end } } },
+      {
+        $facet: {
+          byMethod: [{ $group: { _id: "$method", amount: { $sum: "$amount" }, count: { $sum: 1 } } }],
+          byLocation: [{ $group: { _id: "$locationId", amount: { $sum: "$amount" }, count: { $sum: 1 } } }],
+          byOperator: [{ $group: { _id: "$collectedBy", amount: { $sum: "$amount" }, count: { $sum: 1 } } }],
+        },
+      },
+    ]),
   ]);
 
   // ---- occupancy
@@ -99,7 +117,7 @@ const getDashboard = async (req, res) => {
 
   // ---- revenue (collected on the day paid, minus refunds on the day refunded)
   const netByDay = new Map();
-  for (const row of paidByDay) netByDay.set(row._id, (netByDay.get(row._id) || 0) + row.amount);
+  for (const row of [...paidByDay, ...passPaidByDay]) netByDay.set(row._id, (netByDay.get(row._id) || 0) + row.amount);
   for (const row of refundedByDay) netByDay.set(row._id, (netByDay.get(row._id) || 0) - row.amount);
   const netSince = (start) => {
     const from = localDateText(start);
@@ -112,7 +130,13 @@ const getDashboard = async (req, res) => {
     return { date, amount: round2(netByDay.get(date) || 0) };
   });
 
-  const money = todayMoney[0];
+  const parkingToday = todayMoney[0];
+  const passesToday = passToday[0];
+  const money = {
+    byMethod: mergeGroups(parkingToday.byMethod, passesToday.byMethod).sort((a, b) => String(a._id).localeCompare(String(b._id))),
+    byLocation: mergeGroups(parkingToday.byLocation, passesToday.byLocation),
+    byOperator: mergeGroups(parkingToday.byOperator, passesToday.byOperator),
+  };
   const moneyByLocation = new Map(money.byLocation.map((r) => [String(r._id), r]));
   const entriesAt = new Map(entriesByLocation.map((r) => [String(r._id), r.count]));
 

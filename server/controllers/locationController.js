@@ -3,6 +3,7 @@ const { isCompanyWide } = require("../config/permissions");
 const audit = require("../services/auditService");
 const Company = require("../models/Company");
 const Location = require("../models/Location");
+const { sumCounts } = require("../models/constants");
 
 // Tenant filter, plus "only my assigned locations" for location-level roles.
 const scopeFilter = (req) => {
@@ -60,7 +61,7 @@ const createLocation = async (req, res) => {
 // PUT /api/locations/:id
 const updateLocation = async (req, res) => {
   const location = await findInScope(req);
-  const { address, coordinates, contact, operatingHours, capacity, isActive, ...simple } = req.body;
+  const { address, coordinates, contact, operatingHours, capacity, isActive, receiptSettings, onlineBooking, ...simple } = req.body;
 
   if (isActive !== undefined) {
     requireCompanyWide(req);
@@ -68,9 +69,20 @@ const updateLocation = async (req, res) => {
   }
   Object.assign(location, simple);
   if (address) Object.assign(location.address, address);
-  if (coordinates) Object.assign(location.coordinates, coordinates);
+  if (coordinates && coordinates.clear) location.set("coordinates", undefined);
+  else if (coordinates) {
+    const { clear: _clear, ...point } = coordinates;
+    Object.assign(location.coordinates, point);
+  }
   if (contact) Object.assign(location.contact, contact);
   if (operatingHours) Object.assign(location.operatingHours, operatingHours);
+  if (receiptSettings) Object.assign(location.receiptSettings, receiptSettings);
+  if (onlineBooking) {
+    const { fees, ...rest } = onlineBooking;
+    location.onlineBooking = location.onlineBooking || {};
+    Object.assign(location.onlineBooking, rest);
+    if (fees) for (const [type, fee] of Object.entries(fees)) location.onlineBooking.fees[type] = fee;
+  }
   if (capacity) {
     for (const [type, total] of Object.entries(capacity)) {
       if (total < location.occupied[type]) {
@@ -98,7 +110,7 @@ const deactivateLocation = async (req, res) => {
   requireCompanyWide(req);
   const location = await findInScope(req);
 
-  const parked = location.occupied.car + location.occupied.bike + location.occupied.heavy;
+  const parked = sumCounts(location.occupied);
   if (parked > 0) {
     throw new AppError(`Cannot close this location while ${parked} vehicles are parked`, 409);
   }

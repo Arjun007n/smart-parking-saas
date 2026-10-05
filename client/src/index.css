@@ -24,3 +24,136 @@ body {
     box-shadow: none !important;
   }
 }
+
+/* Dark pages for the gate staff screens (Theme button in the operator header).
+   These rules come after Tailwind's classes and win over them. */
+.theme-dark {
+  background: #0b1220;
+  color: #e2e8f0;
+  color-scheme: dark;
+}
+.theme-dark.bg-slate-100,
+.theme-dark .bg-slate-100 { background-color: #0b1220; }
+.theme-dark .bg-white { background-color: #162033; }
+.theme-dark .bg-slate-50,
+.theme-dark .hover\:bg-slate-50:hover { background-color: #1e2a40; }
+.theme-dark .text-slate-900,
+.theme-dark .text-slate-800 { color: #f1f5f9; }
+.theme-dark .text-slate-700,
+.theme-dark .text-slate-600 { color: #cbd5e1; }
+.theme-dark .text-slate-500 { color: #94a3b8; }
+.theme-dark .border-slate-200,
+.theme-dark .border-slate-300,
+.theme-dark .ring-slate-200,
+.theme-dark .divide-slate-200 > * { border-color: #2c3b57; --tw-ring-color: #2c3b57; }
+.theme-dark input,
+.theme-dark select,
+.theme-dark textarea { background-color: #0f172a; color: #f1f5f9; }
+
+/* ---- Motion kit (components/motion.jsx, ToastProvider). All of it is off for people who ask
+   their system for less motion. ---- */
+@keyframes sp-toast-in {
+  from { opacity: 0; transform: translateX(1rem); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes sp-row-in {
+  from { opacity: 0; transform: translateY(-0.4rem); background-color: rgba(59, 130, 246, 0.18); }
+  to { opacity: 1; transform: none; background-color: transparent; }
+}
+@keyframes sp-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+@keyframes sp-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+.sp-toast { animation: sp-toast-in 0.25s ease-out; }
+.sp-row-in { animation: sp-row-in 1.6s ease-out; }
+.sp-pop { animation: sp-pop 0.4s ease-out; }
+.sp-skeleton {
+  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 37%, #e2e8f0 63%);
+  background-size: 400% 100%;
+  animation: sp-shimmer 1.4s ease-in-out infinite;
+}
+.theme-dark .sp-skeleton { background: linear-gradient(90deg, #1e2a40 25%, #2c3b57 37%, #1e2a40 63%); background-size: 400% 100%; }
+.sp-hidden-until-seen { opacity: 0; transform: translateY(1.25rem); }
+.sp-revealed { opacity: 1; transform: none; transition: opacity 0.6s ease-out, transform 0.6s ease-out; }
+/* Cards and buttons that rise a little when pointed at. */
+.sp-lift { transition: transform 0.18s ease, box-shadow 0.18s ease; }
+.sp-lift:hover { transform: translateY(-2px); box-shadow: 0 8px 20px -8px rgba(15, 23, 42, 0.25); }
+.sp-press:active { transform: scale(0.97); }
+@media (prefers-reduced-motion: reduce) {
+  .sp-toast, .sp-row-in, .sp-pop, .sp-skeleton { animation: none; }
+  .sp-hidden-until-seen { opacity: 1; transform: none; }
+  .sp-lift:hover { transform: none; }
+  .sp-press:active { transform: none; }
+}
+
+/* ---- Gate-staff look (operator screens): Montserrat, navy text, a blue bar on every card,
+   grey table headings, gradient money tiles. Scoped to .gate-skin so the rest of the site is unchanged. ---- */
+.gate-skin {
+  font-family: Montserrat, Arial, Helvetica, sans-serif;
+  color: #292b3a;
+}
+.gate-skin .sp-card-head {
+  margin: -1.5rem -1.5rem 1rem;
+  padding: 0.6rem 1rem;
+  background: #007bff;
+  border-radius: 0.75rem 0.75rem 0 0;
+}
+.gate-skin .sp-card-head h2 {
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.gate-skin table thead th {
+  background: #e9ecef;
+  color: #1e3d73;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 0.55rem 0.75rem !important;
+  white-space: nowrap;
+}
+.gate-skin table tbody tr:hover { background: rgba(0, 123, 255, 0.05); }
+.gate-skin label { color: #1e3d73; font-weight: 600; }
+.gate-skin input:not([type="radio"]):not([type="checkbox"]):focus,
+.gate-skin select:focus { border-color: #007bff; box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.18); outline: none; }
+.theme-dark.gate-skin label { color: #cbd5e1; }
+.theme-dark.gate-skin table thead th { background: #1e2a40; color: #cbd5e1; }
+
+/* Money tiles */
+.tile-gradient { border-radius: 15px; color: #fff; text-align: center; padding: 1rem 0.75rem; box-shadow: 0 6px 16px -8px rgba(15, 23, 42, 0.45); }
+.tile-gradient .tile-amount { font-size: 1.35rem; font-weight: 700; }
+.tile-gradient .tile-label { font-size: 0.8rem; font-weight: 600; opacity: 0.95; }
+.gradient-green { background: linear-gradient(45deg, #00b09b, #96c93d); }
+.gradient-red { background: linear-gradient(45deg, #ff416c, #ff4b2b); }
+.gradient-blue { background: linear-gradient(45deg, #36d1dc, #5b86e5); }
+.gradient-purple { background: linear-gradient(45deg, #7f00ff, #e100ff); }
+.gradient-upi { background: linear-gradient(135deg, #0061ff, #00c6ff); }
+.gradient-fastag { background: linear-gradient(45deg, #ff7a18 0%, #ffb347 40%, #28a745 60%, #20c997 100%); }
+.gradient-dark { background: linear-gradient(45deg, #232526, #414345); }
+
+/* Pastel counters inside a capacity card */
+.count-entries { background: #d4edda; color: #1e8e3e; }
+.count-exits { background: #f8d7da; color: #dc3545; }
+.count-available { background: #ffe5d0; color: #f08a24; }
+.count-parked { background: #d1ecf1; color: #138496; }
+
+/* Big gate buttons and the vehicle type button */
+.gate-btn-entry { background: #19b63d; box-shadow: 0 4px 10px rgba(40, 167, 69, 0.4); }
+.gate-btn-entry:hover { background: #159a34; }
+.gate-btn-exit { background: #dc3545; box-shadow: 0 4px 10px rgba(220, 53, 69, 0.4); }
+.gate-btn-exit:hover { background: #bd2130; }
+.gate-skin .bg-blue-600 { background-image: linear-gradient(to right, #007bff, #0056b3); }
+.gate-skin .bg-blue-600:hover { background-image: linear-gradient(to right, #006fe6, #004a99); }
+.gate-skin button.gate-btn-entry, .gate-skin button.gate-btn-exit { background-image: none; }
+.gate-skin h1 { color: #1e3d73; font-size: 1.25rem; font-weight: 800; }
+
+/* Public website: the same Montserrat face as the gate screens. */
+.site-skin { font-family: Montserrat, Arial, Helvetica, sans-serif; }

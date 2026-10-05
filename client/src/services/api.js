@@ -40,14 +40,77 @@ export const authApi = {
   login: (body) => unwrap(api.post('/auth/login', body)),
   me: () => unwrap(api.get('/auth/me')),
   logout: () => api.post('/auth/logout'),
+  changePassword: (body) => unwrap(api.post('/auth/change-password', body)),
+  updatePreferences: (body) => unwrap(api.put('/auth/preferences', body)),
+  updateProfile: (body) => unwrap(api.put('/auth/profile', body)),
   forgotPassword: (body) => api.post('/auth/forgot-password', body).then((res) => res.data),
   resetPassword: (body) => api.post('/auth/reset-password', body).then((res) => res.data),
+  // Does signup ask for a code sent to the mobile number? ({ otpRequired })
+  signupOptions: () => unwrap(api.get('/auth/signup-options')),
+  sendOtp: (phone) => unwrap(api.post('/auth/otp/send', { phone })),
+  verifyOtp: (phone, code) => unwrap(api.post('/auth/otp/verify', { phone, code })),
 }
 
 export const companyApi = {
   get: (id) => unwrap(api.get(`/companies/${id}`)),
   update: (id, body) => unwrap(api.put(`/companies/${id}`, body)),
   onboarding: (id) => unwrap(api.get(`/companies/${id}/onboarding`)),
+  // The end-of-day report email.
+  reportEmail: (id) => unwrap(api.get(`/companies/${id}/report-email`)),
+  updateReportEmail: (id, body) => unwrap(api.put(`/companies/${id}/report-email`, body)),
+  testReportEmail: (id) => unwrap(api.post(`/companies/${id}/report-email/test`)),
+}
+
+// Buying a plan, and the invoices.
+export const billingApi = {
+  summary: () => unwrap(api.get('/billing')),
+  checkout: (body) => unwrap(api.post('/billing/checkout', body)),
+  order: (id) => unwrap(api.get(`/billing/orders/${id}`)),
+  simulate: (id, outcome) => unwrap(api.post(`/billing/orders/${id}/simulate`, { outcome })),
+  // Saves the invoice as a PDF (the request carries the login, so a plain link would not work).
+  downloadInvoice: async (id, number) => {
+    const res = await api.get(`/billing/invoices/${id}/pdf`, { responseType: 'blob' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(res.data)
+    link.download = `${String(number).replace(/[^A-Za-z0-9-]/g, '-')}.pdf`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(link.href)
+  },
+}
+
+// The hardware shop. The catalog and the cart price need no login; orders belong to a company.
+const saveFile = (blob, name) => {
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(blob)
+  link.download = name
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(link.href)
+}
+export const shopApi = {
+  info: () => unwrap(api.get('/shop/info')),
+  products: () => unwrap(api.get('/shop/products')),
+  // Prices a cart on the server: { lines, problems, goods, shippingFee, shippingGst, gst, total }
+  priceCart: (items) => unwrap(api.post('/shop/cart', { items })),
+  checkout: (body) => unwrap(api.post('/shop/checkout', body)),
+  orders: () => unwrap(api.get('/shop/orders')),
+  order: (id) => unwrap(api.get(`/shop/orders/${id}`)),
+  cancelOrder: (id) => unwrap(api.post(`/shop/orders/${id}/cancel`)),
+  simulate: (id, outcome) => unwrap(api.post(`/shop/orders/${id}/simulate`, { outcome })),
+  downloadInvoice: async (id, number) => {
+    const res = await api.get(`/billing/invoices/${id}/pdf`, { responseType: 'blob' })
+    saveFile(res.data, `${String(number).replace(/[^A-Za-z0-9-]/g, '-')}.pdf`)
+  },
+  // Platform (Super Admin)
+  adminProducts: () => unwrap(api.get('/shop/admin/products')),
+  adminImportStarter: () => unwrap(api.post('/shop/admin/products/import-starter')),
+  adminCreateProduct: (body) => unwrap(api.post('/shop/admin/products', body)),
+  adminUpdateProduct: (id, body) => unwrap(api.put(`/shop/admin/products/${id}`, body)),
+  adminOrders: (params) => unwrap(api.get('/shop/admin/orders', { params })),
+  adminSetFulfilment: (id, body) => unwrap(api.put(`/shop/admin/orders/${id}/fulfilment`, body)),
 }
 
 export const locationApi = {
@@ -63,6 +126,14 @@ export const userApi = {
   create: (body) => unwrap(api.post('/users', body)),
   update: (id, body) => unwrap(api.put(`/users/${id}`, body)),
   deactivate: (id) => unwrap(api.delete(`/users/${id}`)),
+}
+
+export const roleApi = {
+  list: () => unwrap(api.get('/roles')),
+  catalog: () => unwrap(api.get('/roles/catalog')),
+  create: (body) => unwrap(api.post('/roles', body)),
+  update: (id, body) => unwrap(api.put(`/roles/${id}`, body)),
+  remove: (id) => unwrap(api.delete(`/roles/${id}`)),
 }
 
 export const slotApi = {
@@ -93,14 +164,65 @@ export const parkingApi = {
   exit: (body) => unwrap(api.post('/parking/exit', body)),
   exits: (params) => unwrap(api.get('/parking/exits', { params })),
   receipt: (id) => unwrap(api.get(`/parking/sessions/${id}/receipt`)),
+  session: (id) => unwrap(api.get(`/parking/sessions/${id}`)),
+  // Vehicle photos. The upload body is the picture itself.
+  uploadPhoto: (id, blob, kind) =>
+    unwrap(api.post(`/parking/sessions/${id}/photos`, blob, { params: { kind }, headers: { 'Content-Type': blob.type }, timeout: 30000 })),
+  photo: (id, photoId) => api.get(`/parking/sessions/${id}/photos/${photoId}`, { responseType: 'blob' }).then((res) => res.data),
+  deletePhoto: (id, photoId) => unwrap(api.delete(`/parking/sessions/${id}/photos/${photoId}`)),
   cancel: (id, reason) => unwrap(api.post(`/parking/sessions/${id}/cancel`, { reason })),
   override: (id, reason) => unwrap(api.post(`/parking/sessions/${id}/override`, { reason })),
+  // Ask the gate barrier / thermal printer again for a vehicle that was just cleared.
+  barrier: (id) => unwrap(api.post(`/parking/sessions/${id}/barrier`)),
+  // "Open barrier": lift a gate's barrier by hand, with no ticket behind it. ({ locationId, direction, gate?, reason? })
+  openBarrier: (body) => unwrap(api.post('/parking/barrier', body)),
+  print: (id) => unwrap(api.post(`/parking/sessions/${id}/print`)),
+  // Cancel an inside ticket and issue a new one in one step. ({ gate?, vehicleType? })
+  reEntry: (id, body = {}) => unwrap(api.post(`/parking/sessions/${id}/re-entry`, body)),
 }
 
 export const paymentApi = {
   create: (body) => unwrap(api.post('/payments', body)),
+  // Is online payment set up? ({ online, provider, simulated })
+  options: () => unwrap(api.get('/payments/options')),
+  get: (id) => unwrap(api.get(`/payments/${id}`)),
+  cancel: (id) => unwrap(api.post(`/payments/${id}/cancel`)),
+  // Development only: play the customer's side of an online payment.
+  simulate: (id, outcome) => unwrap(api.post(`/payments/${id}/simulate`, { outcome })),
   refund: (id, reason) => unwrap(api.post(`/payments/${id}/refund`, { reason })),
   collection: (params) => unwrap(api.get('/payments/collection', { params })),
+}
+
+// Monthly passes.
+export const passApi = {
+  list: (params) => unwrap(api.get('/passes', { params })),
+  get: (id) => unwrap(api.get(`/passes/${id}`)),
+  create: (body) => unwrap(api.post('/passes', body)),
+  update: (id, body) => unwrap(api.put(`/passes/${id}`, body)),
+  renew: (id, body) => unwrap(api.post(`/passes/${id}/renew`, body)),
+  suspend: (id, reason) => unwrap(api.post(`/passes/${id}/suspend`, { reason })),
+  resume: (id) => unwrap(api.post(`/passes/${id}/resume`)),
+  cancel: (id, reason) => unwrap(api.post(`/passes/${id}/cancel`, { reason })),
+  addVehicle: (id, body) => unwrap(api.post(`/passes/${id}/vehicles`, body)),
+  removeVehicle: (id, body) => unwrap(api.post(`/passes/${id}/vehicles/remove`, body)),
+  replaceVehicle: (id, body) => unwrap(api.post(`/passes/${id}/vehicles/replace`, body)),
+  // Gives a vehicle its UHF / RFID tag (an empty tag removes it).
+  setVehicleTag: (id, body) => unwrap(api.put(`/passes/${id}/vehicles/tag`, body)),
+  // For gate staff: does this vehicle have a pass, and is it good at this location?
+  lookup: (params) => unwrap(api.get('/passes/lookup', { params })),
+}
+
+export const walletApi = {
+  list: (params) => unwrap(api.get('/wallets', { params })),
+  get: (id) => unwrap(api.get(`/wallets/${id}`)),
+  transactions: (id, params) => unwrap(api.get(`/wallets/${id}/transactions`, { params })),
+  // Gate staff: find a wallet by number, vehicle or phone. Returns { wallet } (null when none).
+  lookup: (params) => unwrap(api.get('/wallets/lookup', { params })),
+  create: (body) => unwrap(api.post('/wallets', body)),
+  update: (id, body) => unwrap(api.put(`/wallets/${id}`, body)),
+  topUp: (id, body) => unwrap(api.post(`/wallets/${id}/topup`, body)),
+  adjust: (id, body) => unwrap(api.post(`/wallets/${id}/adjust`, body)),
+  verify: (id) => unwrap(api.get(`/wallets/${id}/verify`)),
 }
 
 export const shiftApi = {
@@ -111,14 +233,49 @@ export const shiftApi = {
   adjust: (id, body) => unwrap(api.post(`/shifts/${id}/adjustments`, body)),
 }
 
+// Gate hardware: devices, their commands, and camera plate suggestions.
+export const hardwareApi = {
+  list: (params) => unwrap(api.get('/hardware', { params })),
+  get: (id) => unwrap(api.get(`/hardware/${id}`)),
+  create: (body) => unwrap(api.post('/hardware', body)),
+  update: (id, body) => unwrap(api.put(`/hardware/${id}`, body)),
+  rotateKey: (id) => unwrap(api.post(`/hardware/${id}/rotate-key`)),
+  send: (id, body) => unwrap(api.post(`/hardware/${id}/commands`, body)),
+  command: (id) => unwrap(api.get(`/hardware/commands/${id}`)),
+  agentInfo: () => unwrap(api.get('/hardware/agent-package/info')),
+  // Saves gate-agent.zip (the agent with this server's address already in its config).
+  downloadAgent: async () => {
+    const res = await api.get('/hardware/agent-package', { responseType: 'blob' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(res.data)
+    link.download = 'gate-agent.zip'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(link.href)
+  },
+}
+
+export const anprApi = {
+  list: (params) => unwrap(api.get('/anpr', { params })),
+  dismiss: (id) => unwrap(api.post(`/anpr/${id}/dismiss`)),
+  // The live picture address of the camera at a gate ({ previewUrl, camera }; previewUrl is null when there is none).
+  preview: (params) => unwrap(api.get('/anpr/preview', { params })),
+  // Can this server read a plate from a photo? ({ photoReading, maxBytes })
+  options: () => unwrap(api.get('/anpr/options')),
+  // Sends a picture (the body is the picture itself); answers { detection, plate, confidence, reviewReasons, readable }.
+  read: (locationId, direction, blob, testPlate) =>
+    unwrap(api.post('/anpr/read', blob, { params: { locationId, direction, ...(testPlate ? { testPlate } : {}) }, headers: { 'Content-Type': blob.type }, timeout: 30000 })),
+}
+
 export const dashboardApi = {
   get: (params) => unwrap(api.get('/dashboard', { params })),
 }
 
-// Downloads a CSV answer as a file. The request carries the login token, so
-// a plain link would not work.
-async function downloadCsv(url, params, fallbackName) {
-  const res = await api.get(url, { params: { ...params, format: 'csv' }, responseType: 'blob' })
+// Downloads a file answer (CSV, Excel or PDF). The request carries the login
+// token, so a plain link would not work.
+async function downloadFile(url, params, fallbackName, format = 'csv') {
+  const res = await api.get(url, { params: { ...params, format }, responseType: 'blob' })
   const match = /filename="([^"]+)"/.exec(res.headers['content-disposition'] || '')
   const link = document.createElement('a')
   link.href = URL.createObjectURL(res.data)
@@ -129,14 +286,39 @@ async function downloadCsv(url, params, fallbackName) {
   URL.revokeObjectURL(link.href)
 }
 
+export const operatorApi = {
+  summary: (params) => unwrap(api.get('/operator/summary', { params })),
+  collection: (params) => unwrap(api.get('/operator/collection', { params })),
+  entries: (params) => unwrap(api.get('/operator/entries', { params })),
+  exits: (params) => unwrap(api.get('/operator/exits', { params })),
+  // kind: 'entries' | 'exits' | 'collection'; format: 'xlsx' | 'csv' | 'pdf'
+  download: (kind, params, format = 'xlsx') => downloadFile(`/operator/${kind}`, params, `${kind}.${format}`, format),
+}
+
+export const bookingApi = {
+  list: (params) => unwrap(api.get('/bookings', { params })),
+  create: (body) => unwrap(api.post('/bookings', body)),
+  cancel: (id, reason) => unwrap(api.post(`/bookings/${id}/cancel`, reason ? { reason } : {})),
+}
+
+// The public booking page: no login, and the booking's secret token travels as ?token=.
+export const publicBookingApi = {
+  locations: () => unwrap(api.get('/public/booking/locations')),
+  location: (id) => unwrap(api.get(`/public/booking/locations/${id}`)),
+  create: (body) => unwrap(api.post('/public/booking/bookings', body)),
+  get: (id, token) => unwrap(api.get(`/public/booking/bookings/${id}`, { params: { token } })),
+  simulate: (id, token, outcome) => unwrap(api.post(`/public/booking/bookings/${id}/simulate`, { outcome }, { params: { token } })),
+}
+
 export const reportApi = {
   get: (name, params) => unwrap(api.get(`/reports/${name}`, { params })),
-  download: (name, params) => downloadCsv(`/reports/${name}`, params, `${name}.csv`),
+  // format: 'csv' | 'xlsx' | 'pdf'
+  download: (name, params, format = 'csv') => downloadFile(`/reports/${name}`, params, `${name}.${format}`, format),
 }
 
 export const auditApi = {
   list: (params) => unwrap(api.get('/audit-logs', { params })),
-  download: (params) => downloadCsv('/audit-logs', params, 'audit.csv'),
+  download: (params) => downloadFile('/audit-logs', params, 'audit.csv'),
 }
 
 export const notificationApi = {
@@ -157,6 +339,19 @@ export const faqApi = {
   create: (body) => unwrap(api.post('/faq', body)),
   update: (id, body) => unwrap(api.put(`/faq/${id}`, body)),
   remove: (id) => unwrap(api.delete(`/faq/${id}`)),
+}
+
+export const testimonialApi = {
+  list: () => unwrap(api.get('/testimonials')),
+  listAll: () => unwrap(api.get('/testimonials/all')),
+  create: (body) => unwrap(api.post('/testimonials', body)),
+  update: (id, body) => unwrap(api.put(`/testimonials/${id}`, body)),
+  remove: (id) => unwrap(api.delete(`/testimonials/${id}`)),
+}
+
+// Real figures for the home page (open locations, vehicles in the last 30 days).
+export const statsApi = {
+  get: () => unwrap(api.get('/public/stats')),
 }
 
 export const blogApi = {

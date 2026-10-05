@@ -1,13 +1,15 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { parkingApi, paymentApi, shiftApi } from '../../services/api'
+import { operatorApi, parkingApi, paymentApi, shiftApi } from '../../services/api'
 import { useAuth } from '../../hooks/useAuth'
 import { useMyLocations } from '../../hooks/useMyLocations'
 import { errorMessage } from '../../utils/errors'
 import { PAYMENT_LABELS, SESSION_STATUS, duration, money, timeOnly, todayInput } from '../../utils/format'
 import { Alert, Badge, Button, Card, Field, PageLoader, Select } from '../../components/ui'
 import ShiftPanel from '../../components/operator/ShiftPanel'
+import CollectionByType from '../../components/operator/CollectionByType'
+import MoneyTiles from '../../components/operator/MoneyTiles'
 
 // Lets an admin give the money of a paid exit back.
 function RefundButton({ session }) {
@@ -97,6 +99,12 @@ export default function Collection() {
     queryFn: () => parkingApi.exits(params),
     enabled: Boolean(filters.date),
   })
+  const byType = useQuery({
+    queryKey: ['operator-collection', params],
+    queryFn: () => operatorApi.collection(params),
+    enabled: Boolean(filters.date),
+  })
+  const download = useMutation({ mutationFn: (format) => operatorApi.download('collection', params, format) })
   const c = collection.data
 
   return (
@@ -135,6 +143,7 @@ export default function Collection() {
       ) : (
         c && (
           <>
+            <MoneyTiles totals={byType.data?.totals} />
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
                 <p className="text-sm text-slate-500">Total collected</p>
@@ -143,6 +152,11 @@ export default function Collection() {
               <div className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
                 <p className="text-sm text-slate-500">Payments</p>
                 <p className="mt-1 text-2xl font-bold text-slate-900">{c.total.count}</p>
+                {c.passes?.count > 0 && (
+                  <p className="mt-1 text-xs text-slate-500">
+                    of which pass sales: {c.passes.count} ({money(c.passes.amount)})
+                  </p>
+                )}
               </div>
               <div className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
                 <p className="text-sm text-slate-500">Net after refunds</p>
@@ -152,6 +166,27 @@ export default function Collection() {
                 </p>
               </div>
             </div>
+
+            <Card
+              title="Collection List"
+              action={
+                <div className="no-print flex gap-2">
+                  <Button variant="secondary" loading={download.isPending} onClick={() => download.mutate('xlsx')}>Download Excel</Button>
+                  <Button variant="secondary" onClick={() => window.print()}>Print</Button>
+                </div>
+              }
+            >
+              {byType.error && <Alert>{errorMessage(byType.error)}</Alert>}
+              {download.error && <Alert>{errorMessage(download.error)}</Alert>}
+              {byType.isLoading ? <PageLoader /> : <CollectionByType rows={byType.data?.rows} totals={byType.data?.totals} />}
+            </Card>
+
+            {c.walletTopups?.count > 0 && (
+              <Alert type="info">
+                Money put into wallets today: {money(c.walletTopups.amount)} ({c.walletTopups.byMethod.map((m) => `${PAYMENT_LABELS[m.key] || m.key} ${money(m.amount)}`).join(', ')}).
+                It is not counted in the totals above: it becomes income when a parking fee is paid from a wallet.
+              </Alert>
+            )}
 
             <div className="grid gap-6 md:grid-cols-2">
               <Card title="By payment method">

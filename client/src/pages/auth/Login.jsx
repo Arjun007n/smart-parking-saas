@@ -23,7 +23,7 @@ export default function Login() {
     setError('')
     try {
       const session = await login(values)
-      navigate(location.state?.from || homePathFor(session.user.role), { replace: true })
+      navigate(location.state?.from || homePathFor(session.user, session.permissions), { replace: true })
     } catch (err) {
       setError(errorMessage(err))
     }

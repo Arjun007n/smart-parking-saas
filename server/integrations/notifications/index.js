@@ -16,10 +16,9 @@ const notConfigured = (name) => ({
   },
 });
 
+// Email is sent by services/emailService.js through integrations/email.
+// SMS and WhatsApp are sent by services/messageService.js through integrations/messaging.
 const channels = {
-  email: notConfigured("email"),
-  sms: notConfigured("sms"),
-  whatsapp: notConfigured("whatsapp"),
   push: notConfigured("push"),
 };
 

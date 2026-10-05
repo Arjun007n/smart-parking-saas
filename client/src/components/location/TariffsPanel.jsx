@@ -1,14 +1,34 @@
 import { useState } from 'react'
-import { useFieldArray, useForm } from 'react-hook-form'
+import { useFieldArray, useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { tariffApi } from '../../services/api'
 import { feePreviewSchema, tariffSchema, toOptionalNumber } from '../../validators/schemas'
 import { errorMessage } from '../../utils/errors'
-import { DAY_LABELS, VEHICLE_LABELS, duration, money } from '../../utils/format'
+import { DAY_LABELS, VEHICLE_LABELS, dateOnly, duration, money } from '../../utils/format'
 import { Alert, Badge, Button, Checkbox, Field, PageLoader, Select } from '../ui'
 
+const KIND_LABELS = { STANDARD: 'Everyday', EVENT: 'Event (match, concert, festival)', AIRPORT: 'Airport / long stay' }
+
+// A <input type="date"> value (YYYY-MM-DD) in the browser's local time.
+const toDateInput = (value) => {
+  if (!value) return ''
+  const d = new Date(value)
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
 const NEW_TARIFF = {
+  kind: 'STANDARD',
+  eventName: '',
+  priority: 0,
+  startTime: '',
+  endTime: '',
+  validFrom: '',
+  validTo: '',
+  flatFee: undefined,
+  longStayAfterMinutes: undefined,
+  longStayDailyRate: undefined,
   name: '',
   vehicleType: 'CAR',
   gracePeriodMinutes: 10,
@@ -24,6 +44,16 @@ const NEW_TARIFF = {
 }
 
 const toForm = (t) => ({
+  kind: t.kind || 'STANDARD',
+  eventName: t.eventName || '',
+  priority: t.priority || 0,
+  startTime: t.startTime || '',
+  endTime: t.endTime || '',
+  validFrom: toDateInput(t.validFrom),
+  validTo: toDateInput(t.validTo),
+  flatFee: t.flatFee ?? undefined,
+  longStayAfterMinutes: t.longStayAfterMinutes ?? undefined,
+  longStayDailyRate: t.longStayDailyRate ?? undefined,
   name: t.name,
   vehicleType: t.vehicleType,
   gracePeriodMinutes: t.gracePeriodMinutes,
@@ -38,17 +68,31 @@ const toForm = (t) => ({
   daysOfWeek: t.daysOfWeek.map(String),
 })
 
-// Optional amounts are sent as null when empty so the server clears them.
-const toBody = ({ vehicleType, daysOfWeek, maxDailyFee, overnightFee, lostTicketFee, ...rest }, isEdit) => ({
-  ...rest,
-  ...(isEdit ? {} : { vehicleType }),
-  daysOfWeek: daysOfWeek.map(Number).sort(),
-  ...Object.fromEntries(
-    Object.entries({ maxDailyFee, overnightFee, lostTicketFee })
-      .filter(([, value]) => value !== undefined || isEdit)
-      .map(([key, value]) => [key, value ?? null]),
-  ),
-})
+// Optional values are sent as null when empty so the server clears them.
+const toBody = (values, isEdit) => {
+  const {
+    vehicleType, daysOfWeek, maxDailyFee, overnightFee, lostTicketFee, flatFee, longStayAfterMinutes,
+    longStayDailyRate, eventName, startTime, endTime, validFrom, validTo, ...rest
+  } = values
+  const optional = {
+    maxDailyFee, overnightFee, lostTicketFee, flatFee, longStayAfterMinutes, longStayDailyRate,
+    eventName: values.kind === 'EVENT' ? eventName?.trim() || undefined : undefined,
+    startTime: startTime || undefined,
+    endTime: endTime || undefined,
+    validFrom: validFrom ? new Date(`${validFrom}T00:00:00`).toISOString() : undefined,
+    validTo: validTo ? new Date(`${validTo}T23:59:59`).toISOString() : undefined,
+  }
+  return {
+    ...rest,
+    ...(isEdit ? {} : { vehicleType }),
+    daysOfWeek: daysOfWeek.map(Number).sort(),
+    ...Object.fromEntries(
+      Object.entries(optional)
+        .filter(([, value]) => value !== undefined || isEdit)
+        .map(([key, value]) => [key, value ?? null]),
+    ),
+  }
+}
 
 function TariffForm({ locationId, tariff, onClose }) {
   const queryClient = useQueryClient()
@@ -60,6 +104,7 @@ function TariffForm({ locationId, tariff, onClose }) {
     formState: { errors },
   } = useForm({ resolver: zodResolver(tariffSchema), defaultValues: tariff ? toForm(tariff) : NEW_TARIFF })
   const slabs = useFieldArray({ control, name: 'slabs' })
+  const kind = useWatch({ control, name: 'kind' })
 
   const save = useMutation({
     mutationFn: (values) =>
@@ -84,6 +129,23 @@ function TariffForm({ locationId, tariff, onClose }) {
     >
       <h3 className="font-semibold text-slate-900">{isEdit ? `Edit “${tariff.name}”` : 'New tariff'}</h3>
       <Alert>{save.error && errorMessage(save.error)}</Alert>
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Select label="Kind of tariff" error={errors.kind?.message} {...register('kind')}>
+          {Object.entries(KIND_LABELS).map(([value, label]) => (
+            <option key={value} value={value}>{label}</option>
+          ))}
+        </Select>
+        {kind === 'EVENT' && (
+          <Field label="Event name" placeholder="Cricket match" error={errors.eventName?.message} {...register('eventName')} />
+        )}
+      </div>
+      {kind === 'EVENT' && (
+        <p className="-mt-2 text-xs text-slate-500">
+          An event tariff is used instead of the everyday and weekend tariffs on the days you choose below. Vehicles that
+          entered during the event are charged by it for the whole stay.
+        </p>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-3">
         <Field label="Tariff name" placeholder="Car standard" error={errors.name?.message} {...register('name')} />
@@ -181,6 +243,69 @@ function TariffForm({ locationId, tariff, onClose }) {
 
       <Checkbox label="Prices above already include tax" {...register('taxInclusive')} />
 
+      {(kind === 'EVENT' || kind === 'AIRPORT') && (
+        <div className="grid gap-4 sm:grid-cols-3">
+          {kind === 'EVENT' && (
+            <Field
+              label="Flat fee for the whole stay (₹)"
+              type="number"
+              min="0"
+              step="0.01"
+              hint="Replaces the slabs. Leave empty to use the slabs above"
+              error={errors.flatFee?.message}
+              {...register('flatFee', optional)}
+            />
+          )}
+          {kind === 'AIRPORT' && (
+            <>
+              <Field
+                label="Long stay starts after (minutes)"
+                type="number"
+                min="1"
+                hint="Example: 480 = after 8 hours"
+                error={errors.longStayAfterMinutes?.message}
+                {...register('longStayAfterMinutes', optional)}
+              />
+              <Field
+                label="Long stay rate per 24 hours (₹)"
+                type="number"
+                min="0"
+                step="0.01"
+                hint="For every started day, instead of the slabs"
+                error={errors.longStayDailyRate?.message}
+                {...register('longStayDailyRate', optional)}
+              />
+            </>
+          )}
+        </div>
+      )}
+
+      <fieldset>
+        <legend className="mb-2 text-sm font-semibold text-slate-900">
+          {kind === 'EVENT' ? 'Event dates' : 'Only between these dates (optional)'}
+        </legend>
+        <div className="grid gap-4 sm:grid-cols-4">
+          <Field label="First day" type="date" error={errors.validFrom?.message} {...register('validFrom')} />
+          <Field label="Last day" type="date" error={errors.validTo?.message} {...register('validTo')} />
+          <Field label="Entry from (time)" type="time" hint="Optional" error={errors.startTime?.message} {...register('startTime')} />
+          <Field label="Entry until (time)" type="time" hint="Can pass midnight, e.g. 22:00 to 06:00" error={errors.endTime?.message} {...register('endTime')} />
+        </div>
+        <p className="mt-1 text-xs text-slate-500">
+          The times are checked against when the vehicle entered. Leave everything empty for a tariff that always applies.
+        </p>
+      </fieldset>
+
+      <Field
+        className="sm:w-60"
+        label="Priority (0 to 100)"
+        type="number"
+        min="0"
+        max="100"
+        hint="Leave at 0. A higher number wins when two tariffs apply"
+        error={errors.priority?.message}
+        {...register('priority', number)}
+      />
+
       <fieldset>
         <legend className="mb-2 text-sm font-semibold text-slate-900">Applies on</legend>
         <div className="flex flex-wrap gap-x-5 gap-y-2">
@@ -217,9 +342,12 @@ function TariffCard({ tariff, onEdit }) {
   })
 
   const rules = [
+    tariff.eventName && `event: ${tariff.eventName}`,
     tariff.gracePeriodMinutes > 0 && `${tariff.gracePeriodMinutes} min free`,
-    ...tariff.slabs.map((s) => `up to ${duration(s.uptoMinutes)}: ${money(s.rate)}`),
-    tariff.additionalPerHour > 0 && `then ${money(tariff.additionalPerHour)} per hour`,
+    tariff.flatFee != null && `flat ${money(tariff.flatFee)} per stay`,
+    ...(tariff.flatFee != null ? [] : tariff.slabs.map((s) => `up to ${duration(s.uptoMinutes)}: ${money(s.rate)}`)),
+    tariff.longStayDailyRate != null && `after ${duration(tariff.longStayAfterMinutes)}: ${money(tariff.longStayDailyRate)} per 24 h`,
+    tariff.flatFee == null && tariff.additionalPerHour > 0 && `then ${money(tariff.additionalPerHour)} per hour`,
     tariff.maxDailyFee != null && `max ${money(tariff.maxDailyFee)} per 24 h`,
     tariff.overnightFee > 0 && `overnight +${money(tariff.overnightFee)}`,
     tariff.lostTicketFee > 0 && `lost ticket +${money(tariff.lostTicketFee)}`,
@@ -233,6 +361,11 @@ function TariffCard({ tariff, onEdit }) {
           <h3 className="font-semibold text-slate-900">{tariff.name}</h3>
           <Badge tone="blue">{VEHICLE_LABELS[tariff.vehicleType]}</Badge>
           <Badge tone={tariff.isActive ? 'green' : 'slate'}>{tariff.isActive ? 'Active' : 'Off'}</Badge>
+          {tariff.kind && tariff.kind !== 'STANDARD' && <Badge tone="amber">{tariff.kind === 'EVENT' ? 'Event' : 'Airport'}</Badge>}
+          {(tariff.validFrom || tariff.validTo) && (
+            <Badge>{dateOnly(tariff.validFrom)} to {dateOnly(tariff.validTo)}</Badge>
+          )}
+          {tariff.startTime && tariff.endTime && <Badge>{tariff.startTime} to {tariff.endTime}</Badge>}
           {tariff.daysOfWeek.length > 0 && (
             <Badge>{tariff.daysOfWeek.map((d) => DAY_LABELS[d]).join(', ')} only</Badge>
           )}

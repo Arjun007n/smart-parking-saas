@@ -12,9 +12,34 @@ const authLimiter = rateLimit({
   message: "Too many attempts. Please try again in a few minutes.",
 });
 
+// Logins get a higher limit: many operators of one site share an IP address
+// and log in at shift change. Guessing one account is stopped by the
+// per-account lock in services/loginGuard.js.
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: () => env.authRateLimitMax * 5,
+  message: "Too many login attempts from this network. Please try again in a few minutes.",
+});
+
 const password = { type: "string", required: true, min: 8, max: 72 };
 const email = { type: "email", required: true };
 
+const mobile = { type: "string", required: true, max: 20, pattern: /^[0-9+\-\s()]{6,20}$/, message: "must be a phone number" };
+// Text messages cost money: a tighter limit than the other sign-in calls.
+const otpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: "Too many code requests. Please try again in a few minutes.",
+});
+
+router.get("/signup-options", controller.signupOptions);
+router.post("/otp/send", otpLimiter, validateBody({ phone: mobile }), controller.sendOtp);
+router.post(
+  "/otp/verify",
+  otpLimiter,
+  validateBody({ phone: mobile, code: { type: "string", required: true, min: 4, max: 8, pattern: /^[0-9]+$/, message: "must be the digits of the code" } }),
+  controller.verifyOtp
+);
 router.post(
   "/register",
   authLimiter,
@@ -23,13 +48,14 @@ router.post(
     name: { type: "string", required: true, min: 2, max: 100 },
     email,
     phone: { type: "string", max: 20 },
+    phoneToken: { type: "string", max: 1000 },
     password,
   }),
   controller.register
 );
 router.post(
   "/login",
-  authLimiter,
+  loginLimiter,
   validateBody({ email, password: { type: "string", required: true, max: 72 } }),
   controller.login
 );
@@ -41,6 +67,31 @@ router.post(
   controller.resetPassword
 );
 router.post("/logout", protect, controller.logout);
+router.post(
+  "/change-password",
+  authLimiter,
+  protect,
+  validateBody({ currentPassword: { type: "string", required: true, max: 72 }, newPassword: password }),
+  controller.changePassword
+);
 router.get("/me", protect, controller.me);
+router.put(
+  "/preferences",
+  protect,
+  validateBody({
+    emailAlerts: { type: "string", enum: ["OFF", "CRITICAL", "IMPORTANT", "ALL"] },
+    phoneAlerts: { type: "string", enum: ["OFF", "CRITICAL", "IMPORTANT", "ALL"] },
+  }),
+  controller.updatePreferences
+);
+router.put(
+  "/profile",
+  protect,
+  validateBody({
+    name: { type: "string", required: true, min: 2, max: 100 },
+    phone: { type: "string", max: 20, pattern: /^[0-9+\-\s()]{6,20}$/, message: "must be a phone number" },
+  }),
+  controller.updateProfile
+);
 
 module.exports = router;

@@ -1,0 +1,14 @@
+{
+  "name": "gate-agent",
+  "version": "1.0.0",
+  "description": "Runs at a parking location. Connects barriers, printers, ANPR cameras, RFID and FASTag readers and CCTV cameras to the Smart Parking cloud API.",
+  "main": "agent.js",
+  "scripts": {
+    "start": "node agent.js",
+    "simulate": "node simulate.js",
+    "test": "node --test tests/agent.test.js tests/wake.test.js"
+  },
+  "license": "ISC",
+  "type": "commonjs",
+  "engines": { "node": ">=20" }
+}

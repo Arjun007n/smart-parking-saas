@@ -1,10 +1,12 @@
 import { useFieldArray, useForm, useWatch } from 'react-hook-form'
+import LocationPicker from '../maps/LocationPicker'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { locationApi } from '../../services/api'
 import { locationDetailsSchema } from '../../validators/schemas'
 import { errorMessage } from '../../utils/errors'
 import { Alert, Button, Checkbox, Field, Select } from '../ui'
+import { CAPACITY_FIELDS, VEHICLE_KEYS } from '../../utils/format'
 
 const toForm = (l) => ({
   name: l.name,
@@ -12,6 +14,8 @@ const toForm = (l) => ({
   city: l.address.city || '',
   state: l.address.state || '',
   pincode: l.address.pincode || '',
+  lat: Number.isFinite(l.coordinates?.lat) ? String(l.coordinates.lat) : '',
+  lng: Number.isFinite(l.coordinates?.lng) ? String(l.coordinates.lng) : '',
   contactName: l.contact?.name || '',
   contactPhone: l.contact?.phone || '',
   is24x7: l.operatingHours.is24x7,
@@ -20,22 +24,34 @@ const toForm = (l) => ({
   car: l.capacity.car,
   bike: l.capacity.bike,
   heavy: l.capacity.heavy,
+  taxi: l.capacity.taxi || 0,
+  tempo: l.capacity.tempo || 0,
   zones: l.zones.join(', '),
-  gates: l.gates.map((g) => ({ name: g.name, type: g.type })),
+  onlineEnabled: Boolean(l.onlineBooking?.enabled),
+  onlineNote: l.onlineBooking?.note || '',
+  fee: Object.fromEntries(VEHICLE_KEYS.map((key) => [key, l.onlineBooking?.fees?.[key] || 0])),
+  gates: l.gates.map((g) => ({
+    name: g.name, type: g.type, laneCode: g.laneCode || '', plazaId: g.plazaId || '', fastagLaneId: g.fastagLaneId || '',
+  })),
 })
 
 const toBody = (v) => {
-  const capacity = { car: v.car, bike: v.bike, heavy: v.heavy }
+  const capacity = { car: v.car, bike: v.bike, heavy: v.heavy, taxi: v.taxi, tempo: v.tempo }
   return {
     name: v.name,
     address: { line1: v.line1, city: v.city, state: v.state, pincode: v.pincode },
+    // Both numbers, or neither: an empty pair removes the saved position.
+    coordinates: v.lat !== '' && v.lng !== '' && v.lat !== undefined && v.lng !== undefined
+      ? { lat: Number(v.lat), lng: Number(v.lng) }
+      : { clear: true },
     contact: { name: v.contactName, phone: v.contactPhone },
     operatingHours: { is24x7: v.is24x7, open: v.open, close: v.close },
     capacity,
     // A vehicle type is accepted when it has capacity.
-    vehicleTypes: ['car', 'bike', 'heavy'].filter((k) => capacity[k] > 0).map((k) => k.toUpperCase()),
+    vehicleTypes: VEHICLE_KEYS.filter((k) => capacity[k] > 0).map((k) => k.toUpperCase()),
     zones: (v.zones || '').split(',').map((z) => z.trim()).filter(Boolean),
     gates: v.gates,
+    onlineBooking: { enabled: v.onlineEnabled, note: v.onlineNote || '', fees: v.fee },
   }
 }
 
@@ -45,10 +61,13 @@ export default function DetailsForm({ location }) {
     register,
     control,
     handleSubmit,
+    setValue,
     formState: { errors },
   } = useForm({ resolver: zodResolver(locationDetailsSchema), defaultValues: toForm(location) })
   const gates = useFieldArray({ control, name: 'gates' })
   const is24x7 = useWatch({ control, name: 'is24x7' })
+  const onlineEnabled = useWatch({ control, name: 'onlineEnabled' })
+  const [lat, lng, line1, city, state, pincode] = useWatch({ control, name: ['lat', 'lng', 'line1', 'city', 'state', 'pincode'] })
 
   const save = useMutation({
     mutationFn: (values) => locationApi.update(location._id, toBody(values)),
@@ -78,6 +97,20 @@ export default function DetailsForm({ location }) {
       </fieldset>
 
       <fieldset>
+        <legend className="mb-3 text-sm font-semibold text-slate-900">Position on the map</legend>
+        <LocationPicker
+          lat={lat || ''}
+          lng={lng || ''}
+          addressText={[line1, city, state, pincode].filter(Boolean).join(', ')}
+          errors={{ lat: errors.lat?.message, lng: errors.lng?.message }}
+          onChange={(p) => {
+            setValue('lat', p.lat, { shouldDirty: true, shouldValidate: true })
+            setValue('lng', p.lng, { shouldDirty: true, shouldValidate: true })
+          }}
+        />
+      </fieldset>
+
+      <fieldset>
         <legend className="mb-3 text-sm font-semibold text-slate-900">Operating hours</legend>
         <Checkbox label="Open 24 hours" {...register('is24x7')} />
         {!is24x7 && (
@@ -93,7 +126,9 @@ export default function DetailsForm({ location }) {
         <div className="grid gap-4 sm:grid-cols-3">
           <Field label="Cars" type="number" min="0" error={errors.car?.message} {...register('car', number)} />
           <Field label="Bikes" type="number" min="0" error={errors.bike?.message} {...register('bike', number)} />
-          <Field label="Heavy vehicles" type="number" min="0" error={errors.heavy?.message} {...register('heavy', number)} />
+          <Field label="Coach / Bus / Truck" type="number" min="0" error={errors.heavy?.message} {...register('heavy', number)} />
+          <Field label="Taxis" type="number" min="0" error={errors.taxi?.message} {...register('taxi', number)} />
+          <Field label="Tempo / SUV / Mini bus" type="number" min="0" error={errors.tempo?.message} {...register('tempo', number)} />
         </div>
       </fieldset>
 
@@ -123,12 +158,35 @@ export default function DetailsForm({ location }) {
               <Button type="button" variant="danger" onClick={() => gates.remove(i)}>
                 Remove
               </Button>
+              <div className="grid w-full gap-3 sm:grid-cols-3">
+                <Field label="Lane code" hint="Optional, e.g. L1" error={errors.gates?.[i]?.laneCode?.message} {...register(`gates.${i}.laneCode`)} />
+                <Field label="Plaza ID" hint="Optional" error={errors.gates?.[i]?.plazaId?.message} {...register(`gates.${i}.plazaId`)} />
+                <Field label="FASTag lane ID" hint="Optional, from your FASTag provider" error={errors.gates?.[i]?.fastagLaneId?.message} {...register(`gates.${i}.fastagLaneId`)} />
+              </div>
             </div>
           ))}
-          <Button type="button" variant="secondary" onClick={() => gates.append({ name: '', type: 'BOTH' })}>
+          <Button type="button" variant="secondary" onClick={() => gates.append({ name: '', type: 'BOTH', laneCode: '', plazaId: '', fastagLaneId: '' })}>
             Add gate
           </Button>
         </div>
+      </fieldset>
+
+      <fieldset>
+        <legend className="mb-1 text-sm font-semibold text-slate-900">Online booking</legend>
+        <p className="mb-3 text-sm text-slate-600">
+          Customers can book a space on the public page (<span className="font-mono">/book</span>) and pay a booking fee. The fee is set against the parking charge when the vehicle arrives. A fee of 0 means that class books free. Paid fees need an online payment gateway to be set up.
+        </p>
+        <Checkbox label="Take online bookings at this location" {...register('onlineEnabled')} />
+        {onlineEnabled && (
+          <div className="mt-3 space-y-4">
+            <div className="grid gap-4 sm:grid-cols-3">
+              {CAPACITY_FIELDS.map(([label, key]) => (
+                <Field key={key} label={`${label}: booking fee (₹)`} type="number" min="0" step="1" error={errors.fee?.[key]?.message} {...register(`fee.${key}`, number)} />
+              ))}
+            </div>
+            <Field label="Note shown to customers (optional)" hint="For example: which gate to use" error={errors.onlineNote?.message} {...register('onlineNote')} />
+          </div>
+        )}
       </fieldset>
 
       <Button type="submit" loading={save.isPending}>

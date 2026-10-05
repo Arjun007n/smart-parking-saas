@@ -7,7 +7,10 @@
 //  3. Within the grace period          -> nothing to pay (not for lost tickets).
 //  4. Base fee from slabs. A slab's rate is the TOTAL fee for a stay up to
 //     that many minutes. Past the last slab, each started hour adds
-//     `additionalPerHour`.
+//     `additionalPerHour`. Two special cases come first:
+//       - `flatFee`: one fee for the whole stay (events).
+//       - long stay: a stay longer than `longStayAfterMinutes` pays
+//         `longStayDailyRate` for every started 24 hours (airports).
 //  5. `maxDailyFee` caps the base fee for every 24 hours of the stay.
 //  6. `minimumFee` is the least a chargeable stay pays.
 //  7. `overnightFee` is added once for every midnight the stay crosses.
@@ -60,8 +63,14 @@ const slabFee = (tariff, minutes) => {
   return last.rate + Math.ceil((minutes - last.uptoMinutes) / 60) * perHour;
 };
 
+const has = (value) => value !== undefined && value !== null;
+
 // Base fee with the daily cap applied to each 24-hour block of the stay.
 const baseFee = (tariff, minutes) => {
+  if (has(tariff.flatFee)) return tariff.flatFee;
+  if (has(tariff.longStayAfterMinutes) && has(tariff.longStayDailyRate) && minutes > tariff.longStayAfterMinutes) {
+    return Math.ceil(minutes / DAY_MINUTES) * tariff.longStayDailyRate;
+  }
   const cap = tariff.maxDailyFee;
   if (cap === undefined || cap === null) return slabFee(tariff, minutes);
 
@@ -138,29 +147,45 @@ const calculateFee = (tariff, options = {}) => {
   };
 };
 
+// "HH:MM" as minutes since midnight.
+const clockMinutes = (text) => {
+  const [h, m] = String(text).split(":").map(Number);
+  return h * 60 + m;
+};
+
 // True when the tariff may be used for a stay that starts at `at`.
 const appliesAt = (tariff, at, utcOffsetMinutes = DEFAULT_UTC_OFFSET()) => {
   if (tariff.isActive === false) return false;
   if (tariff.validFrom && at < new Date(tariff.validFrom)) return false;
   if (tariff.validTo && at > new Date(tariff.validTo)) return false;
+  const local = new Date(at.getTime() + utcOffsetMinutes * MINUTE);
   const days = tariff.daysOfWeek || [];
-  if (days.length) {
-    const localDay = new Date(at.getTime() + utcOffsetMinutes * MINUTE).getUTCDay();
-    if (!days.includes(localDay)) return false;
+  if (days.length && !days.includes(local.getUTCDay())) return false;
+  if (tariff.startTime && tariff.endTime) {
+    const now = local.getUTCHours() * 60 + local.getUTCMinutes();
+    const from = clockMinutes(tariff.startTime);
+    const to = clockMinutes(tariff.endTime);
+    // A window such as 22:00 to 06:00 crosses midnight.
+    const inside = from < to ? now >= from && now < to : now >= from || now < to;
+    if (!inside) return false;
   }
   return true;
 };
 
 // Picks the tariff for a stay from the candidates of one location and
-// vehicle type. A tariff limited to certain days or dates beats a general
-// one; between equals, the most recently created wins.
+// vehicle type. Order of preference: higher `priority`; then an EVENT tariff
+// over the others (so a match-day rate beats the weekend rate); then one
+// limited to days, dates or a time window over a general one; between
+// equals, the most recently created wins.
 const selectTariff = (tariffs, entryTime, utcOffsetMinutes) => {
   const at = toDate(entryTime, "entry time");
   const specificity = (t) =>
-    ((t.daysOfWeek || []).length ? 2 : 0) + (t.validFrom || t.validTo ? 1 : 0);
+    ((t.daysOfWeek || []).length ? 2 : 0) + (t.validFrom || t.validTo ? 1 : 0) + (t.startTime && t.endTime ? 1 : 0);
   const usable = tariffs.filter((t) => appliesAt(t, at, utcOffsetMinutes));
   usable.sort(
     (a, b) =>
+      (b.priority || 0) - (a.priority || 0) ||
+      Number(b.kind === "EVENT") - Number(a.kind === "EVENT") ||
       specificity(b) - specificity(a) ||
       new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
   );
@@ -180,7 +205,29 @@ const slabProblem = (slabs = []) => {
   return null;
 };
 
+// Rules a tariff must follow before it is saved. Returns a message or null.
+const tariffProblem = (t) => {
+  const slabs = slabProblem(t.slabs);
+  if (slabs) return slabs;
+  if (!(t.slabs || []).length && !t.additionalPerHour && !has(t.flatFee)) {
+    return "Add at least one slab, an hourly rate or a flat fee";
+  }
+  if (t.validFrom && t.validTo && new Date(t.validTo) < new Date(t.validFrom)) {
+    return "Valid-to date must be after valid-from date";
+  }
+  if (Boolean(t.startTime) !== Boolean(t.endTime)) return "Set both the start and the end time, or neither";
+  if (t.startTime && t.startTime === t.endTime) return "The start and end time cannot be the same";
+  if (has(t.longStayAfterMinutes) !== has(t.longStayDailyRate)) {
+    return "Long stay needs both the number of minutes and the daily rate";
+  }
+  if (t.kind === "EVENT") {
+    if (!t.eventName) return "Give the event a name";
+    if (!t.validFrom || !t.validTo) return "An event needs a start and an end date";
+  }
+  return null;
+};
+
 module.exports = {
   calculateFee, selectTariff, appliesAt, slabProblem,
-  durationMinutes, midnightsCrossed, slabFee, baseFee,
+  durationMinutes, midnightsCrossed, slabFee, baseFee, tariffProblem,
 };

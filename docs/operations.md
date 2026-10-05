@@ -46,7 +46,9 @@ difference    = counted cash - expected cash     (negative = short)
 
 ## Reports
 
-Revenue, Collection, Vehicle history, Occupancy and Operators, each with date,
+Revenue, Collection, Vehicle history, Occupancy and Operators, plus (Phase 2, see
+`docs/phase2.md`) Peak hours, Occupancy trend, Exceptions, Payments, Stay durations, Passes and
+Hardware, each with date,
 location and (where it applies) operator filters. Every report downloads as
 CSV with the same filters. Text that a spreadsheet would treat as a formula is
 neutralised in the file.
@@ -71,7 +73,7 @@ has no route to change them. Company admins can read and export them.
 | Payment failed | The gateway reports a failed online payment | Admins of that location |
 | Cash difference | A shift closes with counted cash different from expected | Admins of that location |
 | Subscription | Trial ends within 7 days, or payment overdue (once per day) | All admins of the company |
-| Hardware offline | Defined, but not raised until hardware is connected | - |
+| Hardware offline | A monitored device stopped reporting (default after 2 minutes). Critical for barrier and camera | Check the gate agent (`docs/hardware.md`); work by hand meanwhile |
 
 Notifications are kept for 90 days. Each admin has their own read/unread state.
 

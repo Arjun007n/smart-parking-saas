@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { blogApi, faqApi, leadApi } from '../../services/api'
-import { faqSchema, postSchema } from '../../validators/schemas'
+import { blogApi, faqApi, leadApi, testimonialApi } from '../../services/api'
+import { faqSchema, postSchema, testimonialSchema } from '../../validators/schemas'
 import { errorMessage } from '../../utils/errors'
 import { dateTime } from '../../utils/format'
 import { Alert, Badge, Button, Card, Checkbox, Field, PageLoader, Select, Textarea } from '../../components/ui'
@@ -182,6 +182,100 @@ function Faqs() {
   )
 }
 
+// --------------------------------------------------------- testimonials ----
+
+const NEW_TESTIMONIAL = { quote: '', name: '', role: '', company: '', order: 0, isPublished: true }
+
+function TestimonialForm({ item, onClose }) {
+  const queryClient = useQueryClient()
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+  } = useForm({
+    resolver: zodResolver(testimonialSchema),
+    defaultValues: item
+      ? { quote: item.quote, name: item.name, role: item.role || '', company: item.company || '', order: item.order, isPublished: item.isPublished }
+      : NEW_TESTIMONIAL,
+  })
+  const save = useMutation({
+    mutationFn: (values) => (item ? testimonialApi.update(item._id, values) : testimonialApi.create(values)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['testimonials-admin'] })
+      queryClient.invalidateQueries({ queryKey: ['testimonials'] })
+      onClose()
+    },
+  })
+
+  return (
+    <form onSubmit={handleSubmit((values) => save.mutate(values))} className="space-y-4 rounded-lg bg-slate-50 p-4" noValidate>
+      <h3 className="font-semibold text-slate-900">{item ? 'Edit testimonial' : 'New testimonial'}</h3>
+      <Alert>{save.error && errorMessage(save.error)}</Alert>
+      <Textarea label="What the customer said" rows={3} hint="Only add real quotes from real customers, with their permission." error={errors.quote?.message} {...register('quote')} />
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Field label="Name" error={errors.name?.message} {...register('name')} />
+        <Field label="Role (optional)" error={errors.role?.message} {...register('role')} />
+        <Field label="Company (optional)" error={errors.company?.message} {...register('company')} />
+      </div>
+      <Field label="Position" type="number" min="0" hint="Lower numbers come first" className="max-w-xs" error={errors.order?.message} {...register('order', { valueAsNumber: true })} />
+      <Checkbox label="Published (visible on the website)" {...register('isPublished')} />
+      <div className="flex gap-3">
+        <Button type="submit" loading={save.isPending}>Save</Button>
+        <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
+      </div>
+    </form>
+  )
+}
+
+function Testimonials() {
+  const queryClient = useQueryClient()
+  const [editing, setEditing] = useState(null)
+  const { data = [], isLoading, error } = useQuery({ queryKey: ['testimonials-admin'], queryFn: testimonialApi.listAll })
+  const remove = useMutation({
+    mutationFn: testimonialApi.remove,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['testimonials-admin'] })
+      queryClient.invalidateQueries({ queryKey: ['testimonials'] })
+    },
+  })
+
+  return (
+    <div className="space-y-4">
+      {editing ? (
+        <TestimonialForm key={editing === 'new' ? 'new' : editing._id} item={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />
+      ) : (
+        <Button onClick={() => setEditing('new')}>Add testimonial</Button>
+      )}
+      {error && <Alert>{errorMessage(error)}</Alert>}
+      {remove.error && <Alert>{errorMessage(remove.error)}</Alert>}
+      {isLoading ? (
+        <PageLoader />
+      ) : data.length === 0 ? (
+        <p className="text-sm text-slate-500">No testimonials yet. The section stays hidden on the home page until you publish one.</p>
+      ) : (
+        <ul className="divide-y divide-slate-200">
+          {data.map((item) => (
+            <li key={item._id} className="flex flex-wrap items-start justify-between gap-3 py-3">
+              <div className="min-w-0">
+                <p className="text-slate-900">“{item.quote}”</p>
+                <p className="text-xs text-slate-500">
+                  {item.name}{item.role ? `, ${item.role}` : ''}{item.company ? ` · ${item.company}` : ''} · position {item.order} · {item.isPublished ? 'Published' : 'Hidden'}
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="secondary" onClick={() => setEditing(item)}>Edit</Button>
+                <Button variant="danger" onClick={() => window.confirm('Delete this testimonial? This cannot be undone.') && remove.mutate(item._id)}>
+                  Delete
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 // ----------------------------------------------------------------- blog ----
 
 const NEW_POST = { title: '', category: 'General', tags: '', excerpt: '', body: '', isPublished: false }
@@ -290,6 +384,7 @@ const TABS = [
   { key: 'leads', label: 'Enquiries', Panel: Leads },
   { key: 'faq', label: 'FAQ', Panel: Faqs },
   { key: 'blog', label: 'Blog', Panel: Posts },
+  { key: 'testimonials', label: 'Testimonials', Panel: Testimonials },
 ]
 
 // Platform owner's screen for the public website: enquiries and content.

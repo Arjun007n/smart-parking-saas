@@ -83,7 +83,7 @@ export function Button({ children, loading, variant = 'primary', className = '',
   return (
     <button
       disabled={loading || props.disabled}
-      className={`rounded-lg px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${styles[variant]} ${className}`}
+      className={`sp-press rounded-lg px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${styles[variant]} ${className}`}
       {...props}
     >
       {loading ? 'Please wait…' : children}
@@ -109,7 +109,7 @@ export function Card({ title, action, children, className = '' }) {
   return (
     <section className={`rounded-xl bg-white p-6 shadow-sm ring-1 ring-slate-200 ${className}`}>
       {(title || action) && (
-        <div className="mb-4 flex items-center justify-between gap-4">
+        <div className="sp-card-head mb-4 flex items-center justify-between gap-4">
           <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
           {action}
         </div>
@@ -125,6 +125,7 @@ export function Badge({ children, tone = 'slate' }) {
     green: 'bg-green-100 text-green-800',
     red: 'bg-red-100 text-red-800',
     blue: 'bg-blue-100 text-blue-800',
+    amber: 'bg-amber-100 text-amber-800',
   }
   return (
     <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${tones[tone]}`}>

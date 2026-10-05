@@ -7,7 +7,10 @@ import { errorMessage } from '../../utils/errors'
 import { PAYMENT_LABELS, money, timeOnly } from '../../utils/format'
 import { ROLE_LABELS } from '../../utils/roles'
 import { Alert, Badge, Card, PageLoader, Select } from '../../components/ui'
+import { CardSkeleton, CountUp, FillBar, Reveal } from '../../components/motion'
+import { useLiveStatus } from '../../hooks/useLive'
 import { BarChartCard } from '../../components/charts'
+import TrendsPanel from '../../components/dashboard/TrendsPanel'
 
 const SEVERITY = {
   critical: { tone: 'red', label: 'Urgent' },
@@ -15,12 +18,14 @@ const SEVERITY = {
   info: { tone: 'blue', label: 'Note' },
 }
 
-function Stat({ label, value, hint }) {
+// A colourful tile. `gradient` is one of the gradient-* classes of the stylesheet.
+function Stat({ label, value, hint, bar, gradient = 'gradient-blue' }) {
   return (
-    <div className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
-      <p className="text-sm text-slate-500">{label}</p>
-      <p className="mt-1 text-2xl font-bold text-slate-900">{value}</p>
-      {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
+    <div className={`tile-gradient sp-lift !text-left !p-5 ${gradient}`}>
+      <p className="text-sm font-semibold opacity-90">{label}</p>
+      <p className="mt-1 text-2xl font-extrabold">{value}</p>
+      {bar}
+      {hint && <p className="mt-1 text-xs opacity-90">{hint}</p>}
     </div>
   )
 }
@@ -69,7 +74,8 @@ function Operations({ locations }) {
     refetchInterval: 20_000,
   })
 
-  if (isLoading) return <PageLoader />
+  const live = useLiveStatus() === 'live'
+  if (isLoading) return <CardSkeleton count={4} />
   if (error) return <Alert>{errorMessage(error)}</Alert>
 
   const hourly = d.traffic.hourly.map((h) => ({ ...h, label: `${String(h.hour).padStart(2, '0')}:00` }))
@@ -88,7 +94,7 @@ function Operations({ locations }) {
         ) : (
           <span />
         )}
-        <p className="text-xs text-slate-500">Updated {timeOnly(dataUpdatedAt)} · refreshes every 20 seconds</p>
+        <p className="text-xs text-slate-500">Updated {timeOnly(dataUpdatedAt)} · {live ? 'live' : 'refreshes every 20 seconds'}</p>
       </div>
 
       {d.alerts.length > 0 && (
@@ -106,17 +112,19 @@ function Operations({ locations }) {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat
+          gradient="gradient-green"
           label="Occupied now"
-          value={`${d.occupancy.totalOccupied} / ${d.occupancy.totalCapacity}`}
+          value={<><CountUp value={d.occupancy.totalOccupied} /> / {d.occupancy.totalCapacity}</>}
+          bar={<div className="mt-2"><FillBar used={d.occupancy.totalOccupied} total={d.occupancy.totalCapacity} label="Parking occupancy" /></div>}
           hint={`${d.occupancy.utilization}% full · ${d.occupancy.available} free${d.occupancy.reserved ? ` · ${d.occupancy.reserved} reserved slots` : ''}`}
         />
-        <Stat label="Entries today" value={d.traffic.entriesToday} hint={`${d.traffic.exitsToday} exits · ${d.traffic.currentVehicles} inside now`} />
-        <Stat label="Revenue today" value={money(d.revenue.today)} hint="After refunds" />
-        <Stat label="Revenue this month" value={money(d.revenue.month)} hint={`Last 7 days: ${money(d.revenue.week)}`} />
+        <Stat gradient="gradient-blue" label="Entries today" value={<CountUp value={d.traffic.entriesToday} />} hint={`${d.traffic.exitsToday} exits · ${d.traffic.currentVehicles} inside now`} />
+        <Stat gradient="gradient-purple" label="Revenue today" value={<CountUp value={d.revenue.today} format={money} />} hint="After refunds" />
+        <Stat gradient="gradient-dark" label="Revenue this month" value={<CountUp value={d.revenue.month} format={money} />} hint={`Last 7 days: ${money(d.revenue.week)}`} />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card title="Traffic today, by hour">
+        <Reveal><Card title="Traffic today, by hour">
           <BarChartCard
             data={hourly}
             xKey="label"
@@ -124,8 +132,8 @@ function Operations({ locations }) {
             series={[{ key: 'entries', label: 'Entries' }, { key: 'exits', label: 'Exits' }]}
             summary={`Entries and exits per hour today: ${d.traffic.entriesToday} entries and ${d.traffic.exitsToday} exits in total.`}
           />
-        </Card>
-        <Card title="Revenue, last 7 days">
+        </Card></Reveal>
+        <Reveal delay={100}><Card title="Revenue, last 7 days">
           <BarChartCard
             data={week}
             xKey="label"
@@ -134,8 +142,10 @@ function Operations({ locations }) {
             formatValue={(value) => money(value)}
             summary={`Revenue per day for the last 7 days: ${money(d.revenue.week)} in total.`}
           />
-        </Card>
+        </Card></Reveal>
       </div>
+
+      <TrendsPanel locationId={locationId} />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card title="Payments today">
@@ -152,7 +162,7 @@ function Operations({ locations }) {
               </thead>
               <tbody>
                 {d.revenue.byMethod.map((row) => (
-                  <tr key={row.method} className="border-t border-slate-200">
+                  <tr key={row.method} className="sp-row-in border-t border-slate-200">
                     <td className="py-2">{PAYMENT_LABELS[row.method] || row.method}</td>
                     <td className="py-2 text-right">{row.count}</td>
                     <td className="py-2 text-right font-medium">{money(row.amount)}</td>
@@ -174,7 +184,7 @@ function Operations({ locations }) {
             ].map(([label, value]) => (
               <div key={label} className="rounded-lg bg-slate-50 p-3">
                 <dt className="text-slate-500">{label}</dt>
-                <dd className="text-xl font-bold text-slate-900">{value}</dd>
+                <dd className="text-xl font-bold text-slate-900"><CountUp value={value} /></dd>
               </div>
             ))}
           </dl>
@@ -198,7 +208,7 @@ function Operations({ locations }) {
               </thead>
               <tbody>
                 {d.operators.map((o) => (
-                  <tr key={o.operatorId} className="border-t border-slate-200">
+                  <tr key={o.operatorId} className="sp-row-in border-t border-slate-200">
                     <td className="py-2 pr-4">
                       {o.name}
                       <span className="block text-xs text-slate-500">{ROLE_LABELS[o.role] || ''}</span>
@@ -230,7 +240,7 @@ function Operations({ locations }) {
               </thead>
               <tbody>
                 {d.locations.map((l) => (
-                  <tr key={l._id} className="border-t border-slate-200">
+                  <tr key={l._id} className="sp-row-in border-t border-slate-200">
                     <td className="py-2 pr-4">
                       <Link to={`/dashboard/locations/${l._id}`} className="text-blue-700 hover:underline">{l.name}</Link>
                     </td>

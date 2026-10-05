@@ -1,11 +1,7 @@
 const mongoose = require("mongoose");
-const { VEHICLE_TYPES } = require("./constants");
+const { VEHICLE_TYPES, VEHICLE_KEYS } = require("./constants");
 
-const countsByVehicle = {
-  car: { type: Number, default: 0, min: 0 },
-  bike: { type: Number, default: 0, min: 0 },
-  heavy: { type: Number, default: 0, min: 0 },
-};
+const countsByVehicle = Object.fromEntries(VEHICLE_KEYS.map((key) => [key, { type: Number, default: 0, min: 0 }]));
 
 const locationSchema = new mongoose.Schema(
   {
@@ -39,9 +35,31 @@ const locationSchema = new mongoose.Schema(
       {
         name: { type: String, required: true, trim: true },
         type: { type: String, enum: ["ENTRY", "EXIT", "BOTH"], default: "BOTH" },
+        // A gate is a lane. These are optional labels shown on the lane's screen and,
+        // for FASTag, the identifiers the toll-tag network knows the lane by.
+        laneCode: { type: String, trim: true, maxlength: 30 },
+        plazaId: { type: String, trim: true, maxlength: 30 },
+        fastagLaneId: { type: String, trim: true, maxlength: 30 },
       },
     ],
     zones: [{ type: String, trim: true }],
+    // Customers can book ahead on the public page and pay a fee, which is set against the parking
+    // fee on arrival (see services/onlineBookingService.js). Off until a company switches it on.
+    onlineBooking: {
+      enabled: { type: Boolean, default: false },
+      // The booking fee per vehicle class, in rupees. 0 = that class books free, with no payment.
+      fees: Object.fromEntries(VEHICLE_KEYS.map((key) => [key, { type: Number, default: 0, min: 0, max: 100000 }])),
+      note: { type: String, trim: true, maxlength: 300 },
+    },
+    // What the printed and on-screen ticket and receipt say (see utils/receiptSettings.js).
+    receiptSettings: {
+      headerNote: { type: String, trim: true, maxlength: 120 },
+      ticketFooter: { type: String, trim: true, maxlength: 200 },
+      receiptFooter: { type: String, trim: true, maxlength: 200 },
+      showAddress: { type: Boolean },
+      showGst: { type: Boolean },
+      showQr: { type: String, enum: ["DEVICE", "ON", "OFF"] },
+    },
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }

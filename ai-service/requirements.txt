@@ -1,0 +1,7 @@
+# Python 3.9 - 3.12 is the safest choice on Windows (PyTorch supports it best).
+numpy
+opencv-python
+open-image-models[onnx]   # plate finder (MIT licence, ONNX Runtime; downloads its model file on first use)
+easyocr          # reads the characters (uses PyTorch)
+# Optional, only for detector.kind "yolo" with your own .pt model. Note its AGPL-3.0 licence:
+# ultralytics

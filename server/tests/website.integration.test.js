@@ -99,6 +99,38 @@ it("FAQ: the public sees published questions; only the platform admin edits", as
   assert.equal((await api("GET", "/api/faq")).body.data.length, 3);
 });
 
+it("testimonials: the public sees published quotes; only the platform admin edits", async () => {
+  const create = (body, token = s.root) => api("POST", "/api/testimonials", { token, body });
+  assert.equal((await create({ quote: "Works well for our mall.", name: "A. Kumar" }, s.company.token)).status, 403);
+  assert.equal((await api("POST", "/api/testimonials", { body: { quote: "Works well for our mall.", name: "A. Kumar" } })).status, 401);
+  assert.equal((await create({ quote: "short", name: "A. Kumar" })).status, 400);
+
+  const first = await create({ quote: "Entry and exit became much faster.", name: "R. Singh", role: "Parking manager", company: "City Mall", order: 2 });
+  assert.equal(first.status, 201, JSON.stringify(first.body));
+  await create({ quote: "The reports save us an hour every day.", name: "P. Rao", order: 1 });
+  const draft = await create({ quote: "A quote that is not approved yet.", name: "S. Das", isPublished: false });
+
+  const open = await api("GET", "/api/testimonials");
+  assert.equal(open.status, 200);
+  assert.deepEqual(open.body.data.map((t) => t.name), ["P. Rao", "R. Singh"]);
+  assert.equal((await api("GET", "/api/testimonials/all", { token: s.root })).body.data.length, 3);
+  assert.equal((await api("GET", "/api/testimonials/all", { token: s.company.token })).status, 403);
+
+  const id = draft.body.data._id;
+  assert.equal((await api("PUT", `/api/testimonials/${id}`, { token: s.root, body: { isPublished: true } })).body.data.isPublished, true);
+  assert.equal((await api("GET", "/api/testimonials")).body.data.length, 3);
+  assert.equal((await api("DELETE", `/api/testimonials/${id}`, { token: s.company.token })).status, 403);
+  assert.equal((await api("DELETE", `/api/testimonials/${id}`, { token: s.root })).status, 200);
+  assert.equal((await api("DELETE", `/api/testimonials/${id}`, { token: s.root })).status, 404);
+});
+
+it("public stats: real counts, no login needed", async () => {
+  const res = await api("GET", "/api/public/stats");
+  assert.equal(res.status, 200);
+  assert.equal(typeof res.body.data.locations, "number");
+  assert.equal(typeof res.body.data.vehicles30d, "number");
+});
+
 it("blog: drafts are hidden, slugs are unique, views are counted", async () => {
   const body = "This is the first paragraph of the article.\n\n## A heading\n\nAnd a second paragraph.";
   const create = (extra, token = s.root) =>
