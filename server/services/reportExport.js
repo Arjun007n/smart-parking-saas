@@ -21,6 +21,11 @@ const TITLES = {
   vehicles: "Vehicle history",
   occupancy: "Occupancy by hour",
   operators: "Operator report",
+  "operator-collection": "Collection by operator",
+  "day-summary": "Day summary by vehicle type",
+  transactions: "FASTag and online transactions",
+  "pass-vehicles": "Pass vehicles",
+  "pass-receipts": "Pass receipts",
   "peak-hours": "Peak hours",
   "occupancy-trend": "Occupancy trend",
   durations: "Length of stay",
@@ -33,6 +38,9 @@ const TITLES = {
   hardware: "Gate hardware",
   "frequent-vehicles": "Repeat vehicles",
   locations: "Location comparison",
+  "location-list": "Parking locations",
+  "user-list": "Users",
+  "government-movements": "Vehicle entries and exits",
 };
 
 // Words people read instead of the codes in the data (CSV keeps the codes).
@@ -44,7 +52,7 @@ const LABELS = {
   status: {
     ACTIVE: "Inside", PAYMENT_PENDING: "Payment pending", COMPLETED: "Exited", CANCELLED: "Cancelled",
     LOST_TICKET: "Exited (lost ticket)", PASS_EXIT: "Exited (pass)", MANUAL_OVERRIDE: "Exited (override)",
-    SUCCESS: "Paid", REFUNDED: "Refunded",
+    SUCCESS: "Paid", REFUNDED: "Refunded", PENDING: "Pending", FAILED: "Declined or failed", UNKNOWN: "Being checked",
   },
 };
 

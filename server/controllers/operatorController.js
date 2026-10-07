@@ -22,6 +22,29 @@ const KEY_OF_METHOD = { CASH: "cash", GATEWAY: "online", UPI: "upi", CARD: "card
 const METHOD_KEYS = Object.values(KEY_OF_METHOD);
 const TYPE_KEY = Object.fromEntries(VEHICLE_TYPES.map((type) => [type, type.toLowerCase()]));
 
+// Money figures a user was switched off from (Users > Edit > Show entry / exit / total collection).
+// Entry = advances taken at entry, Exit = payments at exit, Total = the total and the ways of paying.
+const HIDDEN_BY = {
+  showEntryCollection: ["entryAmount"],
+  showExitCollection: ["exitAmount"],
+  showTotalCollection: ["cash", "online", "upi", "card", "fastag", "wallet", "total", "refunded", "net", "payments"],
+};
+const hiddenKeys = (user) => {
+  const access = (user && user.access) || {};
+  return Object.entries(HIDDEN_BY).flatMap(([flag, keys]) => (access[flag] === false ? keys : []));
+};
+const withoutKeys = (row, keys) => {
+  if (!row || !keys.length) return row;
+  const copy = { ...row };
+  for (const key of keys) delete copy[key];
+  return copy;
+};
+const redact = (user, result) => {
+  const keys = hiddenKeys(user);
+  if (!result || !keys.length) return { result, keys };
+  return { result: { ...result, rows: result.rows.map((r) => withoutKeys(r, keys)), totals: withoutKeys(result.totals, keys) }, keys };
+};
+
 const canSeeMoney = (req) => can(req, P.PAYMENT_COLLECT) || can(req, P.REPORT_VIEW);
 
 // Locations the request covers and the filter that keeps queries inside them.
@@ -137,7 +160,7 @@ const summary = async (req, res) => {
       },
       counts: { all, types },
       // Money is for people who collect payments or read reports.
-      collection: canSeeMoney(req) ? await collectionByType(inScope, range) : null,
+      collection: canSeeMoney(req) ? redact(req.user, await collectionByType(inScope, range)).result : null,
     },
   });
 };
@@ -146,7 +169,7 @@ const summary = async (req, res) => {
 const collection = async (req, res) => {
   if (!canSeeMoney(req)) throw new AppError("You do not have permission to do this", 403);
   const { range, inScope, date } = await scopeOf(req);
-  const result = await collectionByType(inScope, range);
+  const { result, keys: hidden } = redact(req.user, await collectionByType(inScope, range));
   const columns = [
     { key: "type", label: "Vehicle type" },
     { key: "entryAmount", label: "Entry amount (advance)" },
@@ -160,7 +183,7 @@ const collection = async (req, res) => {
     { key: "total", label: "Total" },
     { key: "refunded", label: "Refunded" },
     { key: "net", label: "Net" },
-  ];
+  ].filter((c) => c.key === "type" || !hidden.includes(c.key));
   return respond(req, res, "collection-by-type", `collection-by-type-${date || "today"}`, columns, [...result.rows, result.totals], {
     date: date || undefined, rows: result.rows, totals: result.totals,
   });

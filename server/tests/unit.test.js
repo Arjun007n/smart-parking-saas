@@ -39,6 +39,16 @@ const fakeRes = () => {
   return res;
 };
 
+test("permissions: the gate operator does gate work and nothing else", () => {
+  const { ROLE_PERMISSIONS, ROLE_RANK, CUSTOM_BASE_ROLES } = require("../config/permissions");
+  assert.deepEqual([...ROLE_PERMISSIONS[ROLES.GATE_OPERATOR]].sort(), ["ENTRY_CREATE", "EXIT_CREATE", "PAYMENT_COLLECT"]);
+  for (const p of ["REPORT_VIEW", "SESSION_OVERRIDE", "PASS_MANAGE", "USER_MANAGE", "LOCATION_MANAGE", "TARIFF_MANAGE", "VEHICLE_MANAGE", "WALLET_MANAGE"]) {
+    assert.ok(!hasPermission(ROLES.GATE_OPERATOR, p), p);
+  }
+  assert.equal(ROLE_RANK[ROLES.GATE_OPERATOR], ROLE_RANK[ROLES.ENTRY_OPERATOR]);
+  assert.ok(CUSTOM_BASE_ROLES.includes(ROLES.GATE_OPERATOR));
+});
+
 test("permissions: each role gets the expected rights", () => {
   assert.ok(hasPermission(ROLES.ENTRY_OPERATOR, PERMISSIONS.ENTRY_CREATE));
   assert.ok(!hasPermission(ROLES.ENTRY_OPERATOR, PERMISSIONS.EXIT_CREATE));

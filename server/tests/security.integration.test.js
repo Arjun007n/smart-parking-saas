@@ -2,7 +2,7 @@
 // headers, CORS, bad input, tokens, account lock, password change, tenant
 // isolation sweep, and duplicate/parallel requests. Needs MongoDB.
 const jwt = require("jsonwebtoken");
-const { setup, it, api, send, registerCompany, login, assert } = require("./helpers");
+const { setup, it, api, send, registerCompany, login, withCode, assert } = require("./helpers");
 const env = require("../config/env");
 const User = require("../models/User");
 const Payment = require("../models/Payment");
@@ -228,7 +228,7 @@ it("a location admin's edit keeps a user's assignments at other locations", asyn
 });
 
 it("account lock: ten wrong passwords lock the account, even for the right password", async () => {
-  const attempt = (password) => api("POST", "/api/auth/login", { body: { email: "sec-locadmin@example.com", password } });
+  const attempt = async (password) => api("POST", "/api/auth/login", { body: await withCode({ email: "sec-locadmin@example.com", password }) });
   for (let i = 0; i < 10; i += 1) assert.equal((await attempt(`wrong-password-${i}`)).status, 401);
 
   const locked = await attempt("Password123");
@@ -245,9 +245,9 @@ it("account lock: ten wrong passwords lock the account, even for the right passw
 
   // Unknown emails never lock and always answer the same way.
   for (let i = 0; i < 12; i += 1) {
-    const res = await api("POST", "/api/auth/login", { body: { email: "nobody@example.com", password: "whatever-123" } });
+    const res = await api("POST", "/api/auth/login", { body: { companyCode: s.a.company.code, email: "nobody@example.com", password: "whatever-123" } });
     assert.equal(res.status, 401);
-    assert.equal(res.body.message, "Invalid email or password");
+    assert.equal(res.body.message, "Invalid company code, login ID or password");
   }
 });
 
@@ -266,7 +266,7 @@ it("change password: needs the current password; other devices are logged out", 
   assert.equal((await api("GET", "/api/auth/me", { token: ok.body.data.token })).status, 200);
   assert.equal((await api("GET", "/api/auth/me", { token: thisDevice })).status, 401);
   assert.equal((await api("GET", "/api/auth/me", { token: otherDevice })).status, 401);
-  assert.equal((await api("POST", "/api/auth/login", { body: { email: "sec-locadmin@example.com", password: "Password123" } })).status, 401);
+  assert.equal((await api("POST", "/api/auth/login", { body: await withCode({ email: "sec-locadmin@example.com", password: "Password123" }) })).status, 401);
   await login("sec-locadmin@example.com", "NewPassword456");
 
   const stored = await User.findOne({ email: "sec-locadmin@example.com" }).select("+password");

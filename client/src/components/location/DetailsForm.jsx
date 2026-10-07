@@ -6,10 +6,11 @@ import { locationApi } from '../../services/api'
 import { locationDetailsSchema } from '../../validators/schemas'
 import { errorMessage } from '../../utils/errors'
 import { Alert, Button, Checkbox, Field, Select } from '../ui'
-import { CAPACITY_FIELDS, VEHICLE_KEYS } from '../../utils/format'
+import { CAPACITY_FIELDS, VEHICLE_KEYS, VEHICLE_LABELS } from '../../utils/format'
 
 const toForm = (l) => ({
   name: l.name,
+  parkingType: l.parkingType || 'NORMAL',
   line1: l.address.line1 || '',
   city: l.address.city || '',
   state: l.address.state || '',
@@ -29,9 +30,11 @@ const toForm = (l) => ({
   zones: l.zones.join(', '),
   onlineEnabled: Boolean(l.onlineBooking?.enabled),
   onlineNote: l.onlineBooking?.note || '',
+  waitingMinutes: l.onlineBooking?.waitingMinutes || 0,
+  cancelBeforeMinutes: l.onlineBooking?.cancelBeforeMinutes || 0,
   fee: Object.fromEntries(VEHICLE_KEYS.map((key) => [key, l.onlineBooking?.fees?.[key] || 0])),
   gates: l.gates.map((g) => ({
-    name: g.name, type: g.type, laneCode: g.laneCode || '', plazaId: g.plazaId || '', fastagLaneId: g.fastagLaneId || '',
+    _id: g._id, isActive: g.isActive !== false, name: g.name, type: g.type, laneCode: g.laneCode || '', plazaId: g.plazaId || '', fastagLaneId: g.fastagLaneId || '', cameraSerial: g.cameraSerial || '', vehicleType: g.vehicleType || '',
   })),
 })
 
@@ -39,6 +42,7 @@ const toBody = (v) => {
   const capacity = { car: v.car, bike: v.bike, heavy: v.heavy, taxi: v.taxi, tempo: v.tempo }
   return {
     name: v.name,
+    parkingType: v.parkingType,
     address: { line1: v.line1, city: v.city, state: v.state, pincode: v.pincode },
     // Both numbers, or neither: an empty pair removes the saved position.
     coordinates: v.lat !== '' && v.lng !== '' && v.lat !== undefined && v.lng !== undefined
@@ -50,8 +54,12 @@ const toBody = (v) => {
     // A vehicle type is accepted when it has capacity.
     vehicleTypes: VEHICLE_KEYS.filter((k) => capacity[k] > 0).map((k) => k.toUpperCase()),
     zones: (v.zones || '').split(',').map((z) => z.trim()).filter(Boolean),
-    gates: v.gates,
-    onlineBooking: { enabled: v.onlineEnabled, note: v.onlineNote || '', fees: v.fee },
+    // A lane with no vehicle type chosen is sent without one, which also clears one saved before.
+    gates: v.gates.map(({ vehicleType, ...gate }) => (vehicleType ? { ...gate, vehicleType } : gate)),
+    onlineBooking: {
+      enabled: v.onlineEnabled, note: v.onlineNote || '', fees: v.fee,
+      waitingMinutes: v.waitingMinutes, cancelBeforeMinutes: v.cancelBeforeMinutes,
+    },
   }
 }
 
@@ -88,6 +96,10 @@ export default function DetailsForm({ location }) {
       <fieldset className="grid gap-4 sm:grid-cols-2">
         <legend className="mb-3 text-sm font-semibold text-slate-900">Address and contact</legend>
         <Field label="Parking name" error={errors.name?.message} {...register('name')} />
+        <Select label="Parking type" {...register('parkingType')}>
+          <option value="NORMAL">Normal</option>
+          <option value="AIRPORT">Airport (long stay)</option>
+        </Select>
         <Field label="Address" error={errors.line1?.message} {...register('line1')} />
         <Field label="City" error={errors.city?.message} {...register('city')} />
         <Field label="State" error={errors.state?.message} {...register('state')} />
@@ -158,14 +170,21 @@ export default function DetailsForm({ location }) {
               <Button type="button" variant="danger" onClick={() => gates.remove(i)}>
                 Remove
               </Button>
-              <div className="grid w-full gap-3 sm:grid-cols-3">
+              <div className="grid w-full gap-3 sm:grid-cols-5">
+                <Select label="Vehicle type of this lane" {...register(`gates.${i}.vehicleType`)}>
+                  <option value="">Any (camera decides)</option>
+                  {Object.entries(VEHICLE_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </Select>
                 <Field label="Lane code" hint="Optional, e.g. L1" error={errors.gates?.[i]?.laneCode?.message} {...register(`gates.${i}.laneCode`)} />
                 <Field label="Plaza ID" hint="Optional" error={errors.gates?.[i]?.plazaId?.message} {...register(`gates.${i}.plazaId`)} />
                 <Field label="FASTag lane ID" hint="Optional, from your FASTag provider" error={errors.gates?.[i]?.fastagLaneId?.message} {...register(`gates.${i}.fastagLaneId`)} />
+                <Field label="Camera serial no." hint="Optional" error={errors.gates?.[i]?.cameraSerial?.message} {...register(`gates.${i}.cameraSerial`)} />
               </div>
             </div>
           ))}
-          <Button type="button" variant="secondary" onClick={() => gates.append({ name: '', type: 'BOTH', laneCode: '', plazaId: '', fastagLaneId: '' })}>
+          <Button type="button" variant="secondary" onClick={() => gates.append({ name: '', type: 'BOTH', laneCode: '', plazaId: '', fastagLaneId: '', cameraSerial: '', vehicleType: '', isActive: true })}>
             Add gate
           </Button>
         </div>
@@ -183,6 +202,22 @@ export default function DetailsForm({ location }) {
               {CAPACITY_FIELDS.map(([label, key]) => (
                 <Field key={key} label={`${label}: booking fee (₹)`} type="number" min="0" step="1" error={errors.fee?.[key]?.message} {...register(`fee.${key}`, number)} />
               ))}
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field
+                label="Waiting time (minutes)"
+                type="number" min="0" step="1"
+                hint="How long a booking waits after the arrival time. 0 = the standard 12 hours."
+                error={errors.waitingMinutes?.message}
+                {...register('waitingMinutes', number)}
+              />
+              <Field
+                label="Customer can cancel until (minutes before arrival)"
+                type="number" min="0" step="1"
+                hint="0 = customers cannot cancel online. A paid fee is flagged for refund."
+                error={errors.cancelBeforeMinutes?.message}
+                {...register('cancelBeforeMinutes', number)}
+              />
             </div>
             <Field label="Note shown to customers (optional)" hint="For example: which gate to use" error={errors.onlineNote?.message} {...register('onlineNote')} />
           </div>

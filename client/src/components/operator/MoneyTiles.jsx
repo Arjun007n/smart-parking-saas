@@ -15,11 +15,12 @@ const TILES = [
 ]
 
 // Nine colourful tiles with the money taken, counting up to the figure. `totals` is the collection totals.
+// A figure the admin switched off for this person is missing from the totals, so its tile is left out.
 export default function MoneyTiles({ totals }) {
   if (!totals) return null
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-      {TILES.map(([label, pick, gradient]) => (
+      {TILES.filter(([, pick]) => pick(totals) !== undefined).map(([label, pick, gradient]) => (
         <div key={label} className={`tile-gradient sp-lift ${gradient}`}>
           <p className="tile-amount">
             ₹ <CountUp value={Number(pick(totals)) || 0} format={(n) => money(n).replace(/^₹\s?/, '')} />

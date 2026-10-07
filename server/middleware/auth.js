@@ -7,6 +7,9 @@ const { ROLES } = require("../config/permissions");
 const { accessOf } = require("../services/roleService");
 
 const BLOCKED_SUBSCRIPTIONS = ["SUSPENDED", "CANCELLED"];
+// A government officer may only reach their own reports and their own account (sign out, change password).
+// This is checked for every request here, so a route that forgot to ask for a permission still stays closed.
+const GOVERNMENT_AREAS = ["/api/government", "/api/auth"];
 
 // Requires a valid "Authorization: Bearer <token>" header and loads the user.
 const protect = async (req, res, next) => {
@@ -34,6 +37,10 @@ const protect = async (req, res, next) => {
       throw new AppError("Company subscription is not active", 403);
     }
     req.company = company;
+  }
+
+  if (user.role === ROLES.GOVERNMENT_OFFICER && !GOVERNMENT_AREAS.includes(req.baseUrl)) {
+    throw new AppError("This account can only open the government reports", 403);
   }
 
   req.user = user;

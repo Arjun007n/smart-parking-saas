@@ -14,6 +14,7 @@ const toForm = (c) => ({
   legalName: c.legalName || '',
   businessType: c.businessType || '',
   gstNumber: c.gstNumber || '',
+  passGstPercent: c.passGstPercent || 0,
   billingName: c.billingContact?.name || '',
   billingEmail: c.billingContact?.email || '',
   billingPhone: c.billingContact?.phone || '',
@@ -39,6 +40,7 @@ function CompanyForm({ company }) {
         legalName: v.legalName,
         businessType: v.businessType,
         gstNumber: v.gstNumber,
+        passGstPercent: v.passGstPercent,
         billingContact: {
           name: v.billingName,
           phone: v.billingPhone,
@@ -63,6 +65,13 @@ function CompanyForm({ company }) {
         <Field label="Legal name" error={errors.legalName?.message} {...register('legalName')} />
         <Field label="Business type" placeholder="Mall, hospital, operator…" error={errors.businessType?.message} {...register('businessType')} />
         <Field label="GSTIN" placeholder="15 characters" error={errors.gstNumber?.message} {...register('gstNumber')} />
+        <Field
+          label="GST on passes (%)"
+          type="number" min="0" max="100" step="0.01"
+          hint="The part of a pass price that is GST (the price already includes it). 0 = none. Shown on pass receipts."
+          error={errors.passGstPercent?.message}
+          {...register('passGstPercent', { valueAsNumber: true })}
+        />
       </fieldset>
 
       <fieldset className="grid gap-4 sm:grid-cols-2">

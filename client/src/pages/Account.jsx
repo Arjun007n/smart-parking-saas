@@ -56,7 +56,9 @@ export default function Account() {
         <dl className="space-y-2 text-sm">
           {[
             ['Name', user.name],
-            ['Email', user.email],
+            user.email && ['Email', user.email],
+            user.loginId && ['Login ID', user.loginId],
+            company?.code && ['Company code', company.code],
             ['Role', roleLabel(user)],
             company && ['Company', company.name],
           ]
@@ -79,7 +81,7 @@ export default function Account() {
             label="Mobile"
             type="tel"
             autoComplete="tel"
-            hint="Optional. Your email is your login, so it cannot be changed here."
+            hint="Optional. Your email or Login ID is how you sign in, so it cannot be changed here."
             error={profileErrors.phone?.message}
             {...registerProfile('phone')}
           />

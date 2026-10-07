@@ -11,7 +11,7 @@ export const FEATURES = [
   { title: 'Multi-location', text: 'Each location has its own capacity, tariffs, gates and staff under one company account.', available: true },
   { title: 'Roles and audit log', text: 'Six roles with separate permissions, and a permanent record of every important action.', available: true },
   { title: 'Number plate recognition (ANPR)', text: 'A gate camera reads the number plate and fills the vehicle number by itself. Entry and exit can run automatically for clear readings.', available: true },
-  { title: 'Passes and bookings', text: 'Monthly passes with pass tags, customer bookings, and advance payments taken at entry.', available: true },
+  { title: 'Passes and bookings', text: 'Monthly passes with pass tags and customer bookings that can be paid online in advance.', available: true },
   { title: 'Online payment', text: 'A pay link with a QR code at exit. It connects to your payment gateway, and the barrier opens when the payment arrives.', available: true },
   { title: 'Gate hardware', text: 'Boom barrier, ticket and receipt printer, pass-tag readers and gate cameras, each tied to a gate and watched for online or offline.', available: true },
   { title: 'FASTag payments', text: 'FASTag readers can be connected and the plate or tag is read at the gate. Collecting the fee from FASTag needs a bank partner and is not available yet.', available: false },

@@ -11,6 +11,7 @@ import { rememberLocation, useMyLocations } from '../../hooks/useMyLocations'
 import { initialLane, useRememberLane } from '../../hooks/useLane'
 import { useGateCamera } from '../../hooks/useGateCamera'
 import { errorMessage } from '../../utils/errors'
+import { operationSettings } from '../../utils/operations'
 import { PAYMENT_LABELS, VEHICLE_LABELS, amountDue, dateTime, duration, money, timeOnly } from '../../utils/format'
 import { Alert, Button, Card, Field, PageLoader } from '../../components/ui'
 import LocationPicker from '../../components/operator/LocationPicker'
@@ -20,7 +21,6 @@ import GateCameraNote from '../../components/operator/GateCameraNote'
 import AutoSwitch from '../../components/operator/AutoSwitch'
 import DeviceStatus, { OpenBarrierButton } from '../../components/operator/DeviceStatus'
 import PlateSuggestions from '../../components/operator/PlateSuggestions'
-import ExitCamera from '../../components/operator/ExitCamera'
 import TodaysExit from '../../components/operator/TodaysExit'
 import QrScanner from '../../components/operator/QrScanner'
 import OnlinePayment from '../../components/operator/OnlinePayment'
@@ -28,6 +28,13 @@ import WalletPayment from '../../components/operator/WalletPayment'
 import PhotoPanel from '../../components/operator/PhotoPanel'
 import PassBanner from '../../components/pass/PassBanner'
 
+// The last lookup without any amount change (what "Recalculate" and "Use the tariff amount" send).
+const withoutEdit = (body) => {
+  const rest = { ...body }
+  delete rest.editedAmount
+  delete rest.editReason
+  return rest
+}
 const looksLikeTicket = (text) => /^t-?\d{6}/i.test(text.trim())
 const looksLikePass = (text) => /^p-\d{6}-[a-z0-9]{6}$/i.test(text.trim())
 const MANUAL_METHODS = ['CASH', 'UPI', 'CARD', 'FASTAG']
@@ -49,6 +56,7 @@ function SessionSummary({ session }) {
     fee.taxPercent > 0 && [`Tax (${fee.taxPercent}%${fee.taxInclusive ? ', included' : ''})`, money(fee.tax)],
     fee.advanceApplied > 0 && ['Total fee', money(fee.total)],
     fee.advanceApplied > 0 && ['Advance paid at entry', `− ${money(fee.advanceApplied)}`],
+    session.feeEdit?.reason && ['Amount changed', `from ${money(session.feeEdit.calculated)}: ${session.feeEdit.reason}`],
   ].filter(Boolean)
 
   return (
@@ -64,6 +72,42 @@ function SessionSummary({ session }) {
         <dd>{money(amountDue(session))}</dd>
       </div>
     </dl>
+  )
+}
+
+// Where the location allows it, the person at the exit can collect a different amount than the
+// tariff's. A reason is always asked for and is recorded with who made the change.
+function AmountEdit({ session, onApply, onReset, pending, error }) {
+  const [open, setOpen] = useState(false)
+  const [amount, setAmount] = useState('')
+  const [reason, setReason] = useState('')
+  const edited = Boolean(session.feeEdit?.reason)
+  const value = Number(amount)
+  const valid = amount.trim() !== '' && Number.isFinite(value) && value >= 0 && reason.trim().length >= 5
+
+  if (!open && !edited) {
+    return (
+      <button type="button" className="text-sm font-medium text-blue-700 hover:underline" onClick={() => setOpen(true)}>
+        Change the amount
+      </button>
+    )
+  }
+  return (
+    <div className="space-y-3 rounded-lg border border-amber-300 bg-amber-50 p-3">
+      <p className="text-sm font-semibold text-amber-900">
+        {edited ? `Amount changed from ${money(session.feeEdit.calculated)}.` : 'Collect a different amount'}
+      </p>
+      <Alert>{error && errorMessage(error)}</Alert>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Amount to collect (₹)" name="edit-amount" inputMode="decimal" autoComplete="off" value={amount} onChange={(event) => setAmount(event.target.value)} />
+        <Field label="Reason" name="edit-reason" autoComplete="off" hint="At least 5 letters. It is kept with your name." value={reason} onChange={(event) => setReason(event.target.value)} />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" loading={pending} disabled={!valid} onClick={() => onApply(value, reason.trim())}>Apply</Button>
+        {edited && <Button type="button" variant="secondary" onClick={onReset}>Use the tariff amount</Button>}
+        {!edited && <Button type="button" variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>}
+      </div>
+    </div>
   )
 }
 
@@ -216,7 +260,9 @@ function PaymentStep({ session, onPaid, onPaidOnline, onRecalculate, recalculati
   )
 }
 
-function Done({ session, paid, advance, change, hardware, onNext }) {
+function Done({ session, paid, advance, change, hardware, onNext, skipReceipt = false }) {
+  const { user } = useAuth()
+  const mayPrint = user?.access?.reprint !== false
   const covered = !paid && session.fee.total > 0 && session.fee.advanceApplied > 0
   const giveBack = session.fee.advanceRefunded || advance?.refund || 0
   const print = useMutation({ mutationFn: () => parkingApi.print(session._id) })
@@ -240,21 +286,23 @@ function Done({ session, paid, advance, change, hardware, onNext }) {
       <Alert>{print.error && errorMessage(print.error)}</Alert>
       <Alert type="success">{print.isSuccess && 'Bill sent to the printer.'}</Alert>
       <div className="flex flex-wrap gap-3">
-        <Button variant="secondary" loading={print.isPending} onClick={() => print.mutate()}>Print bill</Button>
-        <Link
-          to={`/operator/receipt/${session._id}`}
-          className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-        >
-          View receipt
-        </Link>
+        {!skipReceipt && mayPrint && <Button variant="secondary" loading={print.isPending} onClick={() => print.mutate()}>Print bill</Button>}
+        {!skipReceipt && (
+          <Link
+            to={`/operator/receipt/${session._id}`}
+            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            View receipt
+          </Link>
+        )}
         <Button onClick={onNext}>Next vehicle</Button>
       </div>
     </div>
   )
 }
 
-// The big search box: type 3 or more characters of a plate (or ticket) and the
-// vehicles inside that match are listed; pick one to work out its fee.
+// The big search box: click it to see the vehicles that are inside, newest first. Type to narrow
+// the list (3 or more characters search every vehicle inside); pick one to work out its fee.
 function VehicleSearch({ locationId, text, onText, onPick, onSubmitText, disabled }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
@@ -263,12 +311,19 @@ function VehicleSearch({ locationId, text, onText, onPick, onSubmitText, disable
     return () => clearTimeout(timer)
   }, [text])
   const enough = q.length >= MIN_SEARCH
+  // With fewer than 3 characters the vehicles inside are listed as they are (the newest ones) and the
+  // typed characters only narrow that list; with 3 or more the server looks through all of them.
   const found = useQuery({
-    queryKey: ['exit-search', locationId, q],
-    queryFn: () => parkingApi.entries({ locationId, q, match: 'contains' }),
-    enabled: enough && Boolean(locationId) && open,
+    queryKey: ['exit-search', locationId, enough ? q : ''],
+    queryFn: () => parkingApi.entries(enough ? { locationId, q, match: 'contains' } : { locationId }),
+    enabled: Boolean(locationId) && open,
   })
-  const results = found.data?.sessions || []
+  const typed = text.trim().toUpperCase().replace(/[\s-]/g, '')
+  const all = found.data?.sessions || []
+  const results = enough || !typed
+    ? all
+    : all.filter((row) => row.vehicleNumber.includes(typed) || row.ticketNumber.toUpperCase().replace(/-/g, '').includes(typed))
+  const total = found.data?.total ?? 0
 
   return (
     <div className="relative">
@@ -287,7 +342,8 @@ function VehicleSearch({ locationId, text, onText, onPick, onSubmitText, disable
           onText(event.target.value)
           setOpen(true)
         }}
-        onFocus={() => setOpen(true)}
+        onClick={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
         onKeyDown={(event) => {
           if (event.key === 'Escape') setOpen(false)
           if (event.key === 'Enter') {
@@ -299,35 +355,45 @@ function VehicleSearch({ locationId, text, onText, onPick, onSubmitText, disable
           }
         }}
       />
-      {open && !disabled && text.trim() && (
-        <div className="absolute z-20 mt-1 w-full rounded-xl border border-slate-200 bg-white p-2 shadow-lg" role="listbox" aria-label="Vehicles inside">
-          {!enough ? (
-            <p className="px-3 py-2 text-sm text-slate-500">Type at least {MIN_SEARCH} characters, or press Enter to look up exactly what you typed.</p>
-          ) : found.isLoading ? (
-            <p className="px-3 py-2 text-sm text-red-600">Searching…</p>
+      {open && !disabled && (
+        <div className="absolute z-20 mt-1 max-h-96 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-lg" role="listbox" aria-label="Vehicles inside">
+          {found.isLoading ? (
+            <p className="px-3 py-2 text-sm font-semibold text-red-600">Searching…</p>
+          ) : found.error ? (
+            <p className="px-3 py-2 text-sm text-red-600">{errorMessage(found.error)}</p>
           ) : results.length === 0 ? (
             <p className="px-3 py-2 text-sm text-red-600">
-              No vehicle inside matches. Press Enter to look it up anyway (for a lost ticket or a pass).
+              {typed ? 'No vehicle inside matches. Press Enter to look it up anyway (for a lost ticket or a pass).' : 'No vehicle is inside right now.'}
             </p>
           ) : (
-            results.map((row) => (
-              <button
-                key={row._id}
-                type="button"
-                role="option"
-                aria-selected="false"
-                className="flex w-full flex-wrap items-baseline gap-x-4 rounded-lg px-3 py-2 text-left hover:bg-blue-50"
-                onClick={() => {
-                  setOpen(false)
-                  onPick(row)
-                }}
-              >
-                <span className="font-bold text-blue-700">{row.vehicleNumber}</span>
-                <span className="text-sm text-slate-500">{timeOnly(row.entryTime)} · {row.ticketNumber}</span>
-                <span className="text-sm font-medium text-red-600">[{VEHICLE_LABELS[row.vehicleType]}]</span>
-                {row.advance?.amount > 0 && <span className="text-xs text-green-700">advance {money(row.advance.amount)}</span>}
-              </button>
-            ))
+            <>
+              <p className="px-3 pb-1 text-xs text-slate-500">
+                {typed
+                  ? `${results.length} matching`
+                  : total > all.length
+                    ? `Newest ${all.length} of ${total} vehicles inside. Type to find another.`
+                    : `${total} vehicle${total === 1 ? '' : 's'} inside`}
+              </p>
+              {results.map((row) => (
+                <button
+                  key={row._id}
+                  type="button"
+                  role="option"
+                  aria-selected="false"
+                  className="flex w-full flex-wrap items-baseline gap-x-4 rounded-lg px-3 py-2 text-left hover:bg-blue-50"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    setOpen(false)
+                    onPick(row)
+                  }}
+                >
+                  <span className="font-bold text-blue-700">{row.vehicleNumber}</span>
+                  <span className="text-sm text-slate-500">{timeOnly(row.entryTime)} · {row.ticketNumber}</span>
+                  <span className="text-sm font-medium text-red-600">[{VEHICLE_LABELS[row.vehicleType]}]</span>
+                  {row.advance?.amount > 0 && <span className="text-xs text-green-700">advance {money(row.advance.amount)}</span>}
+                </button>
+              ))}
+            </>
           )}
         </div>
       )}
@@ -353,13 +419,14 @@ function ExitForm({ locations, defaultId }) {
   const locationId = useWatch({ control, name: 'locationId' })
   const gate = useWatch({ control, name: 'gate' })
   const location = locations.find((l) => l._id === locationId)
+  const ops = operationSettings(location?.operations)
+  // How many exit lanes this location has: with one (or none) there is nothing to choose.
+  const gateChoices = location ? location.gates.filter((g) => ['EXIT', 'BOTH'].includes(g.type)).length : 0
   // This computer keeps its lane (location and gate) between visits.
   useRememberLane('EXIT', locationId, gate)
-  // With a camera registered for this gate, that one camera reads the plates (and fills the search box).
-  // This computer's own camera is only shown when the operator asks for it.
+  // With an ANPR camera registered for this gate, its readings appear as suggestions and fill the search box.
+  // Without one, the operator types the number.
   const gateCamera = useGateCamera(locationId, 'EXIT', gate)
-  const [ownCamera, setOwnCamera] = useState(false)
-  const showOwnCamera = ownCamera
   // Until the operator uses the switch, automatic follows the camera: ON when this gate has one.
   const autoExit = autoExitChoice ?? gateCamera.hasCamera
 
@@ -473,35 +540,22 @@ function ExitForm({ locations, defaultId }) {
 
   return (
     <div className="space-y-4">
-      <LaneBar location={location} gate={gate} company={company}>
+      <LaneBar location={location} gate={gate} company={company} parkingType={location?.parkingType}>
         {can('EXIT_CREATE') && <OpenBarrierButton locationId={locationId} direction="EXIT" gate={gate} />}
-        <AutoSwitch label="AUTO EXIT" on={autoExit} onChange={setAutoExit} />
+        <AutoSwitch
+          label="AUTO EXIT"
+          on={autoExit}
+          onChange={setAutoExit}
+          hint="When the gate camera reads a number plate clearly, the vehicle is found and the fee is shown by itself. The barrier opens the moment the payment is recorded (or at once when nothing is due)."
+        />
       </LaneBar>
-      {autoExit && (
-        <p className="no-print rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900" role="status">
-          Automatic exit is ON. When the gate camera reads a number plate clearly, the vehicle is found and the fee is shown by itself. The barrier opens
-          the moment the payment is recorded (or at once when nothing is due). Switch it off to pause.
-        </p>
-      )}
 
-      <LivePreview locationId={locationId} direction="EXIT" gate={gate} />
-
-
-      <PlateSuggestions
-        locationId={locationId}
-        direction="EXIT"
-        onUse={applySuggestion}
-        usedId={detection?._id}
-        canFill={!text.trim() && !detection && !result && !lookup.isPending}
-        auto={autoExit}
-        onAuto={autoLookup}
-      />
-
-      <div className="grid gap-6 lg:grid-cols-5">
+      <div className="grid items-start gap-4 lg:grid-cols-5">
         <div className="space-y-4 lg:col-span-3">
-          <Card className="no-print">
+          {/* The lane is fixed by the admin for most operators, so the pickers only show when there is a choice. */}
+          <div className={`no-print rounded-lg border border-slate-200 bg-white p-3 ${locations.length > 1 || gateChoices > 1 ? '' : 'hidden'}`}>
             <LocationPicker locations={locations} selectedId={locationId} register={register} errors={errors} gateTypes={['EXIT', 'BOTH']} />
-          </Card>
+          </div>
 
           <div className="no-print space-y-3">
             <Alert>{lookup.error && errorMessage(lookup.error)}</Alert>
@@ -529,6 +583,16 @@ function ExitForm({ locations, defaultId }) {
             {scanning && <QrScanner onScan={onScan} onClose={() => setScanning(false)} />}
           </div>
 
+          <PlateSuggestions
+            locationId={locationId}
+            direction="EXIT"
+            onUse={applySuggestion}
+            usedId={detection?._id}
+            canFill={!text.trim() && !detection && !result && !lookup.isPending}
+            auto={autoExit}
+            onAuto={autoLookup}
+          />
+
           {session && (
             <Card title={finished ? 'Exit complete' : 'Fee to collect'}>
               <div className="space-y-5">
@@ -536,11 +600,31 @@ function ExitForm({ locations, defaultId }) {
                 <SessionSummary session={session} />
                 <PhotoPanel key={session._id} sessionId={session._id} kind="EXIT" />
                 {finished ? (
-                  <Done session={session} paid={result.paid} advance={result.advance} change={result.change} hardware={result.hardware} onNext={next} />
+                  <Done
+                    session={session}
+                    paid={result.paid}
+                    advance={result.advance}
+                    change={result.change}
+                    hardware={result.hardware}
+                    onNext={next}
+                    // A location can switch the receipt off for pass holders, who pay nothing.
+                    skipReceipt={session.status === 'PASS_EXIT' && !ops.printPassReceipt}
+                  />
                 ) : (
                   <>
+                    {ops.exitAmountEdit && can('EXIT_CREATE') && !result.pass?.validHere && (
+                      <AmountEdit
+                        key={session._id}
+                        session={session}
+                        pending={lookup.isPending}
+                        error={lookup.error}
+                        onApply={(amount, reason) => lookup.mutate({ ...withoutEdit(lastLookup), editedAmount: amount, editReason: reason })}
+                        onReset={() => lookup.mutate(withoutEdit(lastLookup))}
+                      />
+                    )}
                     <PaymentStep
-                      key={session._id}
+                      // A changed amount starts the payment step over, so the cash shown matches it.
+                      key={`${session._id}-${amountDue(session)}`}
                       session={session}
                       recalculating={lookup.isPending}
                       // A FASTag reader gave us this vehicle: the likely way it is paying.
@@ -562,19 +646,8 @@ function ExitForm({ locations, defaultId }) {
         </div>
 
         <div className="space-y-4 lg:col-span-2">
-          {showOwnCamera ? (
-            <ExitCamera
-              locationId={locationId}
-              busy={Boolean(result) || lookup.isPending}
-              onDetection={applySuggestion}
-              autoExit={autoExit}
-              onAutoExitChange={setAutoExit}
-              onAutoExit={autoLookup}
-              isRecentPlate={(plate) => recent.current.plate === plate && Date.now() < recent.current.until}
-            />
-          ) : (
-            <GateCameraNote camera={gateCamera} direction="EXIT" gate={gate} fills="the search box" onUseOwn={() => setOwnCamera(true)} />
-          )}
+          <LivePreview locationId={locationId} direction="EXIT" gate={gate} />
+          <GateCameraNote camera={gateCamera} direction="EXIT" gate={gate} fills="the search box" />
           <TodaysExit locationId={locationId} />
         </div>
       </div>

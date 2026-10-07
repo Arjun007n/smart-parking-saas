@@ -92,7 +92,7 @@ const getOnboarding = async (req, res) => {
     User.countDocuments({
       companyId,
       isActive: true,
-      role: { $in: [ROLES.ENTRY_OPERATOR, ROLES.EXIT_OPERATOR, ROLES.COLLECTION_OPERATOR] },
+      role: { $in: [ROLES.ENTRY_OPERATOR, ROLES.EXIT_OPERATOR, ROLES.COLLECTION_OPERATOR, ROLES.GATE_OPERATOR] },
     }),
   ]);
 

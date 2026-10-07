@@ -18,6 +18,8 @@ const bookingSchema = new mongoose.Schema(
     note: { type: String, trim: true, maxlength: 300 },
     // When the customer plans to arrive.
     expectedAt: { type: Date, required: true },
+    // After this moment a booking that nobody used expires (arrival time plus the location's waiting time).
+    holdUntil: Date,
     status: { type: String, enum: BOOKING_STATUSES, default: "BOOKED" },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     sessionId: { type: mongoose.Schema.Types.ObjectId, ref: "ParkingSession" },

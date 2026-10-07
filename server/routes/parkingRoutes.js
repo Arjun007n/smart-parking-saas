@@ -53,6 +53,9 @@ router.post(
     lostTicket: { type: "boolean" },
     gate: { type: "string", max: 50 },
     detectionId: { type: "objectId" },
+    // Only where the location allows it: the amount to collect instead of the tariff's, and why.
+    editedAmount: { type: "number", min: 0, max: 100000 },
+    editReason: { type: "string", max: 200 },
   }),
   controller.startExit
 );
@@ -96,20 +99,22 @@ router.post(
   validateBody({ gate: { type: "string", max: 50 }, vehicleType: { type: "string", enum: VEHICLE_TYPES } }),
   controller.reEntry
 );
+router.post("/sessions/:id/reprint", validateIdParam(), canOperate, controller.countReprint);
 router.post("/sessions/:id/print", validateIdParam(), canOperate, gateOnly, controller.printSlip);
 
-// Corrections are for admins and are always recorded in the audit log.
+// Corrections are for supervisors and admins and are always recorded in the audit log.
+const canCorrect = requireAnyPermission(P.SESSION_OVERRIDE, P.LOCATION_MANAGE);
 router.post(
   "/sessions/:id/cancel",
   validateIdParam(),
-  requirePermission(P.LOCATION_MANAGE),
+  canCorrect,
   validateBody(reason),
   controller.cancelSession
 );
 router.post(
   "/sessions/:id/override",
   validateIdParam(),
-  requirePermission(P.LOCATION_MANAGE),
+  canCorrect,
   validateBody(reason),
   controller.overrideSession
 );

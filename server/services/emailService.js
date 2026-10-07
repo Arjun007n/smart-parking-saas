@@ -141,7 +141,7 @@ const alertRecipients = async ({ companyId, locationId, severity }) => {
   const scope = [{ role: ROLES.COMPANY_ADMIN }];
   scope.push(locationId ? { role: ROLES.LOCATION_ADMIN, locationIds: locationId } : { role: ROLES.LOCATION_ADMIN });
   const users = await User.find({ companyId, isActive: true, $or: scope }).select("email emailAlerts").limit(100).lean();
-  return users.filter((u) => wants(u, severity)).map((u) => u.email);
+  return users.filter((u) => u.email && wants(u, severity)).map((u) => u.email);
 };
 
 const hourly = new Map(); // companyId -> { count, resetAt }

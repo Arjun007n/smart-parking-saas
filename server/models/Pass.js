@@ -46,6 +46,8 @@ const passSchema = new mongoose.Schema(
     locationIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "Location" }],
     passNumber: { type: String, required: true, unique: true },
     passType: { type: String, enum: PASS_TYPES, default: "REGULAR" },
+    // The firm or society this pass was bought for (see models/PassCompany.js). Optional.
+    passCompanyId: { type: mongoose.Schema.Types.ObjectId, ref: "PassCompany" },
     // The vehicles that may use this pass (at most `maxVehicles`). The first
     // one is the main vehicle; vehicleNumber/vehicleType below always mirror it.
     vehicles: { type: [passVehicleSchema], default: [] },
@@ -109,6 +111,7 @@ passSchema.index(
 passSchema.index({ companyId: 1, endDate: 1 });
 passSchema.index({ companyId: 1, locationIds: 1 });
 passSchema.index({ companyId: 1, holderName: 1 });
+passSchema.index({ companyId: 1, passCompanyId: 1 }, { sparse: true });
 
 module.exports = mongoose.model("Pass", passSchema);
 module.exports.PASS_STATUSES = PASS_STATUSES;

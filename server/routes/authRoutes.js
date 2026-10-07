@@ -21,6 +21,13 @@ const loginLimiter = rateLimit({
   message: "Too many login attempts from this network. Please try again in a few minutes.",
 });
 
+// The signup form asks as the admin types a code, so this allows more than the sign-in calls.
+const codeLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: () => env.authRateLimitMax * 5,
+  message: "Too many checks. Please try again in a few minutes.",
+});
+
 const password = { type: "string", required: true, min: 8, max: 72 };
 const email = { type: "email", required: true };
 
@@ -33,6 +40,7 @@ const otpLimiter = rateLimit({
 });
 
 router.get("/signup-options", controller.signupOptions);
+router.get("/company-code", codeLimiter, controller.checkCompanyCode);
 router.post("/otp/send", otpLimiter, validateBody({ phone: mobile }), controller.sendOtp);
 router.post(
   "/otp/verify",
@@ -45,10 +53,16 @@ router.post(
   authLimiter,
   validateBody({
     companyName: { type: "string", required: true, min: 2, max: 150 },
+    // The code everyone in the company signs in with, chosen by the admin (made automatically when left out).
+    companyCode: { type: "string", max: 20 },
     name: { type: "string", required: true, min: 2, max: 100 },
     email,
     phone: { type: "string", max: 20 },
     phoneToken: { type: "string", max: 1000 },
+    // Optional billing details, asked at signup so the first invoice is ready (can be changed on the Company page).
+    gstNumber: { type: "string", max: 15, upper: true, pattern: /^[0-9]{2}[A-Z0-9]{13}$/, message: "must be a 15 character GSTIN" },
+    city: { type: "string", max: 100 },
+    state: { type: "string", max: 100 },
     password,
   }),
   controller.register
@@ -56,7 +70,15 @@ router.post(
 router.post(
   "/login",
   loginLimiter,
-  validateBody({ email, password: { type: "string", required: true, max: 72 } }),
+  // A company code, and a Login ID or an email (the controller checks which; the platform administrator needs no code).
+  validateBody({
+    email: { type: "email" },
+    companyCode: { type: "string", max: 20 },
+    loginId: { type: "string", max: 40 },
+    password: { type: "string", required: true, max: 72 },
+    // The Government login page sends this; only government officers may sign in there (and only there).
+    portal: { type: "string", enum: ["government"] },
+  }),
   controller.login
 );
 router.post("/forgot-password", authLimiter, validateBody({ email }), controller.forgotPassword);

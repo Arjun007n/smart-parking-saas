@@ -76,7 +76,7 @@ function SessionRow({ session, locationNames, loadedAt, canCorrect }) {
 
 export default function Entries() {
   const { can } = useAuth()
-  const canCorrect = can('LOCATION_MANAGE')
+  const canCorrect = can('SESSION_OVERRIDE') || can('LOCATION_MANAGE')
   const { locations } = useMyLocations()
   const [input, setInput] = useState('')
   const [search, setSearch] = useState({ q: '', locationId: '', page: 1 })

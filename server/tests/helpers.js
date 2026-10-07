@@ -65,8 +65,18 @@ const registerCompany = async (tag) => {
   return res.body.data;
 };
 
+// Everyone but the platform administrator signs in with their company's code: this adds it to a login
+// body that has an email, by looking the user up (a platform administrator or unknown email gets none).
+const withCode = async (body) => {
+  const User = require("../models/User");
+  const Company = require("../models/Company");
+  const user = typeof body.email === "string" ? await User.findOne({ email: body.email }).select("companyId") : null;
+  const company = user && user.companyId ? await Company.findById(user.companyId).select("code") : null;
+  return company ? { companyCode: company.code, ...body } : body;
+};
+
 const login = async (email, password = "Password123") => {
-  const res = await api("POST", "/api/auth/login", { body: { email, password } });
+  const res = await api("POST", "/api/auth/login", { body: await withCode({ email, password }) });
   assert.equal(res.status, 200, JSON.stringify(res.body));
   return res.body.data.token;
 };
@@ -101,4 +111,4 @@ const setup = () => {
 // A test that is reported as skipped when there is no database.
 const it = (name, fn) => test(name, async (t) => (state.skipReason ? t.skip(state.skipReason) : fn(t)));
 
-module.exports = { setup, it, api, raw, send, bytes, registerCompany, login, assert };
+module.exports = { setup, it, api, raw, send, bytes, registerCompany, login, withCode, assert };

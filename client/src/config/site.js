@@ -7,18 +7,18 @@ export const SITE = {
     'Parking management software for entry, exit, fee calculation, payments, receipts and reports, across one or many locations.',
 
   // The company that owns the site, for the Privacy Policy and the Terms. Falls back to `name`.
-  legalName: 'test@pvt.ltd.',
+  legalName: '',
   // The place whose courts decide disputes, for example 'Bhopal, Madhya Pradesh, India'. Left out when empty.
-  jurisdiction: 'Bhopal, Madhya Pradesh, India',
+  jurisdiction: '',
   // When paid plans may be cancelled and what is refunded, in one or two sentences. Left out when empty.
   refundPolicy: '',
   // A link to your demo video (YouTube or any page). The "Watch demo video" button shows only when this is set.
   demoVideoUrl: '',
 
   // Shown on the Contact page and in the footer.
-  email: 'abhinav.bhatnagar3@gmail.com',
-  phone: '+91 99923 17194',
-  address: 'MP Nagar, Bhopal, Madhya Pradesh, India',
+  email: '',
+  phone: '',
+  address: '',
   hours: '',
 
   // Businesses that use you, shown as a row of names on the home page. Add only real ones; empty hides the row.

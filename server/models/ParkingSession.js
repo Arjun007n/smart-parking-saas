@@ -46,6 +46,8 @@ const parkingSessionSchema = new mongoose.Schema(
     entryGate: String,
     exitGate: String,
     entryOperatorId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    // True when this ticket replaced another one (a re-entry). Counted per operator for the admin.
+    reEntry: { type: Boolean },
     exitOperatorId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     slotId: { type: mongoose.Schema.Types.ObjectId, ref: "ParkingSlot" },
     tariffId: { type: mongoose.Schema.Types.ObjectId, ref: "Tariff" },
@@ -82,6 +84,17 @@ const parkingSessionSchema = new mongoose.Schema(
       at: Date,
     },
     lostTicket: { type: Boolean, default: false },
+    // How many times the ticket was printed again after the first print.
+    reprints: { type: Number, default: 0, min: 0 },
+    // Set when the person at the exit changed the amount: what the tariff said, and why.
+    feeEdit: {
+      calculated: Number,
+      reason: String,
+      by: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+      at: Date,
+    },
+    // True when the ticket was closed by the "close forgotten tickets" switch of its location.
+    autoClosed: { type: Boolean, default: false },
     // Why an admin cancelled the session or closed it by hand.
     overrideReason: String,
     closedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },

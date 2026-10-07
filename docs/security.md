@@ -37,6 +37,7 @@ where the system is hosted and must be done on Day 30.
 | Duplicate requests and duplicate exits | Parallel tests, below |
 | Invalid tickets, invalid payments | Unknown ticket, ticket from another location, mismatched vehicle, wrong amount, unknown method, payment before fee calculation |
 | Full parking | Entry refused at capacity; six simultaneous arrivals for two spaces admit exactly two |
+| Government officer opening anything else | One check on every request (`middleware/auth.js`): an officer reaches only `/api/government` and `/api/auth`, everything else is 403 |
 | Wrong location, wrong operator | Operators cannot act outside their assigned locations or roles |
 | Network failures | A retried entry or a retried payment returns the original result instead of creating a second one |
 

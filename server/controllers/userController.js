@@ -7,6 +7,10 @@ const Location = require("../models/Location");
 const Operator = require("../models/Operator");
 const Role = require("../models/Role");
 const { findAssignable, accessOf, withinActor } = require("../services/roleService");
+const account = require("../services/accountService");
+const lanesService = require("../services/laneService");
+const licences = require("../services/licenceService");
+const { buildReportFile, formatOf } = require("../services/reportExport");
 
 const sameIds = (ids) => [...new Set(ids.map(String))];
 
@@ -38,6 +42,23 @@ const checkLocations = async (actor, companyId, locationIds) => {
     if (found !== ids.length) throw new AppError("One or more locations were not found", 400);
   }
   return ids;
+};
+
+// A Login ID in its stored form, checked for shape. Empty means "none".
+const cleanLoginId = (value) => {
+  const loginId = account.normalizeLoginId(value);
+  if (!loginId) return undefined;
+  if (!account.LOGIN_ID_PATTERN.test(loginId)) {
+    throw new AppError("A Login ID has 3 to 30 letters, digits, dots, dashes or underscores", 400);
+  }
+  return loginId;
+};
+
+// Checks the lanes chosen for a user against the locations they work at.
+const checkLanes = async (companyId, lanes, locationIds) => {
+  if (!lanes.length) return [];
+  const locations = await Location.find({ companyId, _id: { $in: locationIds } }).select("name gates").lean();
+  return lanesService.checkAssignment(lanes, locations, locationIds);
 };
 
 const findManageable = async (req) => {
@@ -94,6 +115,8 @@ const getUser = async (req, res) => {
 // POST /api/users
 const createUser = async (req, res) => {
   const { name, email, phone, password, customRoleId } = req.body;
+  const loginId = cleanLoginId(req.body.loginId);
+  if (!email && !loginId) throw new AppError("Give the user an email or a Login ID to sign in with", 400);
 
   // A custom role brings its own base role; otherwise a built-in role is needed.
   let role = req.body.role;
@@ -118,23 +141,34 @@ const createUser = async (req, res) => {
   const company = await Company.findById(req.companyId);
   if (!company) throw new AppError("Company not found", 404);
 
-  const activeUsers = await User.countDocuments({ companyId: req.companyId, isActive: true });
-  if (activeUsers >= company.plan.maxUsers) {
-    throw new AppError(`Your plan allows ${company.plan.maxUsers} users. Upgrade to add more.`, 403);
+  // A government officer uses no seat of the plan or of a location.
+  const officer = role === ROLES.GOVERNMENT_OFFICER;
+  if (!officer) {
+    const activeUsers = await User.countDocuments({ companyId: req.companyId, isActive: true, role: { $ne: ROLES.GOVERNMENT_OFFICER } });
+    if (activeUsers >= company.plan.maxUsers) {
+      throw new AppError(`Your plan allows ${company.plan.maxUsers} users. Upgrade to add more.`, 403);
+    }
   }
 
-  if (await User.exists({ email })) {
+  if (email && (await User.exists({ email }))) {
     throw new AppError("An account with this email already exists", 409);
+  }
+  if (loginId && (await User.exists({ companyId: req.companyId, loginId }))) {
+    throw new AppError("This Login ID is already used in your company", 409);
   }
 
   const locationIds = await checkLocations(req.user, req.companyId, req.body.locationIds || []);
+  if (officer && !locationIds.length) throw new AppError("Choose the locations this officer may see", 400);
+  if (!officer) await licences.assertRoom(req.companyId, locationIds);
+  const lanes = await checkLanes(req.companyId, req.body.lanes || [], locationIds);
 
   const user = await User.create({
-    companyId: req.companyId, name, email, phone, password, role, locationIds,
+    companyId: req.companyId, name, email, loginId, phone, password, role, locationIds, lanes,
     customRoleId: customRole ? customRole._id : undefined,
+    ...(req.body.access ? { access: req.body.access } : {}),
   });
   await saveOperatorProfile(user, req.body.operator);
-  await audit.record(req, "USER_CREATE", { entity: "User", entityId: user._id, meta: { role, customRoleId: customRole ? customRole._id : undefined } });
+  await audit.record(req, "USER_CREATE", { entity: "User", entityId: user._id, meta: { role, loginId, customRoleId: customRole ? customRole._id : undefined } });
 
   res.status(201).json({ success: true, data: await withProfile(user) });
 };
@@ -143,6 +177,7 @@ const createUser = async (req, res) => {
 const updateUser = async (req, res) => {
   const user = await findManageable(req);
   const { name, phone, role, locationIds, isActive, password, customRoleId } = req.body;
+  const before = { role: user.role, isActive: user.isActive, locationIds: [...user.locationIds] };
   const clearRole = (req.cleared || []).includes("customRoleId");
   const changed = [];
 
@@ -209,19 +244,45 @@ const updateUser = async (req, res) => {
     user.locationIds = [...untouched, ...allowed];
     changed.push("locationIds");
   }
+  if (req.body.loginId !== undefined) {
+    const loginId = cleanLoginId(req.body.loginId);
+    if (!loginId && !user.email) throw new AppError("This user has no email, so they need a Login ID to sign in", 400);
+    if (loginId !== user.loginId) {
+      if (loginId && (await User.exists({ companyId: user.companyId, loginId, _id: { $ne: user._id } }))) {
+        throw new AppError("This Login ID is already used in your company", 409);
+      }
+      user.loginId = loginId;
+      changed.push("loginId");
+    }
+  }
+  if (req.body.access) {
+    for (const [key, value] of Object.entries(req.body.access)) user.set(`access.${key}`, value);
+    changed.push("access");
+  }
   if (name !== undefined) { user.name = name; changed.push("name"); }
   if (phone !== undefined) { user.phone = phone; changed.push("phone"); }
   if (isActive !== undefined && isActive !== user.isActive) {
     if (isActive) {
       // Switching someone back on counts against the plan like adding them.
       const company = await Company.findById(user.companyId);
-      const activeUsers = await User.countDocuments({ companyId: user.companyId, isActive: true });
-      if (company && activeUsers >= company.plan.maxUsers) {
+      const activeUsers = await User.countDocuments({ companyId: user.companyId, isActive: true, role: { $ne: ROLES.GOVERNMENT_OFFICER } });
+      if (company && user.role !== ROLES.GOVERNMENT_OFFICER && activeUsers >= company.plan.maxUsers) {
         throw new AppError(`Your plan allows ${company.plan.maxUsers} users. Upgrade to add more.`, 403);
       }
     }
     user.isActive = isActive;
     changed.push("isActive");
+  }
+  // Lanes: what was sent, or what is left of the old ones after the locations changed.
+  if (req.body.lanes !== undefined || locationIds !== undefined) {
+    const wanted = req.body.lanes !== undefined ? req.body.lanes : user.lanes.map((l) => ({ locationId: String(l.locationId), gate: l.gate }));
+    const stillThere = wanted.filter((l) => user.locationIds.map(String).includes(String(l.locationId)));
+    user.lanes = await checkLanes(user.companyId, stillThere, user.locationIds);
+    changed.push("lanes");
+  }
+  // Seats: adding someone to a location, or switching them back on, must fit the location's licence.
+  if (user.isActive && user.role !== ROLES.GOVERNMENT_OFFICER && (locationIds !== undefined || !before.isActive)) {
+    await licences.assertRoom(user.companyId, user.locationIds, { user: before });
   }
   if (password !== undefined) {
     user.password = password; // "reset access"
@@ -257,4 +318,61 @@ const deactivateUser = async (req, res) => {
   res.json({ success: true, data: await withProfile(user) });
 };
 
-module.exports = { listUsers, getUser, createUser, updateUser, deactivateUser };
+const ROLE_NAMES = {
+  COMPANY_ADMIN: "Company Admin", LOCATION_ADMIN: "Location Admin", SUPERVISOR: "Supervisor", ENTRY_OPERATOR: "Entry Operator",
+  EXIT_OPERATOR: "Exit Operator", COLLECTION_OPERATOR: "Collection Operator", GATE_OPERATOR: "Operator", VIEWER: "Viewer", GOVERNMENT_OFFICER: "Government Officer",
+};
+
+// GET /api/users/export?format=xlsx|csv|pdf: the Users table as a file.
+const exportUsers = async (req, res) => {
+  const format = formatOf(req) || "xlsx";
+  const users = await User.find(scopeFilter(req)).sort({ createdAt: 1 }).limit(500);
+  const people = await withProfiles(users);
+  const locations = await Location.find({ ...req.tenantFilter }).select("name").lean();
+  const names = Object.fromEntries(locations.map((l) => [String(l._id), l.name]));
+  const columns = [
+    { key: "sn", label: "SN" }, { key: "name", label: "User name" }, { key: "role", label: "Role" },
+    { key: "loginId", label: "Login ID" }, { key: "mobile", label: "Mobile" }, { key: "email", label: "Email ID" },
+    { key: "location", label: "Location" }, { key: "lanes", label: "Lane/Door" }, { key: "status", label: "Status" },
+  ];
+  const rows = people.map((u, i) => ({
+    sn: i + 1, name: u.name, role: (u.customRole && u.customRole.name) || ROLE_NAMES[u.role] || u.role,
+    loginId: u.loginId || "", mobile: u.phone || "", email: u.email || "",
+    location: u.locationIds.map((id) => names[String(id)]).filter(Boolean).join(", "),
+    lanes: (u.lanes || []).map((l, k) => `${k + 1}. ${l.gate}`).join("  "),
+    status: u.isActive ? "Active" : "Inactive",
+  }));
+  const file = buildReportFile({
+    format, name: "users", report: "user-list", columns, rows, extra: {}, company: req.company ? req.company.name : "", scope: "",
+  });
+  res.set({ "Content-Type": file.contentType, "Content-Disposition": `attachment; filename="${file.filename}"`, "Cache-Control": "no-store" });
+  res.send(file.buffer);
+};
+
+// GET /api/users/licences
+// Seats per location: the limit, how many are in use, and until when the licences run.
+const listLicences = async (req, res) => {
+  const company = await Company.findById(req.companyId);
+  if (!company) throw new AppError("Company not found", 404);
+  const filter = { ...req.tenantFilter };
+  if (!isCompanyWide(req.user.role)) filter._id = { $in: req.user.locationIds };
+  const locations = await Location.find(filter).sort({ name: 1 }).limit(500).lean();
+  const data = await licences.overview(company, locations);
+  if (!isCompanyWide(req.user.role)) data.activeUsers = undefined; // only the company admin sees company totals
+  res.json({ success: true, data });
+};
+
+// PUT /api/users/licences/:locationId   { limit }   (limit null = no limit of its own)
+const setLicence = async (req, res) => {
+  const company = await Company.findById(req.companyId);
+  if (!company) throw new AppError("Company not found", 404);
+  const location = await Location.findOne({ _id: req.params.locationId, companyId: req.companyId });
+  if (!location) throw new AppError("Location not found", 404);
+  const limit = req.body.limit === undefined || req.body.limit === null ? null : req.body.limit;
+  await licences.setLimit(company, location, limit);
+  await audit.record(req, "LICENCE_SET", { entity: "Location", entityId: location._id, meta: { limit } });
+  const locations = await Location.find({ companyId: req.companyId }).sort({ name: 1 }).limit(500).lean();
+  res.json({ success: true, data: await licences.overview(company, locations) });
+};
+
+module.exports = { exportUsers, listUsers, getUser, createUser, updateUser, deactivateUser, listLicences, setLicence };

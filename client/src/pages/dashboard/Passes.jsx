@@ -3,15 +3,21 @@ import { Link } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { passApi } from '../../services/api'
+import { passApi, passCompanyApi } from '../../services/api'
 import { useAuth } from '../../hooks/useAuth'
 import { useMyLocations } from '../../hooks/useMyLocations'
 import { passSaleSchema } from '../../validators/schemas'
 import { errorMessage } from '../../utils/errors'
 import { isCompanyWide } from '../../utils/roles'
-import { PASS_STATE, VEHICLE_LABELS, lastDay, todayInput } from '../../utils/format'
+import { PASS_STATE, VEHICLE_LABELS, lastDay, money, todayInput } from '../../utils/format'
 import { Alert, Badge, Button, Card, Field, PageLoader, Select, Textarea } from '../../components/ui'
 import PassMoneyFields from '../../components/pass/PassMoneyFields'
+import PassCompaniesPanel from '../../components/pass/PassCompaniesPanel'
+import PassVehiclesPanel from '../../components/pass/PassVehiclesPanel'
+import PassReceiptsPanel from '../../components/pass/PassReceiptsPanel'
+import PassBulkBar from '../../components/pass/PassBulkBar'
+import PassUsersPanel from '../../components/pass/PassUsersPanel'
+import PassUploadPanel from '../../components/pass/PassUploadPanel'
 import { PASS_TYPE_LABELS, MAX_PASS_VEHICLES, passMoneyPayload, vehicleList } from '../../utils/pass'
 
 const FILTERS = [
@@ -41,6 +47,9 @@ function SellPassForm({ locations, defaultLocationId }) {
   // Other vehicles that share the pass: [{ vehicleNumber, vehicleType }]
   const [extras, setExtras] = useState([])
   const [extrasError, setExtrasError] = useState('')
+  // The firm or society the pass is for (optional; see the Companies tab).
+  const [passCompanyId, setPassCompanyId] = useState('')
+  const companies = useQuery({ queryKey: ['pass-companies', 'active'], queryFn: () => passCompanyApi.list({ active: 'true' }) })
 
   const sell = useMutation({
     mutationFn: (values) =>
@@ -52,6 +61,7 @@ function SellPassForm({ locations, defaultLocationId }) {
         maxVehicles: values.maxVehicles,
         ...(extras.length ? { extraVehicles: extras.map((v) => ({ vehicleNumber: v.vehicleNumber.trim(), vehicleType: v.vehicleType })) } : {}),
         holderName: values.holderName,
+        ...(passCompanyId ? { passCompanyId } : {}),
         ...(values.phone ? { phone: values.phone } : {}),
         ...(values.email ? { email: values.email } : {}),
         ...(values.notes ? { notes: values.notes } : {}),
@@ -60,10 +70,13 @@ function SellPassForm({ locations, defaultLocationId }) {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['passes'] })
+      queryClient.invalidateQueries({ queryKey: ['pass-summary'] })
+      queryClient.invalidateQueries({ queryKey: ['pass-companies'] })
       queryClient.invalidateQueries({ queryKey: ['collection'] })
       queryClient.invalidateQueries({ queryKey: ['shift'] })
       reset({ ...defaults, locationId: defaultLocationId })
       setExtras([])
+      setPassCompanyId('')
     },
   })
 
@@ -105,6 +118,12 @@ function SellPassForm({ locations, defaultLocationId }) {
         </Select>
         <Field label="Holder name" error={errors.holderName?.message} {...register('holderName')} />
         <Field label="Phone (optional)" type="tel" error={errors.phone?.message} {...register('phone')} />
+        {(companies.data?.companies || []).length > 0 && (
+          <Select label="Company (optional)" name="sell-company" value={passCompanyId} onChange={(event) => setPassCompanyId(event.target.value)}>
+            <option value="">No company</option>
+            {companies.data.companies.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
+          </Select>
+        )}
         <Field
           label="Email (optional)"
           type="email"
@@ -201,11 +220,69 @@ function SellPassForm({ locations, defaultLocationId }) {
   )
 }
 
+const TABS = [['passes', 'Passes'], ['users', 'Pass users'], ['companies', 'Companies'], ['vehicles', 'Vehicles'], ['receipts', 'Receipts'], ['upload', 'Bulk upload']]
+
+function SummaryTiles() {
+  const { data } = useQuery({ queryKey: ['pass-summary'], queryFn: passApi.summary })
+  if (!data) return null
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
+      {[
+        ['Companies', data.companies],
+        ['Pass users', data.users],
+        ['Passes', data.passes],
+        ['Vehicles', data.vehicles],
+        ['Valid now', data.active],
+        ['Ending in 7 days', data.expiring],
+        ['Ended', data.expired],
+        ['Paid by valid passes', money(data.activeRevenue)],
+      ].map(([label, value]) => (
+        <div key={label} className="rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200">
+          <p className="text-xs text-slate-500">{label}</p>
+          <p className="text-lg font-bold text-slate-900">{value}</p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function Passes() {
+  const [tab, setTab] = useState('passes')
+  return (
+    <div className="space-y-6">
+      <h1 className="text-2xl font-bold text-slate-900">Parking passes</h1>
+      <SummaryTiles />
+      <div role="tablist" aria-label="Pass sections" className="flex gap-1 border-b border-slate-300">
+        {TABS.map(([key, label]) => (
+          <button
+            key={key}
+            role="tab"
+            aria-selected={tab === key}
+            onClick={() => setTab(key)}
+            className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${tab === key ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-600 hover:text-slate-900'}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === 'passes' && <PassList />}
+      {tab === 'users' && <PassUsersPanel />}
+      {tab === 'companies' && <PassCompaniesPanel />}
+      {tab === 'vehicles' && <PassVehiclesPanel />}
+      {tab === 'receipts' && <PassReceiptsPanel />}
+      {tab === 'upload' && <PassUploadPanel />}
+    </div>
+  )
+}
+
+function PassList() {
   const { company } = useAuth()
   const { locations, defaultId, isLoading: locationsLoading } = useMyLocations()
   const [input, setInput] = useState('')
-  const [search, setSearch] = useState({ q: '', state: '', type: '', page: 1 })
+  const [search, setSearch] = useState({ q: '', state: '', type: '', passCompanyId: '', locationId: '', page: 1 })
+  // Passes ticked for a change that applies to all of them.
+  const [chosen, setChosen] = useState([])
+  const companies = useQuery({ queryKey: ['pass-companies', ''], queryFn: () => passCompanyApi.list({}) })
 
   const { data, isLoading, error, isFetching } = useQuery({
     queryKey: ['passes', search],
@@ -214,15 +291,21 @@ export default function Passes() {
         ...(search.q ? { q: search.q } : {}),
         ...(search.state ? { state: search.state } : {}),
         ...(search.type ? { type: search.type } : {}),
+        ...(search.passCompanyId ? { passCompanyId: search.passCompanyId } : {}),
+        ...(search.locationId ? { locationId: search.locationId } : {}),
         page: search.page,
       }),
     placeholderData: keepPreviousData,
   })
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1
 
+  const rows = data ? data.passes : []
+  const allChosen = rows.length > 0 && rows.every((p) => chosen.includes(p._id))
+  const toggleOne = (id) => setChosen((list) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]))
+  const toggleAll = () => setChosen((list) => (allChosen ? list.filter((id) => !rows.some((p) => p._id === id)) : [...new Set([...list, ...rows.map((p) => p._id)])]))
+
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-slate-900">Parking passes</h1>
       <p className="max-w-3xl text-sm text-slate-600">
         A vehicle with a valid pass (daily, weekly or monthly) drives in and out without paying the tariff. A lost ticket costs a pass holder nothing.
         When the pass ends, the normal tariff applies again.
@@ -279,8 +362,34 @@ export default function Passes() {
               <option key={value} value={value}>{label}</option>
             ))}
           </Select>
+          {(companies.data?.companies || []).length > 0 && (
+            <Select
+              className="w-48"
+              label="Company"
+              name="pass-company"
+              value={search.passCompanyId}
+              onChange={(event) => setSearch((s) => ({ ...s, passCompanyId: event.target.value, page: 1 }))}
+            >
+              <option value="">All companies</option>
+              {companies.data.companies.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
+            </Select>
+          )}
+          {locations.length > 1 && (
+            <Select
+              className="w-48"
+              label="Location"
+              name="pass-location"
+              value={search.locationId}
+              onChange={(event) => setSearch((s) => ({ ...s, locationId: event.target.value, page: 1 }))}
+            >
+              <option value="">All locations</option>
+              {locations.map((l) => <option key={l._id} value={l._id}>{l.name}</option>)}
+            </Select>
+          )}
           <Button type="submit" loading={isFetching}>Search</Button>
         </form>
+
+        {chosen.length > 0 && <PassBulkBar ids={chosen} onDone={() => setChosen([])} />}
 
         {error && <Alert>{errorMessage(error)}</Alert>}
         {isLoading ? (
@@ -291,6 +400,9 @@ export default function Passes() {
               <table className="w-full min-w-[640px] text-left text-sm">
                 <thead className="text-slate-500">
                   <tr>
+                    <th className="pb-2 pr-3 font-medium">
+                      <input type="checkbox" className="h-4 w-4" aria-label="Choose all passes on this page" checked={allChosen} onChange={toggleAll} />
+                    </th>
                     <th className="pb-2 pr-4 font-medium">Vehicle</th>
                     <th className="pb-2 pr-4 font-medium">Holder</th>
                     <th className="pb-2 pr-4 font-medium">Pass number</th>
@@ -304,6 +416,9 @@ export default function Passes() {
                     const state = PASS_STATE[pass.state] || PASS_STATE.ACTIVE
                     return (
                       <tr key={pass._id} className="border-t border-slate-200">
+                        <td className="py-3 pr-3">
+                          <input type="checkbox" className="h-4 w-4" aria-label={`Choose pass ${pass.passNumber}`} checked={chosen.includes(pass._id)} onChange={() => toggleOne(pass._id)} />
+                        </td>
                         <td className="py-3 pr-4 font-medium text-slate-900">
                           {vehicleList(pass)}
                           <span className="block text-xs font-normal text-slate-500">

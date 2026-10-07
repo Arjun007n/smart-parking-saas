@@ -17,6 +17,14 @@ export const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const rupees = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 })
 export const money = (amount) => rupees.format(amount || 0)
 
+// A waiting time the way a person says it: "45 minutes", "12 hours", "1 day".
+export function waitText(minutes) {
+  const m = Math.round(minutes)
+  if (m >= 1440 && m % 1440 === 0) return `${m / 1440} day${m === 1440 ? '' : 's'}`
+  if (m >= 60 && m % 60 === 0) return `${m / 60} hour${m === 60 ? '' : 's'}`
+  return `${m} minute${m === 1 ? '' : 's'}`
+}
+
 export function duration(minutes) {
   const days = Math.floor(minutes / 1440)
   const hours = Math.floor((minutes % 1440) / 60)

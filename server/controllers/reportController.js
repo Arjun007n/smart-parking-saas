@@ -1,6 +1,7 @@
 const AppError = require("../utils/AppError");
 const { dayRange, rangeFromQuery, timezoneString, localDateText, DAY } = require("../utils/time");
 const { locationsInScope, operatorIdFromQuery } = require("../utils/scope");
+const { withPeriodDefaults, checkPeriod } = require("../utils/reportPeriod");
 const { normalizePlate, escapeRegex } = require("../utils/plate");
 const audit = require("../services/auditService");
 const { formatOf, buildReportFile } = require("../services/reportExport");
@@ -9,7 +10,7 @@ const ParkingSession = require("../models/ParkingSession");
 const Payment = require("../models/Payment");
 const PassPayment = require("../models/PassPayment");
 const User = require("../models/User");
-const { SESSION_STATUSES, sumCounts } = require("../models/constants");
+const { SESSION_STATUSES, VEHICLE_TYPES, sumCounts } = require("../models/constants");
 
 const CSV_LIMIT = 10000;
 const PAGE_SIZE = 100;
@@ -23,15 +24,20 @@ const rememberScope = (req, locations) => {
   req.reportScopeName = req.query.locationId && locations.length === 1 ? locations[0].name : "All locations";
 };
 
-const reportScope = async (req, options) => {
+const reportScope = async (req, options = {}) => {
   const locations = await locationsInScope(req);
   rememberScope(req, locations);
+  // A report can pass its own dates (for example one chosen day) in `options.query`.
+  const query = options.query || req.query;
+  const range = rangeFromQuery(withPeriodDefaults(query), options);
+  // ?period=current|old keeps the dates inside the live or the old period.
+  checkPeriod(query, range);
   return {
     locations,
     locationNames: new Map(locations.map((l) => [String(l._id), l.name])),
     // The company is repeated here so the database can use the company-first indexes.
     inScope: { ...req.tenantFilter, locationId: { $in: locations.map((l) => l._id) } },
-    range: rangeFromQuery(req.query, options),
+    range,
   };
 };
 
@@ -46,7 +52,8 @@ const respond = (req, res, name, columns, rows, extra = {}) => {
   const format = formatOf(req);
   if (!format) return res.json({ success: true, data: { columns, rows, ...extra } });
 
-  const report = req.path.replace(/^\/+|\/+$/g, "");
+  // A report outside /api/reports names itself (req.reportKey) so its title is its own.
+  const report = req.reportKey || req.path.replace(/^\/+|\/+$/g, "");
   const file = buildReportFile({
     format, name, report, columns, rows, extra,
     company: req.company ? req.company.name : "", scope: req.reportScopeName || "",
@@ -188,7 +195,7 @@ const collectionReport = async (req, res) => {
   ], rows, { total, page, pageSize: PAGE_SIZE, from: range.from, to: range.to });
 };
 
-// GET /api/reports/vehicles?from=&to=&locationId=&q=&status=&page=
+// GET /api/reports/vehicles?from=&to=&locationId=&q=&status=&vehicleType=&gate=&entryOperatorId=&exitOperatorId=&period=&page=
 // Vehicle history: every visit that started in the period.
 const vehicleReport = async (req, res) => {
   const { locationNames, inScope, range } = await reportScope(req);
@@ -196,6 +203,16 @@ const vehicleReport = async (req, res) => {
   const q = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 30) : "";
   if (q) filter.vehicleNumber = { $regex: `^${escapeRegex(normalizePlate(q))}` };
   if (SESSION_STATUSES.includes(req.query.status)) filter.status = req.query.status;
+  if (VEHICLE_TYPES.includes(req.query.vehicleType)) filter.vehicleType = req.query.vehicleType;
+  // A gate name matches where the vehicle came in or went out.
+  if (typeof req.query.gate === "string" && req.query.gate.trim()) {
+    const gate = req.query.gate.trim().slice(0, 50);
+    filter.$or = [{ entryGate: gate }, { exitGate: gate }];
+  }
+  const entryBy = operatorIdFromQuery(req, "entryOperatorId");
+  const exitBy = operatorIdFromQuery(req, "exitOperatorId");
+  if (entryBy) filter.entryOperatorId = entryBy;
+  if (exitBy) filter.exitOperatorId = exitBy;
 
   const csv = wantsExport(req);
   const page = pageFrom(req);
@@ -203,6 +220,12 @@ const vehicleReport = async (req, res) => {
     ParkingSession.find(filter).sort({ entryTime: -1 }).skip(csv ? 0 : (page - 1) * PAGE_SIZE).limit(csv ? CSV_LIMIT : PAGE_SIZE),
     ParkingSession.countDocuments(filter),
   ]);
+  const [names, payments] = await Promise.all([
+    userNames(sessions.flatMap((s) => [s.entryOperatorId, s.exitOperatorId])),
+    Payment.find({ sessionId: { $in: sessions.map((s) => s._id) }, status: { $in: ["SUCCESS", "REFUNDED"] } }).select("sessionId kind method amount"),
+  ]);
+  const feeMethod = new Map();
+  for (const p of payments) if (p.kind !== "ADVANCE") feeMethod.set(String(p.sessionId), p.method);
 
   const rows = sessions.map((s) => ({
     vehicle: s.vehicleNumber,
@@ -213,7 +236,18 @@ const vehicleReport = async (req, res) => {
     exitTime: s.exitTime || "",
     durationMinutes: s.durationMinutes ?? "",
     status: s.status,
+    entryBy: names.get(String(s.entryOperatorId)) || "",
+    exitBy: names.get(String(s.exitOperatorId)) || (s.autoClosed ? "Closed automatically" : ""),
+    entryGate: s.entryGate || "",
+    exitGate: s.exitGate || "",
+    reprints: s.reprints || 0,
+    advance: s.advance && s.advance.amount ? s.advance.amount : "",
+    advanceMethod: s.advance && s.advance.amount ? s.advance.method || "" : "",
     fee: s.fee && s.fee.total !== undefined ? s.fee.total : "",
+    payable: s.fee && s.fee.due !== undefined ? s.fee.due : s.fee && s.fee.total !== undefined ? s.fee.total : "",
+    method: feeMethod.get(String(s._id)) || "",
+    photos: Array.isArray(s.photos) ? s.photos.length : 0,
+    edited: s.feeEdit && s.feeEdit.reason ? `Changed from ${s.feeEdit.calculated}: ${s.feeEdit.reason}` : "",
   }));
 
   respond(req, res, `vehicles-${range.from}-to-${range.to}`, [
@@ -222,10 +256,21 @@ const vehicleReport = async (req, res) => {
     { key: "ticket", label: "Ticket" },
     { key: "location", label: "Location" },
     { key: "entryTime", label: "Entry" },
+    { key: "entryBy", label: "Entry by" },
+    { key: "entryGate", label: "Entry gate" },
     { key: "exitTime", label: "Exit" },
+    { key: "exitBy", label: "Exit by" },
+    { key: "exitGate", label: "Exit gate" },
     { key: "durationMinutes", label: "Duration (min)" },
     { key: "status", label: "Status" },
+    { key: "reprints", label: "Reprints" },
+    { key: "advance", label: "Advance" },
+    { key: "advanceMethod", label: "Advance mode" },
     { key: "fee", label: "Fee" },
+    { key: "payable", label: "Payable" },
+    { key: "method", label: "Paid by" },
+    { key: "photos", label: "Photos" },
+    { key: "edited", label: "Amount changed" },
   ], rows, { total, page, pageSize: PAGE_SIZE, from: range.from, to: range.to });
 };
 

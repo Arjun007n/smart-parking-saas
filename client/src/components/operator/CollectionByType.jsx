@@ -1,6 +1,6 @@
 import { VEHICLE_LABELS, money } from '../../utils/format'
 
-const COLUMNS = [
+const ALL_COLUMNS = [
   ['entryAmount', 'Entry amount'],
   ['exitAmount', 'Exit amount'],
   ['cash', 'Cash'],
@@ -16,6 +16,9 @@ const COLUMNS = [
 // advance at the gate; exit amount is what was paid when leaving.
 export default function CollectionByType({ rows, totals }) {
   if (!rows) return null
+  // A column the admin switched off for this person is missing from the figures, so it is left out.
+  const sample = totals || rows[0] || {}
+  const COLUMNS = ALL_COLUMNS.filter(([key]) => sample[key] !== undefined)
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[640px] text-left text-sm">

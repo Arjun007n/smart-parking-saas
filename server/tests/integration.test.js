@@ -42,6 +42,14 @@ const api = async (method, path, { token, body, headers } = {}) => {
   return { status: res.status, body: await res.json() };
 };
 
+// Everyone but the platform administrator signs in with their company's code; this adds it to a login body.
+const withCode = async (body) => {
+  const Company = require("../models/Company");
+  const user = typeof body.email === "string" ? await User.findOne({ email: body.email }).select("companyId") : null;
+  const company = user && user.companyId ? await Company.findById(user.companyId).select("code") : null;
+  return company ? { companyCode: company.code, ...body } : body;
+};
+
 const registerCompany = async (n) => {
   const res = await api("POST", "/api/auth/register", {
     body: {
@@ -115,13 +123,13 @@ it("register cannot be used to choose a role or company", async () => {
 });
 
 it("login works, wrong password and bad input are rejected", async () => {
-  const ok = await api("POST", "/api/auth/login", { body: { email: "admin1@example.com", password: "Password123" } });
+  const ok = await api("POST", "/api/auth/login", { body: await withCode({ email: "admin1@example.com", password: "Password123" }) });
   assert.equal(ok.status, 200);
   assert.ok(ok.body.data.token);
 
-  const wrong = await api("POST", "/api/auth/login", { body: { email: "admin1@example.com", password: "nope-nope" } });
+  const wrong = await api("POST", "/api/auth/login", { body: await withCode({ email: "admin1@example.com", password: "nope-nope" }) });
   assert.equal(wrong.status, 401);
-  const unknown = await api("POST", "/api/auth/login", { body: { email: "ghost@example.com", password: "Password123" } });
+  const unknown = await api("POST", "/api/auth/login", { body: { companyCode: s.a.company.code, email: "ghost@example.com", password: "Password123" } });
   assert.equal(unknown.status, 401);
   assert.equal(unknown.body.message, wrong.body.message);
 
@@ -229,7 +237,7 @@ it("company admin creates users and assigns roles and locations", async () => {
 });
 
 it("RBAC: operator is limited to what the role allows", async () => {
-  const login = await api("POST", "/api/auth/login", { body: { email: "entry@example.com", password: "Password123" } });
+  const login = await api("POST", "/api/auth/login", { body: await withCode({ email: "entry@example.com", password: "Password123" }) });
   const token = login.body.data.token;
   assert.deepEqual(login.body.data.permissions, ["ENTRY_CREATE"]);
 
@@ -245,7 +253,7 @@ it("RBAC: operator is limited to what the role allows", async () => {
 });
 
 it("RBAC: location admin manages only their own location and lower roles", async () => {
-  const login = await api("POST", "/api/auth/login", { body: { email: "locadmin@example.com", password: "Password123" } });
+  const login = await api("POST", "/api/auth/login", { body: await withCode({ email: "locadmin@example.com", password: "Password123" }) });
   const token = login.body.data.token;
 
   const update = await api("PUT", `/api/locations/${s.locA1._id}`, { token, body: { capacity: { car: 120 } } });
@@ -353,7 +361,7 @@ it("suspended company is locked out", async () => {
 });
 
 it("deactivating a user ends their session", async () => {
-  const login = await api("POST", "/api/auth/login", { body: { email: "entry@example.com", password: "Password123" } });
+  const login = await api("POST", "/api/auth/login", { body: await withCode({ email: "entry@example.com", password: "Password123" }) });
   const token = login.body.data.token;
   assert.equal((await api("GET", "/api/auth/me", { token })).status, 200);
 
@@ -362,7 +370,7 @@ it("deactivating a user ends their session", async () => {
   assert.equal(off.body.data.isActive, false);
 
   assert.equal((await api("GET", "/api/auth/me", { token })).status, 401);
-  const relogin = await api("POST", "/api/auth/login", { body: { email: "entry@example.com", password: "Password123" } });
+  const relogin = await api("POST", "/api/auth/login", { body: await withCode({ email: "entry@example.com", password: "Password123" }) });
   assert.equal(relogin.status, 403);
 });
 
@@ -381,10 +389,10 @@ it("forgot / reset password flow", async () => {
 
   // Old token and old password stop working, and the link cannot be reused.
   assert.equal((await api("GET", "/api/auth/me", { token: s.a.token })).status, 401);
-  assert.equal((await api("POST", "/api/auth/login", { body: { email: "admin1@example.com", password: "Password123" } })).status, 401);
+  assert.equal((await api("POST", "/api/auth/login", { body: await withCode({ email: "admin1@example.com", password: "Password123" }) })).status, 401);
   assert.equal((await api("POST", "/api/auth/reset-password", { body: { token: resetToken, password: "Another12345" } })).status, 400);
 
-  const login = await api("POST", "/api/auth/login", { body: { email: "admin1@example.com", password: "NewPassword123" } });
+  const login = await api("POST", "/api/auth/login", { body: await withCode({ email: "admin1@example.com", password: "NewPassword123" }) });
   assert.equal(login.status, 200);
   s.a.token = login.body.data.token;
 });

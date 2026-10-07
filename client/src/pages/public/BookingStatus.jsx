@@ -1,9 +1,9 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { publicBookingApi } from '../../services/api'
 import { errorMessage } from '../../utils/errors'
-import { VEHICLE_LABELS, dateTime, money } from '../../utils/format'
+import { VEHICLE_LABELS, dateTime, money, waitText } from '../../utils/format'
 import { usePageTitle } from '../../hooks/usePageTitle'
 import { useToast } from '../../hooks/useToast'
 import { playCue } from '../../utils/sound'
@@ -64,6 +64,14 @@ export default function BookingStatus() {
       playCue(change.cue)
     }
   }, [status, toast])
+  const [confirmCancel, setConfirmCancel] = useState(false)
+  const cancel = useMutation({
+    mutationFn: () => publicBookingApi.cancel(id, token),
+    onSuccess: () => {
+      setConfirmCancel(false)
+      queryClient.invalidateQueries({ queryKey: ['public-booking', id] })
+    },
+  })
   const simulate = useMutation({
     mutationFn: (outcome) => publicBookingApi.simulate(id, token, outcome),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['public-booking', id] }),
@@ -166,8 +174,25 @@ export default function BookingStatus() {
           {booking.status === 'BOOKED' && (
             <Alert type="success">
               Booking confirmed. At the gate, give your reference {booking.code} or your vehicle number.
-              {paid ? ' Your booking fee is taken off your parking charge.' : ''} We keep the booking for {booking.graceHours} hours after your arrival time.
+              {paid ? ' Your booking fee is taken off your parking charge.' : ''} We keep the booking for {waitText(booking.waitingMinutes ?? booking.graceHours * 60)} after your arrival time.
             </Alert>
+          )}
+          {booking.status === 'BOOKED' && booking.canCancel && (
+            <div className="space-y-2">
+              <Alert>{cancel.error && errorMessage(cancel.error)}</Alert>
+              {confirmCancel ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm text-slate-700">
+                    Cancel this booking?{paid ? ' Your booking fee will be refunded by the parking.' : ''}
+                  </span>
+                  <Button variant="danger" loading={cancel.isPending} onClick={() => cancel.mutate()}>Yes, cancel it</Button>
+                  <Button variant="secondary" disabled={cancel.isPending} onClick={() => setConfirmCancel(false)}>Keep it</Button>
+                </div>
+              ) : (
+                <Button variant="secondary" onClick={() => setConfirmCancel(true)}>Cancel booking</Button>
+              )}
+              <p className="text-xs text-slate-500">You can cancel until {waitText(booking.cancelBeforeMinutes)} before your arrival time.</p>
+            </div>
           )}
           {booking.status === 'ARRIVED' && <Alert type="success">Your vehicle has entered. Thank you!</Alert>}
           {['CANCELLED', 'EXPIRED'].includes(booking.status) && !refundDue && (

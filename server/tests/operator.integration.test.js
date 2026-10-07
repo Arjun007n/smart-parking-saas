@@ -238,7 +238,7 @@ it("bookings: cancel once, other companies cannot touch them, old ones expire", 
   });
   assert.equal(again.status, 201);
 
-  await Booking.updateOne({ _id: again.body.data._id }, { $set: { expectedAt: new Date(Date.now() - 13 * 3600 * 1000) } });
+  await Booking.updateOne({ _id: again.body.data._id }, { $set: { expectedAt: new Date(Date.now() - 13 * 3600 * 1000), holdUntil: new Date(Date.now() - 1 * 3600 * 1000) } });
   const list = await api("GET", "/api/bookings", { token: s.a.token });
   assert.equal(list.body.data.bookings.length, 0);
   assert.equal((await Booking.findById(again.body.data._id)).status, "EXPIRED");

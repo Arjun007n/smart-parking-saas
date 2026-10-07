@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Pretends to be a camera so the whole flow can be tried without hardware.
 //
-//   node simulate.js plate --key hwk_... --plate MH12AB1234 [--confidence 0.93]
+//   node simulate.js plate --key hwk_... --plate MH12AB1234 [--confidence 0.93] [--type car|bike|truck|bus|taxi|tempo]
 //                          [--direction ENTRY|EXIT] [--server http://localhost:5000]
 //                          [--repeat 3] [--event-id abc] [--image https://...]
 //   node simulate.js plate --device "Gate 1 camera"     (reads key/server from config.json)
@@ -100,6 +100,7 @@ const main = async () => {
       ...(args.direction ? { direction: String(args.direction).toUpperCase() } : {}),
       ...(args["event-id"] ? { eventId: String(args["event-id"]) } : {}),
       ...(args.image ? { imageUrl: String(args.image) } : {}),
+      ...(args.type ? { vehicleType: String(args.type) } : {}),
       capturedAt: new Date().toISOString(),
     });
     console.log(`#${i + 1}`, JSON.stringify(result));

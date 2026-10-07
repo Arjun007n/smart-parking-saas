@@ -1,7 +1,7 @@
 // Custom roles through the API: who may edit them, who may hand them out,
 // how permissions change at once, and that companies stay apart.
 // Needs MongoDB (see tests/helpers.js).
-const { setup, it, api, registerCompany, login, assert } = require("./helpers");
+const { setup, it, api, registerCompany, login, withCode, assert } = require("./helpers");
 const AuditLog = require("../models/AuditLog");
 
 setup();
@@ -68,7 +68,7 @@ it("users: a custom role sets the permissions, the base role sets the rank", asy
   assert.equal(created.body.data.customRole.name, "Gate reports");
   s.crId = created.body.data._id;
 
-  const logged = await api("POST", "/api/auth/login", { body: { email: "ra-cr@example.com", password: "Password123" } });
+  const logged = await api("POST", "/api/auth/login", { body: await withCode({ email: "ra-cr@example.com", password: "Password123" }) });
   assert.equal(logged.status, 200);
   assert.deepEqual(logged.body.data.permissions, ["ENTRY_CREATE", "REPORT_VIEW"]);
   assert.equal(logged.body.data.user.customRole.name, "Gate reports");
@@ -150,7 +150,7 @@ it("users: moving between a custom role and a built-in role", async () => {
   assert.equal(cleared.status, 200, JSON.stringify(cleared.body));
   assert.equal(cleared.body.data.customRole, null);
   assert.equal(cleared.body.data.role, "ENTRY_OPERATOR", "back to the base role");
-  assert.deepEqual((await api("POST", "/api/auth/login", { body: { email: "ra-cr@example.com", password: "Password123" } })).body.data.permissions, ["ENTRY_CREATE"]);
+  assert.deepEqual((await api("POST", "/api/auth/login", { body: await withCode({ email: "ra-cr@example.com", password: "Password123" }) })).body.data.permissions, ["ENTRY_CREATE"]);
 
   const users = await api("GET", "/api/users", { token: s.a.token });
   assert.ok(users.body.data.some((u) => u.customRole?.name === "Gate reports"), "the list names custom roles");

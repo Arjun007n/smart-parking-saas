@@ -6,11 +6,12 @@ Base URL: `/api`. Send `Authorization: Bearer <token>` on protected routes.
 
 | Method | Path | Body | Notes |
 |---|---|---|---|
-| POST | `/auth/register` | companyName, name, email, password, phone? | Creates a company and its Company Admin. Returns a token. |
+| POST | `/auth/register` | companyName, companyCode? (4 to 12 letters or digits, chosen by the admin; made automatically if left out; 409 when taken or reserved), name, email, password, phone?, gstNumber? (15 characters), city?, state? | Creates a company (with its sign-in `code`) and its Company Admin. Returns a token. |
 | GET | `/auth/signup-options` | | `{otpRequired}` for the signup page |
 | POST | `/auth/otp/send` | phone | Sends a code by SMS (only when `SIGNUP_OTP=on`) |
 | POST | `/auth/otp/verify` | phone, code | Returns `phoneToken`, sent to `/auth/register` as `phoneToken` |
-| POST | `/auth/login` | email, password | Returns token, user, company, permissions |
+| GET | `/auth/company-code?code=ACME1` | | `{ code, available, reason? }`, for the signup form to check a code while the admin types |
+| POST | `/auth/login` | companyCode, **loginId or email**, password | Returns token, user, company (with `code`), permissions. The code is required for every user except the platform administrator (email alone). Missing code: 401 "Enter your company code to sign in" (same answer whether or not the email exists); wrong code, ID or password: 401 "Invalid company code, login ID or password". Optional `portal: "government"` is sent by the Government login page: only a Government Officer gets in through it (anyone else: 401 as for a wrong password), and a Government Officer is refused on the normal login (403 "Government officers sign in on the Government login page") |
 | GET | `/auth/me` | | Current user |
 | PUT | `/auth/profile` | name, phone? (empty clears it) | The signed-in user edits their own name and mobile number. Email, role and company cannot be set here. Audited as `AUTH_PROFILE_CHANGED` |
 | PUT | `/auth/preferences` | emailAlerts (`OFF`, `CRITICAL`, `IMPORTANT`, `ALL`) | Which alerts are also emailed to this user (admins). Audited as `AUTH_PREFERENCES_CHANGED` |
@@ -60,7 +61,14 @@ See `docs/shop.md` for the full table.
 |---|---|---|
 | GET | `/locations`, `/locations/:id` | Any signed-in user, limited to their company and assigned locations |
 | POST | `/locations` | Company Admin (plan limit applies) |
-| PUT | `/locations/:id` | `LOCATION_MANAGE`; Location Admin only for assigned locations. `receiptSettings` `{ headerNote?, ticketFooter?, receiptFooter?, showAddress?, showGst?, showQr? (DEVICE\|ON\|OFF) }` changes how tickets and receipts look (an empty footer means the standard wording) |
+| PUT | `/locations/:id` | `LOCATION_MANAGE`; Location Admin only for assigned locations. `receiptSettings` `{ headerNote?, ticketFooter?, receiptFooter?, showAddress?, showGst?, showQr? (DEVICE\|ON\|OFF) }` changes how tickets and receipts look (an empty footer means the standard wording). `onlineBooking` also takes `waitingMinutes` (how long a booking waits after its arrival time: 5 to 4320; 0 or empty = the standard `BOOKING_GRACE_HOURS`, 12 hours) and `cancelBeforeMinutes` (0 to 10080; 0 = customers cannot cancel online). `operations` `{ allowReEntry?, exitAmountEdit?, autoExitHours? (0-720; 0 = never), printTicketNumber?, printPhoto?, photoAutoCapture?, printPassReceipt? }` are the gate switches (unset ones keep the defaults, so old locations behave as before). `reportRecipients` is up to 10 email addresses that get this location's end-of-day report |
+| GET | `/locations/:id/lanes` | `?q=` (name, lane code, plaza, FASTag lane, camera serial, operator or device name) `&page=&limit=` (default 10, at most 100). `{ rows: [{ _id, sn, name, type, vehicleType, laneCode, plazaId, fastagLaneId, cameraSerial, isActive, operators, devices }], total, page, limit, pages }` |
+| PATCH | `/locations/:id/lanes/:laneId/status` | `LOCATION_MANAGE`. `{ isActive }` switches a lane on or off. A lane that is off refuses entries, exits and manual barrier lifts with 409. Audited as `LOCATION_LANE_ON` / `LOCATION_LANE_OFF` |
+| PUT | `/locations/:id` (more fields) | `parkingType` (`NORMAL` or `AIRPORT`); `gates[]` `{ _id (send it back for an existing lane), name, type, laneCode, plazaId, fastagLaneId, cameraSerial, vehicleType, isActive }`: names must be unique (case does not matter, 400); a rename follows the lane's operators and devices; a lane missing from the list is removed, refused with 409 while operators or devices are tied to it; `operations.autoExitRules` `[{ vehicleType, active, days (1-365), amount }]` closes a ticket of that vehicle type that is still open after `days` days (no payment is recorded; `amount` is written on the ticket and in the alert). A type without an active rule follows `autoExitHours` |
+| GET | `/locations/export?format=xlsx\|csv\|pdf` | The Locations table as a file (default xlsx): parking type, seats and valid upto, the gate switches, auto exit on or off, capacity, lanes |
+| GET | `/locations/:id/re-entries` | `LOCATION_MANAGE`. The re-entry counter: `{ limit, since, total, operators: [{ userId, name, loginId, count, last, atLimit }] }` for today (or since the last reset) |
+| POST | `/locations/:id/re-entries/reset` | `LOCATION_MANAGE`. Starts the count again from now; returns the same shape. Audited as `LOCATION_REENTRY_COUNTER_RESET` |
+| POST | `/locations/:id/auto-exit/run` | `LOCATION_MANAGE`. `{ vehicleType }` applies that type's active rule now; returns `{ closed }` |
 | DELETE | `/locations/:id` | Company Admin. Deactivates; refused while vehicles are parked |
 
 ## Users
@@ -71,9 +79,16 @@ than your own; a Location Admin only users of their own locations.
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/users`, `/users/:id` | |
-| POST | `/users` | name, email, password, role **or** customRoleId, locationIds? (plan limit applies) |
-| PUT | `/users/:id` | name, phone, role, customRoleId (`null` removes the custom role), locationIds, isActive, password (reset access) |
+| POST | `/users` | name, email **and/or** loginId, password, role **or** customRoleId, locationIds?, lanes?, access? (plan and location licence limits apply) |
+| PUT | `/users/:id` | name, phone, loginId, role, customRoleId (`null` removes the custom role), locationIds, lanes, access, isActive, password (reset access) |
+| GET | `/users/export?format=` | The Users list as csv, xlsx or pdf: name, role, login ID, mobile, email, locations, lanes, status |
 | DELETE | `/users/:id` | Deactivates |
+| GET | `/users/licences` | Seats per location: `{ planUsers, activeUsers, allotted, validUpto, expired, locations: [{ locationId, name, limit, used, left }] }` |
+| PUT | `/users/licences/:locationId` | `COMPANY_MANAGE`. `{ limit }` (omit or null = no limit of its own). Not below the staff already there; the limits together not above the plan's users. Audited as `LICENCE_SET` |
+
+`access` is `{ reprint, showEntryCollection, showExitCollection, showTotalCollection }`, each a boolean; a flag that was never set counts as allowed. `reprint: false` makes `POST /parking/sessions/:id/reprint` and `.../print` answer 403 for that person. The three `show…` flags remove figures from `GET /operator/collection` and `GET /operator/summary` for that person: entry amount; exit amount; and cash, online, UPI, card, FASTag, wallet, total, refunded, net (the money columns are dropped from exports too).
+
+`loginId`: 3 to 30 letters, digits, `.`, `-`, `_`; stored in lower case; unique inside the company. `lanes`: `[{ locationId, gate }]` (gate = a lane name of that location, at a location the user works at); a location with no lane listed is open to all its lanes. Roles `SUPERVISOR` (rank 40) and `VIEWER` (rank 10) can be handed out by a Company Admin or Location Admin. The permission `SESSION_OVERRIDE` (cancel, release without payment, re-entry beyond the grace window) is held by admins and supervisors; `LOCATION_MANAGE` still works for these routes.
 
 `operator` (optional on create and update): `{ employeeCode, shift: { name, start, end } }`.
 
@@ -127,13 +142,14 @@ All need `TARIFF_MANAGE`. A Location Admin only sees tariffs of assigned locatio
 |---|---|---|---|
 | POST | `/parking/entry` | `ENTRY_CREATE` | locationId, vehicleNumber, vehicleType, gate?, idempotencyKey?. Returns the session with its ticket number |
 | GET | `/parking/entries?locationId=&q=&date=&page=&match=` | Gate staff, admins | Vehicles inside now. `q` = ticket, or start of a vehicle number; `match=contains` finds the text anywhere in the number (exit search box) |
-| POST | `/parking/exit` | `EXIT_CREATE` | locationId, ticketNumber or vehicleNumber, lostTicket?, gate?. Calculates the fee. Returns `paymentRequired` |
+| POST | `/parking/exit` | `EXIT_CREATE` | locationId, ticketNumber or vehicleNumber, lostTicket?, gate?, editedAmount?, editReason?. Calculates the fee. Returns `paymentRequired`. `editedAmount` (with a reason of at least 5 letters) is accepted only when the location's `exitAmountEdit` switch is on; tax is worked out again, the original fee is kept on the ticket and the change is audited as `PARKING_FEE_EDITED`. Entry is refused for a vehicle already inside when `allowReEntry` is off |
 | GET | `/parking/exits?locationId=&q=&date=&page=` | Gate staff, admins | Closed sessions of one day (default today) |
 | GET | `/parking/sessions/:id` | Gate staff, admins | |
 | GET | `/parking/sessions/:id/receipt` | Gate staff, admins | After exit only |
 | POST | `/parking/sessions/:id/cancel` | `LOCATION_MANAGE` | reason. For an entry made by mistake |
 | POST | `/parking/sessions/:id/override` | `LOCATION_MANAGE` | reason. Exit without the normal payment. Opens the exit barrier |
 | POST | `/parking/sessions/:id/barrier` | `ENTRY_CREATE` (entry) / `EXIT_CREATE` (exit) | Asks the gate barrier again. Only for a vehicle cleared in the last 10 minutes. Optional body `{ gate }` when several devices cannot be told apart |
+| POST | `/parking/sessions/:id/reprint` | gate staff | Counts one reprint of the ticket (shown in the collection report) |
 | POST | `/parking/sessions/:id/print` | `ENTRY_CREATE` or `EXIT_CREATE` | Prints the ticket (vehicle inside) or receipt (exited) on the gate's thermal printer |
 
 ### Gate staff screens
@@ -160,6 +176,7 @@ All need `TARIFF_MANAGE`. A Location Admin only sees tariffs of assigned locatio
 | GET | `/public/booking/locations/:id` | One of them (404 if not bookable) |
 | POST | `/public/booking/bookings` | locationId, vehicleNumber, vehicleType, customerName, phone, expectedAt, note?. 10 per 15 minutes per address. Answers `{ booking, token }`; the token is shown once. Free: `BOOKED`. Paid: `AWAITING_PAYMENT` with `booking.payment.payUrl` |
 | GET | `/public/booking/bookings/:id?token=` | The customer's view: status, amount, payment state, `payUrl` while pending. Wrong id or token: 404 |
+| POST | `/public/booking/bookings/:id/cancel?token=` | The customer cancels. Only a `BOOKED` booking, and only until `cancelBeforeMinutes` before the arrival time (0 = customers cannot cancel: 409). A paid fee is flagged for refund. The booking view carries `canCancel`, `cancelBeforeMinutes` and `waitingMinutes` |
 | POST | `/public/booking/bookings/:id/simulate?token=` | `{ outcome: SUCCESS \| FAILED }`. Only with `PAYMENT_PROVIDER=simulated` (never in production) |
 
 Booking statuses: `AWAITING_PAYMENT`, `BOOKED`, `ARRIVED`, `CANCELLED`, `EXPIRED`. Payment states: `NONE`, `PENDING`, `PAID`, `FAILED`, `REFUND_DUE`. Staff list entries carry `source` (`STAFF` or `ONLINE`), `amount` and `payment`. The gateway webhook (`/payments/webhook`) also settles booking fees. `/parking/entry` answers `booking.feePaidOnline` when the fee became the advance.
@@ -212,8 +229,16 @@ With method `GATEWAY`, `POST /payments` starts an online payment and answers wit
 | Method | Path | Who | Notes |
 |---|---|---|---|
 | GET | `/passes/lookup?locationId=&vehicleNumber=` or `&passNumber=` | `ENTRY_CREATE`, `EXIT_CREATE` or `PASS_MANAGE` | The valid pass for a vehicle at a location, if any. The answer lists the pass's `vehicles` and which of them are `inside` |
-| GET | `/passes?state=&type=&q=&page=`, `/passes/:id` | `PASS_MANAGE` | |
-| POST | `/passes` | `PASS_MANAGE` | locationId, vehicleNumber, vehicleType, holderName, `unit`+`count` (or `months`; default 1 month), amount, method, startDate?, locationIds?, phone?, email? (pass details and an ending-soon reminder are emailed there), notes?, passType?, maxVehicles?, extraVehicles? (`[{vehicleNumber, vehicleType}]`) |
+| GET | `/passes?state=&type=&passCompanyId=&q=&page=`, `/passes/:id` | `PASS_MANAGE` | |
+| GET | `/passes/users?q=&passCompanyId=&page=&format=` | `PASS_MANAGE` | Pass users: passes with the same mobile (or, with none, the same name) are one user. Company, GST number, vehicles, passes, active now. csv, xlsx or pdf |
+| POST | `/passes/bulk-upload` | `PASS_MANAGE` | `{ locationId, rows (max 200) }`; each row has text cells holderName, vehicleNumber, vehicleType (required), phone, email, passType, startDate, unit, count, amount, method, company (a name in the company master), notes, transactionId. Each row is a normal sale and fails alone with a reason. Answers `{ created, failed, results: [{ row, ok, passNumber \| error }] }` |
+| GET | `/passes/summary` | `PASS_MANAGE` | Counts for the tiles: users, active, ending soon, expired, suspended, sold this month |
+| GET | `/passes/vehicles?locationId=&q=&passCompanyId=&page=&format=` | `PASS_MANAGE` | One row per vehicle on a pass (vehicle, type, pass, holder, company, validity, inside now). `format` = csv, xlsx or pdf |
+| GET | `/passes/invoices?from=&to=&locationId=&passCompanyId=&q=&page=&format=` | `PASS_MANAGE` | Pass receipts, one per payment (sale or renewal): receipt number `passNumber/n`, taxable value, tax, total, method |
+| POST | `/passes/bulk` | `PASS_MANAGE` | `{ ids (max 200), action: EXTEND\|SET_DATES\|SUSPEND\|RESUME\|CANCEL, days?, startDate?, endDate?, reason? }`. Changes many passes at once without taking money (use Renew for a paid extension). Answers with what changed and what was skipped, with the reason |
+| GET, POST | `/pass-companies` | `PASS_MANAGE` | List (`?q=&active=true`, with pass counts) or add a company master: name, contactName, phone, email, gstin, address, notes |
+| PUT | `/pass-companies/:id` | `PASS_MANAGE` | Edit, or switch off with `isActive: false` |
+| POST | `/passes` | `PASS_MANAGE` | locationId, passCompanyId?, vehicleNumber, vehicleType, holderName, `unit`+`count` (or `months`; default 1 month), amount, method, startDate?, locationIds?, phone?, email? (pass details and an ending-soon reminder are emailed there), notes?, passType?, maxVehicles?, extraVehicles? (`[{vehicleNumber, vehicleType}]`) |
 | POST | `/passes/:id/renew` | `PASS_MANAGE` | `unit`+`count` (or `months`), amount, method, locationId |
 | POST | `/passes/:id/suspend`, `/resume`, `/cancel` | `PASS_MANAGE` | suspend and cancel need a reason |
 | PUT | `/passes/:id` | `PASS_MANAGE` | holderName, phone, email (empty removes), notes, locationIds, passType, maxVehicles |
@@ -240,19 +265,33 @@ With method `GATEWAY`, `POST /payments` starts an online payment and answers wit
 | POST | `/shifts/:id/adjustments` | `LOCATION_MANAGE` | amount (+ or -), reason |
 | GET | `/shifts?date=&locationId=` | `PAYMENT_COLLECT` or `REPORT_VIEW` | Admins and report viewers see all; others their own |
 
+## Government officer reports
+
+A Government Officer (role `GOVERNMENT_OFFICER`, permission `GOVERNMENT_REPORT`) can use only `/government/*` and `/auth/*` (login, me, logout, change password). Every other route answers 403 "This account can only open the government reports", checked in one place (`middleware/auth.js`). Company and location admins also hold the permission, so they can check what officers see. The officer sees only the locations the admin chose; a location outside them is 404. No money is in any answer. An entry is a ticket made in the period (cancelled tickets do not count); an exit is a vehicle that left in the period (automatic closes do not count).
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/government/locations` | The officer's locations, for the filter |
+| GET | `/government/summary?from=&to=&locationId=` | `totals` {entries, exits, inside}, `byDay`, `byType`, `byLocation`. Up to 366 days |
+| GET | `/government/movements?from=&to=&locationId=&direction=ALL\|ENTRY\|EXIT&vehicleType=&q=&page=&pageSize=` | One row per entry or exit: time, vehicle number, type, ticket, location, gate. `q` is part of a vehicle number or a ticket number. Add `format=xlsx\|csv\|pdf` for a file (up to 10,000 rows; audited as `REPORT_EXPORT`) |
+
 ## Dashboard and reports
 
 All need `REPORT_VIEW` and only cover locations the user may see.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/dashboard?locationId=` | Everything on the operations dashboard, in one call |
+| GET | `/dashboard?locationId=&from=&to=` | Everything on the operations dashboard, in one call. `from` and `to` (local dates, up to 92 days apart, default today) set the period of the day figures: `traffic` by hour, `revenue.byHour` (24 hours, after refunds) and `revenue.inPeriod`, `byVehicleType`, operators, payments, exceptions, reprints. `period` echoes them (`isToday`). Not affected by the period: vehicles inside now, month tiles, `revenue.last7Days`, `momentum` (vehicles inside by hour, today only: empty for other periods), `passes` {active, endingSoon, total, `activeRevenue` = paid for passes valid now}, `subscription` and `locationPlans` (each location with its plan status RUNNING, EXPIRING within 30 days, EXPIRED or NO_PLAN, the expiry date, package and validity; one plan covers the whole company, so locations share a date) |
 | GET | `/reports/revenue?from=&to=&groupBy=&locationId=` | groupBy: day, week, month, location. Up to 366 days |
 | GET | `/reports/collection?from=&to=&locationId=&operatorId=&method=&page=` | One row per payment |
-| GET | `/reports/vehicles?from=&to=&locationId=&q=&status=&page=` | One row per visit |
+| GET | `/reports/vehicles?from=&to=&locationId=&q=&status=&entryOperatorId=&exitOperatorId=&page=` | One row per visit. Filter by the person who made the entry or did the exit |
 | GET | `/reports/occupancy?date=&locationId=` | Vehicles inside for each hour of a day |
 | GET | `/reports/operators?from=&to=&locationId=&operatorId=` | Entries, exits, collections, refunds per person |
 
+| GET | `/reports/operator-collection?from=&to=&locationId=&operatorId=&vehicleType=` | With `vehicleType`, only tickets of that class are counted (pass sales and shift differences are left out). Per operator: entries, reprints, pass and paid entries, exits, cash, UPI, card, online, FASTag, pass sales, refunded, **system collection**, closed shifts, **actual collection** (system plus the cash differences found when shifts were closed in the period) and the difference |
+| GET | `/reports/transactions?kind=fastag\|online&from=&to=&locationId=&status=&q=&view=list\|daily&page=` | Every FASTag charge attempt or online (gateway) payment, whatever its outcome: date, location, vehicle, ticket or tag, transaction number, provider, status, amount, reason. `status` (FASTag: SUCCESS, PENDING, UNKNOWN, FAILED; online: SUCCESS, PENDING, FAILED, REFUNDED). `tiles` give accepted, in-progress, declined and refunded amounts for the whole period. `view=daily` lists successful amounts per day. This is what our system recorded, not a bank settlement statement |
+| GET | `/reports/day-summary?date=&locationId=` | One day, one line per location: entries, exits, vehicle-type split, collection by method |
+| GET | `/reports/periods` | `{ currentDays, currentFrom }`: where the Current and Old periods split |
 | GET | `/reports/peak-hours?by=hour\|weekday` | Entries by hour of day or weekday |
 | GET | `/reports/occupancy-trend` | Daily average and peak occupancy |
 | GET | `/reports/exceptions?type=` | Cancelled entries, admin releases, lost tickets, refunds, failed online payments, payment problems, vehicles inside over 24 hours |
@@ -262,6 +301,8 @@ All need `REPORT_VIEW` and only cover locations the user may see.
 | GET | `/reports/hardware` | Device uptime and failed commands |
 | GET | `/reports/frequent-vehicles?min=2\|3\|5\|10\|20&q=&page=` | Vehicles that came back: visits, locations, stay, fees, free pass visits, lost tickets, their pass. `summary` has the repeat share of all visits. Up to 366 days |
 | GET | `/reports/locations` | Every location side by side: capacity, inside now, entries, exits, stay, pass visits, lost tickets, collected, pass sales, refunds, net, net per entry. Up to 366 days |
+
+Reports that list dates also accept `period=current` (the last `REPORT_CURRENT_DAYS` days, default 90) or `period=old` (before that; with no dates it shows the 30 days just before the live period). With no `period` there is no limit, as before.
 
 Add `format=csv`, `format=xlsx` (Excel) or `format=pdf` to any report to download it
 (any other format is refused with 400). The file holds the same rows as the screen, with the same
@@ -323,8 +364,6 @@ Admin and operator endpoints (logged-in users):
 | GET | `/anpr?locationId=&status=&direction=` | Gate staff, admins | Camera suggestions (default: waiting) |
 | POST | `/anpr/:id/dismiss` | Gate staff, admins | A wrong or irrelevant reading |
 | GET | `/anpr/preview?locationId=&direction=ENTRY\|EXIT&gate=` | Gate staff, admins | `{ hasCamera, previewUrl, camera }` for the camera at that gate (`hasCamera` is true when a matching ANPR camera exists; `previewUrl` is null when none is set). The Entry and Exit screens use `hasCamera` to hide the browser-camera panel. The address comes from the camera's `config.previewUrl` and carries a secret token |
-| GET | `/anpr/options` | Gate staff, admins | `{ photoReading, maxBytes, simulated }`: is plate reading from photos switched on? |
-| POST | `/anpr/read?locationId=&direction=ENTRY\|EXIT` | `ENTRY_CREATE` (entry) / `EXIT_CREATE` (exit) | Body is the picture (`image/jpeg`, `image/png`, `image/webp`). Answers `{ detection, plate, confidence, reviewReasons, readable }`. The picture is not stored. `testPlate=` (simulated reader only) makes any picture "read" as that plate. 503 when switched off, 415 not a picture, 413 too large, 429 over the limit, 502 when the reading service fails |
 
 Device endpoints (header `x-device-key`, not a user token):
 
@@ -334,14 +373,14 @@ Device endpoints (header `x-device-key`, not a user token):
 | GET | `/device/commands` | Takes up to 5 commands; each must be acknowledged |
 | POST | `/device/commands/:id/ack` | `{ ok, error? }`; repeating is harmless |
 | POST | `/device/events` | `{ type: DEVICE_ERROR or DEVICE_INFO, message, severity? }` |
-| POST | `/device/anpr` | Cameras: `{ plate, confidence, eventId?, capturedAt?, imageUrl?, direction? }` |
+| POST | `/device/anpr` | Cameras: `{ plate, confidence, eventId?, capturedAt?, imageUrl?, direction?, vehicleType? }` |
 | POST | `/device/rfid` | UHF readers: `{ tag, eventId?, capturedAt?, direction? }`. Unknown tag: `{ known: false }` |
 | POST | `/device/fastag` | FASTag readers: `{ plate, tagId?, confidence?, eventId?, capturedAt?, direction? }` (record only, no charge) |
 | POST | `/device/snapshots?commandId=` | CCTV cameras: body is the picture (jpeg, png, webp); attaches it to the ticket |
 
 | GET | `/device/stream` | Event stream for the gate agent: `ready`, then `wake` on connect and whenever a command is queued for that device. One stream per device (a newer one replaces the older). 503 when the server is full |
 
-Suggestions from `/anpr` carry `source` (CAMERA, PHOTO, RFID, FASTAG) and, for tags, `passNumber` and `tagId`.
+Suggestions from `/anpr` carry `vehicleType` and `vehicleTypeFrom` (CAMERA; HISTORY for a plate we know; LANE for the lane's own type) when the type is known, `source` (CAMERA, PHOTO, RFID, FASTAG) and, for tags, `passNumber` and `tagId`.
 
 ### Live stream for screens
 

@@ -79,6 +79,10 @@ export function Button({ children, loading, variant = 'primary', className = '',
     primary: 'bg-blue-600 text-white hover:bg-blue-700',
     secondary: 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50',
     danger: 'border border-red-200 bg-white text-red-700 hover:bg-red-50',
+    // The coloured action buttons of the admin tables: Create (green), Download (teal), Print (navy).
+    success: 'bg-[#28a745] text-white hover:bg-[#218838]',
+    info: 'bg-[#17a2b8] text-white hover:bg-[#138496]',
+    dark: 'bg-[#1e3d73] text-white hover:bg-[#162f59]',
   }
   return (
     <button

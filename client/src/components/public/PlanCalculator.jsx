@@ -59,10 +59,10 @@ export default function PlanCalculator() {
       </div>
       <div className="mt-5 flex flex-wrap items-center gap-3">
         <Link
-          to={`/dashboard/billing?users=${users}&months=${months}`}
+          to={`/register?plan=buy&users=${users}&months=${months}`}
           className="sp-press inline-block rounded-lg bg-gradient-to-r from-[#007bff] to-[#0056b3] px-6 py-3 font-semibold text-white shadow hover:brightness-110"
         >
-          Buy this plan online
+          Register and buy this plan
         </Link>
         <Link
           to={`/contact?plan=Parking Management&users=${users}&months=${months}`}
@@ -70,6 +70,7 @@ export default function PlanCalculator() {
         >
           Talk to us first
         </Link>
+        <Link to="/login" state={{ from: `/dashboard/billing?users=${users}&months=${months}` }} className="font-semibold text-[#007bff] hover:underline">Already registered? Log in to buy</Link>
         <Link to="/register" className="font-semibold text-[#007bff] hover:underline">or start the free trial</Link>
       </div>
     </div>

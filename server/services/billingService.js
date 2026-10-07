@@ -98,7 +98,7 @@ const checkout = async ({ company, user, users, months, req }) => {
   const chosen = gateway.provider();
   if (!chosen || !chosen.isConfigured() || !chosen.hostedPage) throw new AppError("Online payment is not set up yet. Please contact support.", 503);
 
-  const active = await User.countDocuments({ companyId: company._id, isActive: true });
+  const active = await User.countDocuments({ companyId: company._id, isActive: true, role: { $ne: "GOVERNMENT_OFFICER" } });
   if (active > users) {
     throw new AppError(`You have ${active} active users. Choose at least ${active} users, or deactivate some users first.`, 409);
   }

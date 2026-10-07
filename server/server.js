@@ -20,7 +20,9 @@ const { sweep: sweepShopOrders } = require("./services/shopService");
 const { sweep: sweepFastag } = require("./services/fastagService");
 const { purgeExpired: purgePhotos } = require("./services/photoService");
 const { runDue: sendDueReports } = require("./services/dailyReportService");
+const { closeForgottenTickets } = require("./services/operationsService");
 const { migrateIndexes: migratePaymentIndexes } = require("./services/advanceService");
+const { migrateUserIndexes, backfillCompanyCodes } = require("./services/accountService");
 
 // Looks for trials about to end and overdue subscriptions, now and twice a day.
 const watchSubscriptions = () => {
@@ -65,6 +67,12 @@ const watchPhotos = () => {
   setInterval(run, 24 * 60 * 60 * 1000).unref();
 };
 
+// Every 15 minutes: close tickets forgotten open at the locations that asked for it.
+const watchForgottenTickets = () => {
+  const run = () => closeForgottenTickets().catch((error) => console.error("Forgotten-ticket check failed:", error.message));
+  setInterval(run, 15 * 60 * 1000).unref();
+};
+
 // Every 5 minutes: send the end-of-day report emails that are due.
 const watchReports = () => {
   const run = () => sendDueReports().catch((error) => console.error("Daily report run failed:", error.message));
@@ -86,6 +94,13 @@ const start = async () => {
   await migratePaymentIndexes()
     .then((changed) => changed && console.log("Updated the payment index for advance payments"))
     .catch((error) => console.error("Payment index update failed:", error.message));
+  // Sign-in by company code and Login ID: old companies get a code, and the email index allows users without one.
+  await migrateUserIndexes()
+    .then((changed) => changed && console.log("Updated the user email index for Login ID sign-in"))
+    .catch((error) => console.error("User index update failed:", error.message));
+  await backfillCompanyCodes()
+    .then((n) => n && console.log(`Gave ${n} compan${n === 1 ? "y" : "ies"} a sign-in code`))
+    .catch((error) => console.error("Company code backfill failed:", error.message));
   server = app.listen(env.port, () => {
     console.log(`Server running on port ${env.port}`);
   });
@@ -95,6 +110,7 @@ const start = async () => {
   watchPayments();
   watchPhotos();
   watchReports();
+  watchForgottenTickets();
 };
 
 // Stop cleanly when the host asks (deploys, restarts): finish requests in

@@ -303,9 +303,9 @@ const requestTicketPrint = (args) => {
     build: async (options) => {
       const [company, location] = await Promise.all([
         Company.findById(session.companyId).select("name gstNumber"),
-        Location.findById(session.locationId).select("name address receiptSettings"),
+        Location.findById(session.locationId).select("name address receiptSettings operations"),
       ]);
-      return printer.buildTicket({ company, location, session, settings: location && location.receiptSettings }, options);
+      return printer.buildTicket({ company, location, session, settings: location && location.receiptSettings, operations: location && location.operations }, options);
     },
   });
 };

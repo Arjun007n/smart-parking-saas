@@ -150,9 +150,11 @@ Safety notes:
   out later. The operator sees "did not respond" and opens it manually (or presses *Try the barrier
   again*, which only works for a vehicle cleared in the last 10 minutes).
 
-## Reading plates from a webcam or an IP camera (AI service)
+## Number plates: ANPR camera or typing
 
-If your camera cannot read plates itself, use the Python **AI service** (`ai-service/`, guide in `docs/ai-service.md`). It reads the camera with YOLO and OCR and reports to `POST /api/device/anpr` like any other ANPR camera, and gives the Entry and Exit screens a live picture with the plate box.
+The platform has no plate-reading software of its own. At each gate the number comes from an **ANPR camera**
+(a camera that reads the plate itself) or from the operator typing it on the Entry or Exit screen. Both work at
+the same time: a camera reading appears as a suggestion, and the operator can always type instead.
 
 ## Connecting a real ANPR camera
 
@@ -160,11 +162,12 @@ The platform accepts one standard format at `POST /api/device/anpr`:
 
 ```json
 { "plate": "MH12AB1234", "confidence": 0.93, "eventId": "cam-77123",
-  "capturedAt": "2026-10-03T10:15:00Z", "imageUrl": "https://...", "direction": "ENTRY" }
+  "capturedAt": "2026-10-03T10:15:00Z", "imageUrl": "https://...", "direction": "ENTRY", "vehicleType": "car" }
 ```
 
 * `confidence` may be 0–1 or 0–100. `eventId` makes a camera's retries harmless.
   `direction` is needed only when the camera is registered for both entry and exit: `ENTRY`, `EXIT`, or `AUTO` (the server decides: an open ticket of 5+ minutes means leaving, otherwise arriving).
+* `vehicleType` is optional: what the camera thinks the vehicle is. Words like car, SUV, van, bike, motorcycle, scooter, truck, bus, taxi, auto, tempo and pickup are mapped to our five types (Car, Bike, Heavy, Taxi, Tempo); a word we do not know is ignored. The Entry screen then chooses the vehicle type by itself. A plate we already know (it has been in before) keeps the type we remember, whatever the camera says. If neither knows it, the **vehicle type of the lane** is used (set on the location's gate: "Vehicle type of this lane", e.g. a bike lane). With none of these, the type goes back to Car (or the lane's type) and the screen says the camera could not tell, so the operator checks it.
 * Cameras that can call a web address with a custom header can post straight to the cloud with
   `x-device-key: hwk_...`.
 * Most cameras cannot set headers or post to the internet. Use the gate agent as a bridge: give

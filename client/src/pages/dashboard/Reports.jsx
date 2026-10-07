@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query'
 import { locationApi, reportApi, userApi } from '../../services/api'
 import { useAuth } from '../../hooks/useAuth'
@@ -10,8 +11,11 @@ import { BarChartCard } from '../../components/charts'
 // Which filters each report uses, and how its chart (if any) is drawn.
 const REPORTS = {
   revenue: { label: 'Revenue', range: true, groupBy: true },
+  'day-summary': { label: 'Day summary', day: true },
+  'operator-collection': { label: 'Collection by operator', range: true, operator: true, vehicleType: true },
   collection: { label: 'Collection', range: true, operator: true, method: true, paged: true },
-  vehicles: { label: 'Vehicle history', range: true, search: true, status: true, paged: true },
+  transactions: { label: 'FASTag & online', range: true, transactions: true, paged: true },
+  vehicles: { label: 'Vehicle history', range: true, search: true, status: true, vehicleType: true, gate: true, entryBy: true, exitBy: true, paged: true },
   occupancy: { label: 'Occupancy', day: true },
   operators: { label: 'Operators', range: true, operator: true },
   'peak-hours': { label: 'Peak hours', range: true, by: true },
@@ -25,15 +29,22 @@ const REPORTS = {
   locations: { label: 'Locations', range: true },
 }
 
-const MONEY_KEYS = ['collected', 'tax', 'refunded', 'net', 'amount', 'fee', 'cash', 'fees', 'average', 'passSales', 'perEntry']
-const DATE_KEYS = ['paidAt', 'entryTime', 'exitTime', 'when', 'lastVisit']
+const MONEY_KEYS = [
+  'collected', 'tax', 'refunded', 'net', 'amount', 'fee', 'cash', 'fees', 'average', 'passSales', 'perEntry',
+  'entryAmount', 'exitAmount', 'upi', 'card', 'online', 'fastag', 'wallet', 'systemCollection', 'actualCollection', 'difference',
+  'advance', 'payable', 'total',
+]
+const DATE_KEYS = ['paidAt', 'entryTime', 'exitTime', 'when', 'lastVisit', 'date']
 const PERCENT_KEYS = ['utilization', 'peakUtilization', 'share', 'successRate', 'readRate', 'averageConfidence']
 const MINUTE_KEYS = ['durationMinutes', 'averageStayMinutes', 'averageMinutes']
 const NUMBER_KEYS = [
   'payments', 'refunds', 'entries', 'exits', 'corrections', 'vehicles', 'capacity', 'peakInside', 'failed', 'passVisits',
   'daysLeft', 'commands', 'acked', 'outages', 'detections', 'corrected', 'averageEntries', 'averageSeconds',
   'visits', 'locationCount', 'lostTickets', 'insideNow',
+  'transactions', 'reprints', 'passEntries', 'paidEntries', 'passExits', 'paidExits', 'shifts', 'parked', 'photos',
 ]
+
+const TXN_STATUS = { PENDING: 'Pending', UNKNOWN: 'Being checked', FAILED: 'Declined or failed' }
 
 const EXCEPTION_TYPES = {
   CANCELLED: 'Entry cancelled', OVERRIDE: 'Released by admin', LOST_TICKET: 'Lost ticket', REFUND: 'Refund',
@@ -50,7 +61,7 @@ function display(key, value) {
   if (PERCENT_KEYS.includes(key)) return `${value}%`
   if (key === 'method') return PAYMENT_LABELS[value] || value
   if (key === 'type') return VEHICLE_LABELS[value] || HARDWARE_TYPES[value] || value
-  if (key === 'status') return SESSION_STATUS[value]?.label || (value === 'REFUNDED' ? 'Refunded' : value === 'SUCCESS' ? 'Paid' : value)
+  if (key === 'status') return SESSION_STATUS[value]?.label || TXN_STATUS[value] || (value === 'REFUNDED' ? 'Refunded' : value === 'SUCCESS' ? 'Paid' : value)
   return String(value)
 }
 
@@ -69,18 +80,32 @@ function buildParams(name, f) {
     ...(spec.min ? { min: f.min } : {}),
     ...(spec.operator && f.operatorId ? { operatorId: f.operatorId } : {}),
     ...(spec.method && f.method ? { method: f.method } : {}),
+    ...(spec.transactions ? { kind: f.kind, view: f.view, ...(f.txnStatus ? { status: f.txnStatus } : {}) } : {}),
     ...(spec.search && f.q.trim() ? { q: f.q.trim() } : {}),
     ...(spec.status && f.status ? { status: f.status } : {}),
+    ...(spec.vehicleType && f.vehicleType ? { vehicleType: f.vehicleType } : {}),
+    ...(spec.gate && f.gate.trim() ? { gate: f.gate.trim() } : {}),
+    ...(spec.entryBy && f.entryOperatorId ? { entryOperatorId: f.entryOperatorId } : {}),
+    ...(spec.exitBy && f.exitOperatorId ? { exitOperatorId: f.exitOperatorId } : {}),
+    ...(f.period ? { period: f.period } : {}),
     ...(spec.paged ? { page: f.page } : {}),
   }
 }
 
 export default function Reports() {
   const { can } = useAuth()
-  const [name, setName] = useState('revenue')
-  const [filters, setFilters] = useState({
-    from: todayInput(), to: todayInput(), locationId: '', groupBy: 'day', operatorId: '', method: '', q: '', status: '', page: 1,
-    by: 'hour', exceptionType: '', due: '30', min: '2',
+  // A link from the dashboard can open a report ready-filtered: ?report=vehicles&from=&to=&vehicleType=&locationId=
+  const [linked] = useSearchParams()
+  const [name, setName] = useState(() => (REPORTS[linked.get('report')] ? linked.get('report') : 'revenue'))
+  const [filters, setFilters] = useState(() => {
+    const day = /^\d{4}-\d{2}-\d{2}$/
+    const from = day.test(linked.get('from') || '') ? linked.get('from') : todayInput()
+    const to = day.test(linked.get('to') || '') ? linked.get('to') : from
+    const type = linked.get('vehicleType') || ''
+    return {
+      from, to, locationId: linked.get('locationId') || '', groupBy: 'day', operatorId: '', method: '', q: '', status: '', page: 1,
+      by: 'hour', kind: 'fastag', view: 'list', txnStatus: '', exceptionType: '', due: '30', min: '2', vehicleType: Object.hasOwn(VEHICLE_LABELS, type) ? type : '', gate: '', entryOperatorId: '', exitOperatorId: '', period: '',
+    }
   })
   const spec = REPORTS[name]
   const params = buildParams(name, filters)
@@ -94,6 +119,7 @@ export default function Reports() {
     placeholderData: keepPreviousData,
     enabled: Boolean(filters.from) && (!spec.range || Boolean(filters.to)),
   })
+  const periods = useQuery({ queryKey: ['report-periods'], queryFn: reportApi.periods, staleTime: 60 * 60 * 1000 })
   const download = useMutation({ mutationFn: (format) => reportApi.download(name, params, format) })
 
   const data = report.data
@@ -127,7 +153,8 @@ export default function Reports() {
           label={spec.day ? 'Date' : 'From'}
           type="date"
           name="report-from"
-          max={todayInput()}
+          max={filters.period === 'old' && periods.data ? periods.data.lastOldDay : todayInput()}
+          min={filters.period === 'current' && periods.data ? periods.data.currentFrom : undefined}
           value={filters.from}
           onChange={(event) => set({ from: event.target.value, ...(event.target.value > filters.to ? { to: event.target.value } : {}) })}
         />
@@ -137,7 +164,7 @@ export default function Reports() {
             type="date"
             name="report-to"
             min={filters.from}
-            max={todayInput()}
+            max={filters.period === 'old' && periods.data ? periods.data.lastOldDay : todayInput()}
             value={filters.to}
             onChange={(event) => set({ to: event.target.value })}
           />
@@ -148,6 +175,23 @@ export default function Reports() {
             {locations.data.map((l) => (
               <option key={l._id} value={l._id}>{l.name}</option>
             ))}
+          </Select>
+        )}
+        {periods.data && (
+          <Select
+            label="Period"
+            name="report-period"
+            value={filters.period}
+            onChange={(event) => {
+              const period = event.target.value
+              // Old reports start on the last day of the old period; current ones on today.
+              const day = period === 'old' ? periods.data.lastOldDay : todayInput()
+              set({ period, ...(period ? { from: day, to: day } : {}) })
+            }}
+          >
+            <option value="">Any dates</option>
+            <option value="current">Current (last {periods.data.days} days)</option>
+            <option value="old">Old (before {periods.data.currentFrom})</option>
           </Select>
         )}
         {spec.groupBy && (
@@ -194,6 +238,28 @@ export default function Reports() {
             ))}
           </Select>
         )}
+        {spec.transactions && (
+          <>
+            <Select label="Payment" name="report-kind" value={filters.kind} onChange={(event) => set({ kind: event.target.value, txnStatus: '' })}>
+              <option value="fastag">FASTag</option>
+              <option value="online">Online (gateway)</option>
+            </Select>
+            <Select label="Show" name="report-view" value={filters.view} onChange={(event) => set({ view: event.target.value })}>
+              <option value="list">Every transaction</option>
+              <option value="daily">Day by day (accepted only)</option>
+            </Select>
+            {filters.view === 'list' && (
+              <Select label="Status" name="report-txn-status" value={filters.txnStatus} onChange={(event) => set({ txnStatus: event.target.value })}>
+                <option value="">All statuses</option>
+                <option value="SUCCESS">Accepted</option>
+                <option value="PENDING">Pending</option>
+                {filters.kind === 'fastag' && <option value="UNKNOWN">Being checked</option>}
+                <option value="FAILED">Declined or failed</option>
+                {filters.kind === 'online' && <option value="REFUNDED">Refunded</option>}
+              </Select>
+            )}
+          </>
+        )}
         {spec.method && (
           <Select label="Paid by" name="report-method" value={filters.method} onChange={(event) => set({ method: event.target.value })}>
             <option value="">Any method</option>
@@ -210,6 +276,31 @@ export default function Reports() {
             <option value="">Any status</option>
             {Object.entries(SESSION_STATUS).map(([value, s]) => (
               <option key={value} value={value}>{s.label}</option>
+            ))}
+          </Select>
+        )}
+        {spec.vehicleType && (
+          <Select label="Vehicle type" name="report-vehicle-type" value={filters.vehicleType} onChange={(event) => set({ vehicleType: event.target.value })}>
+            <option value="">Any type</option>
+            {Object.entries(VEHICLE_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </Select>
+        )}
+        {spec.gate && <Field label="Gate" name="report-gate" placeholder="Gate name" value={filters.gate} onChange={(event) => set({ gate: event.target.value })} />}
+        {spec.entryBy && (users.data || []).length > 0 && (
+          <Select label="Entry by" name="report-entry-by" value={filters.entryOperatorId} onChange={(event) => set({ entryOperatorId: event.target.value })}>
+            <option value="">Anyone</option>
+            {users.data.map((u) => (
+              <option key={u._id} value={u._id}>{u.name}</option>
+            ))}
+          </Select>
+        )}
+        {spec.exitBy && (users.data || []).length > 0 && (
+          <Select label="Exit by" name="report-exit-by" value={filters.exitOperatorId} onChange={(event) => set({ exitOperatorId: event.target.value })}>
+            <option value="">Anyone</option>
+            {users.data.map((u) => (
+              <option key={u._id} value={u._id}>{u.name}</option>
             ))}
           </Select>
         )}
@@ -263,6 +354,57 @@ export default function Reports() {
                   summary={`Net revenue by ${data.groupBy}: ${money(data.total.net)} in total.`}
                 />
               </Card>
+            )}
+
+            {name === 'operator-collection' && data.vehicleType && (
+              <Alert type="info">
+                Only {VEHICLE_LABELS[data.vehicleType] || data.vehicleType} tickets are counted. Pass sales and cash found short or over belong to a person, not a vehicle class, so they are left out.
+              </Alert>
+            )}
+
+            {name === 'operator-collection' && data.total && (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                {[
+                  ['System collection', money(data.total.systemCollection), `${data.total.entries || 0} entries · ${data.total.exits || 0} exits`],
+                  ['Actual collection', money(data.total.actualCollection), `${data.total.shifts || 0} shift(s) closed in this period`],
+                  ['Short / over', money(data.total.difference), data.total.difference < 0 ? 'Cash counted was less than expected' : data.total.difference > 0 ? 'Cash counted was more than expected' : 'Counted cash matched'],
+                  ['Reprints', data.total.reprints || 0, `${data.total.passEntries || 0} pass entries`],
+                ].map(([label, value, hint]) => (
+                  <div key={label} className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+                    <p className="text-sm text-slate-500">{label}</p>
+                    <p className="mt-1 text-xl font-bold text-slate-900">{value}</p>
+                    {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {name === 'transactions' && data.tiles && (
+              <>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  {[
+                    ['Accepted', money(data.tiles.accepted), 'Money that went through'],
+                    ['In progress', money(data.tiles.inProgress), 'Waiting for the bank or being checked'],
+                    ['Declined / failed', money(data.tiles.declined), 'Not charged'],
+                    ['Refunded', money(data.tiles.refunded), `${data.tiles.count} attempts in this period`],
+                  ].map(([label, value, hint]) => (
+                    <div key={label} className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+                      <p className="text-sm text-slate-500">{label}</p>
+                      <p className="mt-1 text-xl font-bold text-slate-900">{value}</p>
+                      <p className="mt-1 text-xs text-slate-500">{hint}</p>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-sm text-slate-600">
+                  This is what our system recorded. It is not a bank statement, so compare it with your payment partner&apos;s settlement report before you reconcile.
+                </p>
+              </>
+            )}
+
+            {name === 'day-summary' && (
+              <p className="text-sm text-slate-600">
+                One day at {filters.locationId ? 'this location' : 'all locations'}, by vehicle type. Choose a location and download the PDF to keep a copy.
+              </p>
             )}
 
             {name === 'occupancy' && data.rows.length > 0 && (

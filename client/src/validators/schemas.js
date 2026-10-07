@@ -13,17 +13,40 @@ const count = z
   .min(0, 'Cannot be negative')
   .max(100000, 'Too large')
 
+// Everyone signs in with their company code and either a Login ID or an email. (The platform's own
+// administrator has no company and leaves the code empty; the server decides.)
 export const loginSchema = z.object({
-  email,
+  companyCode: z.string().trim().max(20).optional(),
+  identifier: z.string().trim().min(1, 'Enter your Login ID or email').max(254),
   password: z.string().min(1, 'Password is required'),
 })
+
+// A Login ID: 3 to 30 letters, digits, dots, dashes or underscores.
+const loginId = z
+  .string()
+  .trim()
+  .refine((v) => !v || /^[A-Za-z0-9][A-Za-z0-9._-]{2,29}$/.test(v), 'Use 3 to 30 letters, digits, dots, dashes or underscores')
 
 export const registerSchema = z
   .object({
     companyName: z.string().trim().min(2, 'Company name is required').max(150),
+    // The code everyone in the company signs in with, chosen by the admin.
+    companyCode: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .regex(/^[A-Z0-9]{4,12}$/, 'Use 4 to 12 letters or digits, no spaces or symbols'),
     name: z.string().trim().min(2, 'Your name is required').max(100),
     email,
     phone: z.string().trim().max(20).optional(),
+    gstNumber: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .refine((v) => v === '' || /^[0-9]{2}[A-Z0-9]{13}$/.test(v), 'GSTIN must be 15 characters')
+      .optional(),
+    city: z.string().trim().max(100).optional(),
+    state: z.string().trim().max(100).optional(),
     password,
     confirmPassword: z.string(),
   })
@@ -56,8 +79,11 @@ export const locationSchema = z.object({
 
 export const userSchema = z.object({
   name: z.string().trim().min(2, 'Name is required').max(100),
-  email,
+  // A user needs an email or a Login ID (or both) to sign in with.
+  email: optionalEmail,
+  loginId: loginId.optional(),
   phone: z.string().trim().max(20).optional(),
+  lanes: z.array(z.string()).optional(),
   password,
   role: z.string().min(1, 'Choose a role'),
   locationIds: z.array(z.string()),
@@ -65,7 +91,11 @@ export const userSchema = z.object({
   shiftName: z.string().trim().max(50).optional(),
   shiftStart: z.union([z.literal(''), z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Enter a time like 09:30')]).optional(),
   shiftEnd: z.union([z.literal(''), z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Enter a time like 09:30')]).optional(),
-})
+  reprint: z.enum(['YES', 'NO']).optional(),
+  showEntry: z.enum(['YES', 'NO']).optional(),
+  showExit: z.enum(['YES', 'NO']).optional(),
+  showTotal: z.enum(['YES', 'NO']).optional(),
+}).refine((v) => Boolean(v.email || v.loginId), { path: ['loginId'], message: 'Enter a Login ID or an email' })
 
 export const companySchema = z.object({
   name: z.string().trim().min(2, 'Company name is required').max(150),
@@ -77,6 +107,7 @@ export const companySchema = z.object({
     .toUpperCase()
     .refine((v) => v === '' || /^[0-9]{2}[A-Z0-9]{13}$/.test(v), 'GSTIN must be 15 characters')
     .optional(),
+  passGstPercent: z.number({ error: 'Enter a percentage, 0 for none' }).min(0, 'Cannot be negative').max(100, 'At most 100'),
   billingName: z.string().trim().max(100).optional(),
   billingEmail: z
     .string()
@@ -104,6 +135,7 @@ const coordinate = (limit, name) =>
   z.string().trim().optional().refine((v) => !v || (Number.isFinite(Number(v)) && Math.abs(Number(v)) <= limit), { message: `${name} must be a number from -${limit} to ${limit}` })
 
 export const locationDetailsSchema = z.object({
+  parkingType: z.enum(['NORMAL', 'AIRPORT']),
   lat: coordinate(90, 'Latitude'),
   lng: coordinate(180, 'Longitude'),
   name: z.string().trim().min(2, 'Parking name is required').max(150),
@@ -124,16 +156,34 @@ export const locationDetailsSchema = z.object({
   zones: z.string().max(2000).optional(),
   onlineEnabled: z.boolean(),
   onlineNote: z.string().trim().max(300).optional(),
+  waitingMinutes: z.number({ error: 'Enter minutes (0 for the standard time)' }).int().min(0).max(4320, 'At most 3 days (4320 minutes)').refine((v) => v === 0 || v >= 5, 'At least 5 minutes, or 0 for the standard time'),
+  cancelBeforeMinutes: z.number({ error: 'Enter minutes (0 if customers cannot cancel)' }).int().min(0).max(10080, 'At most 7 days'),
   fee: z.object(Object.fromEntries(['car', 'bike', 'heavy', 'taxi', 'tempo'].map((key) => [key, z.number({ error: 'Enter an amount' }).min(0, 'Cannot be negative').max(100000, 'Too large')]))),
-  gates: z.array(
-    z.object({
-      name: z.string().trim().min(1, 'Gate name is required').max(50),
-      type: z.enum(['ENTRY', 'EXIT', 'BOTH']),
-      laneCode: z.string().trim().max(30).optional(),
-      plazaId: z.string().trim().max(30).optional(),
-      fastagLaneId: z.string().trim().max(30).optional(),
+  gates: z
+    .array(
+      z.object({
+        // Set for lanes that already exist, so the server can tell a rename from a removal.
+        _id: z.string().optional(),
+        isActive: z.boolean().optional(),
+        name: z.string().trim().min(1, 'Gate name is required').max(50),
+        type: z.enum(['ENTRY', 'EXIT', 'BOTH']),
+        laneCode: z.string().trim().max(30).optional(),
+        plazaId: z.string().trim().max(30).optional(),
+        fastagLaneId: z.string().trim().max(30).optional(),
+        cameraSerial: z.string().trim().max(60).optional(),
+        // The kind of vehicle this lane is for; '' = any.
+        vehicleType: z.enum(['', 'CAR', 'BIKE', 'HEAVY', 'TAXI', 'TEMPO']).optional(),
+      }),
+    )
+    // Two lanes cannot share a name (capital letters do not make a name different).
+    .superRefine((lanes, ctx) => {
+      const seen = new Set()
+      lanes.forEach((lane, i) => {
+        const key = lane.name.trim().toLowerCase()
+        if (key && seen.has(key)) ctx.addIssue({ code: 'custom', path: [i, 'name'], message: 'Another lane already has this name' })
+        seen.add(key)
+      })
     }),
-  ),
 })
 
 export const slotBulkSchema = z.object({
@@ -241,11 +291,16 @@ export const operatorProfileSchema = z.object({
 })
 
 export const userEditSchema = operatorProfileSchema.extend({
+  loginId: loginId.optional(),
+  lanes: z.array(z.string()).optional(),
   name: z.string().trim().min(2, 'Name is required').max(100),
   phone: z.string().trim().max(20).optional(),
   role: z.string().min(1, 'Choose a role'),
   locationIds: z.array(z.string()),
-  password: z.union([z.literal(''), password]).optional(),
+  reprint: z.enum(['YES', 'NO']).optional(),
+  showEntry: z.enum(['YES', 'NO']).optional(),
+  showExit: z.enum(['YES', 'NO']).optional(),
+  showTotal: z.enum(['YES', 'NO']).optional(),
 })
 
 const plate = z
@@ -253,26 +308,12 @@ const plate = z
   .trim()
   .refine((v) => /^[A-Za-z0-9]{4,12}$/.test(v.replace(/[\s-]/g, '')), 'Enter 4 to 12 letters and digits')
 
-// Money taken at the gate. Left empty means no advance.
-const advanceAmount = z
-  .string()
-  .trim()
-  .refine((v) => v === '' || (/^\d{1,6}(\.\d{1,2})?$/.test(v) && Number(v) <= 100000), 'Enter an amount up to 1,00,000 (at most 2 decimals)')
-
-export const entrySchema = z
-  .object({
-    locationId: z.string().min(1, 'Choose a location'),
-    vehicleNumber: plate,
-    vehicleType,
-    gate: z.string().optional(),
-    advanceAmount: advanceAmount.optional(),
-    advanceMethod: z.enum(['CASH', 'UPI', 'CARD', 'FASTAG']).optional(),
-    advanceReference: z.string().trim().max(100).optional(),
-  })
-  .refine((v) => !v.advanceReference || Number(v.advanceAmount) > 0, {
-    message: 'Enter the advance amount first',
-    path: ['advanceAmount'],
-  })
+export const entrySchema = z.object({
+  locationId: z.string().min(1, 'Choose a location'),
+  vehicleNumber: plate,
+  vehicleType,
+  gate: z.string().optional(),
+})
 
 export const exitLookupSchema = z
   .object({

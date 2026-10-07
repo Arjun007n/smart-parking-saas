@@ -35,6 +35,7 @@ const fields = (isCreate) => ({
     type: "object",
     fields: { is24x7: { type: "boolean" }, open: time, close: time },
   },
+  parkingType: { type: "string", enum: ["NORMAL", "AIRPORT"] },
   vehicleTypes: { type: "array", max: 10, of: { type: "string", enum: VEHICLE_TYPES } },
   capacity: { type: "object", fields: Object.fromEntries(VEHICLE_KEYS.map((key) => [key, count])) },
   gates: {
@@ -48,6 +49,11 @@ const fields = (isCreate) => ({
         laneCode: { type: "string", max: 30 },
         plazaId: { type: "string", max: 30 },
         fastagLaneId: { type: "string", max: 30 },
+        // Sent back for lanes that already exist, so a rename is not mistaken for a removal.
+        _id: { type: "objectId" },
+        cameraSerial: { type: "string", max: 60 },
+        isActive: { type: "boolean" },
+        vehicleType: { type: "string", enum: VEHICLE_TYPES },
       },
     },
   },
@@ -58,6 +64,10 @@ const fields = (isCreate) => ({
       enabled: { type: "boolean" },
       fees: { type: "object", fields: Object.fromEntries(VEHICLE_KEYS.map((key) => [key, { type: "number", min: 0, max: 100000 }])) },
       note: text(300),
+      // How long a booking waits after its arrival time (5 minutes to 3 days). 0 = the standard 12 hours.
+      waitingMinutes: { type: "number", integer: true, min: 0, max: 4320 },
+      // Customers may cancel up to this many minutes before arrival. 0 = they cannot cancel online.
+      cancelBeforeMinutes: { type: "number", integer: true, min: 0, max: 10080 },
     },
   },
   receiptSettings: {
@@ -68,6 +78,30 @@ const fields = (isCreate) => ({
       showQr: { type: "string", enum: ["DEVICE", "ON", "OFF"] },
     },
   },
+  reportRecipients: { type: "array", max: 10, of: { type: "string", max: 254, pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, message: "must be an email address" } },
+  operations: {
+    type: "object",
+    fields: {
+      allowReEntry: { type: "boolean" }, exitAmountEdit: { type: "boolean" },
+      autoExitHours: { type: "number", integer: true, min: 0, max: 720 },
+      reEntryLimit: { type: "number", integer: true, min: 0, max: 1000 },
+      printTicketNumber: { type: "boolean" }, printPhoto: { type: "boolean" },
+      photoAutoCapture: { type: "boolean" }, printPassReceipt: { type: "boolean" },
+      autoExitRules: {
+        type: "array",
+        max: 10,
+        of: {
+          type: "object",
+          fields: {
+            vehicleType: { type: "string", required: true, enum: VEHICLE_TYPES },
+            active: { type: "boolean" },
+            days: { type: "number", required: true, integer: true, min: 1, max: 365 },
+            amount: { type: "number", min: 0, max: 1000000 },
+          },
+        },
+      },
+    },
+  },
   ...(isCreate ? {} : { isActive: { type: "boolean" } }),
 });
 
@@ -75,6 +109,27 @@ router.use(protect, tenant);
 
 // Any logged-in user can see the locations they are allowed to work at.
 router.get("/", controller.listLocations);
+router.get("/export", controller.exportLocations);
+router.post(
+  "/:id/auto-exit/run",
+  validateIdParam(),
+  requirePermission(PERMISSIONS.LOCATION_MANAGE),
+  validateBody({ vehicleType: { type: "string", required: true, enum: VEHICLE_TYPES } }),
+  controller.runAutoExit
+);
+// The re-entry counter: only an admin can see it, and only an admin can reset it.
+router.get("/:id/re-entries", validateIdParam(), requirePermission(PERMISSIONS.LOCATION_MANAGE), controller.reEntryCounter);
+router.post("/:id/re-entries/reset", validateIdParam(), requirePermission(PERMISSIONS.LOCATION_MANAGE), controller.resetReEntryCounter);
+// The Lanes tab: every lane with its operators and devices (?q= search, ?page=, ?limit=). The switch turns one lane on or off.
+router.get("/:id/lanes", validateIdParam(), controller.listLanes);
+router.patch(
+  "/:id/lanes/:laneId/status",
+  validateIdParam(),
+  validateIdParam("laneId"),
+  requirePermission(PERMISSIONS.LOCATION_MANAGE),
+  validateBody({ isActive: { type: "boolean", required: true } }),
+  controller.setLaneStatus
+);
 router.get("/:id", validateIdParam(), controller.getLocation);
 
 router.post(

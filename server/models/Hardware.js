@@ -51,7 +51,7 @@ const hardwareSchema = new mongoose.Schema(
       },
       autoPrint: { type: Boolean, default: true },
       printQr: { type: Boolean, default: false },
-      // ANPR camera: where the AI service shows its live picture (with a secret token in the address).
+      // ANPR camera: where the camera's live picture is (a token in the address keeps it private).
       previewUrl: { type: String, trim: true, maxlength: 300 },
     },
   },

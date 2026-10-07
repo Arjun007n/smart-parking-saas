@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { passApi } from '../../services/api'
+import { passApi, passCompanyApi } from '../../services/api'
 import { useAuth } from '../../hooks/useAuth'
 import { useMyLocations } from '../../hooks/useMyLocations'
 import { passContactSchema, passRenewSchema } from '../../validators/schemas'
@@ -62,6 +62,8 @@ function RenewForm({ pass, locations, defaultLocationId }) {
 // The holder's name, phone and email (the email receives the pass details and an ending-soon reminder).
 function ContactCard({ pass, onChanged }) {
   const [done, setDone] = useState('')
+  const [passCompanyId, setPassCompanyId] = useState(pass.passCompanyId || '')
+  const companies = useQuery({ queryKey: ['pass-companies', ''], queryFn: () => passCompanyApi.list({}) })
   const {
     register, handleSubmit, formState: { errors },
   } = useForm({
@@ -69,7 +71,7 @@ function ContactCard({ pass, onChanged }) {
     defaultValues: { holderName: pass.holderName || '', phone: pass.phone || '', email: pass.email || '' },
   })
   const save = useMutation({
-    mutationFn: (values) => passApi.update(pass._id, { holderName: values.holderName, phone: values.phone || '', email: values.email || '' }),
+    mutationFn: (values) => passApi.update(pass._id, { holderName: values.holderName, phone: values.phone || '', email: values.email || '', passCompanyId }),
     onSuccess: () => {
       setDone('Saved.')
       onChanged()
@@ -82,6 +84,14 @@ function ContactCard({ pass, onChanged }) {
       <form className="grid gap-3 sm:grid-cols-2" onSubmit={handleSubmit((values) => { setDone(''); save.mutate(values) })} noValidate>
         <Field label="Holder name" error={errors.holderName?.message} {...register('holderName')} />
         <Field label="Phone" type="tel" error={errors.phone?.message} {...register('phone')} />
+        {(companies.data?.companies || []).length > 0 && (
+          <div className="sm:col-span-2">
+            <Select label="Company" name="pass-company" value={passCompanyId} onChange={(event) => setPassCompanyId(event.target.value)}>
+              <option value="">No company</option>
+              {companies.data.companies.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
+            </Select>
+          </div>
+        )}
         <div className="sm:col-span-2">
           <Field
             label="Email"

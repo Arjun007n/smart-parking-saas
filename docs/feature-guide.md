@@ -24,35 +24,72 @@ The server (Node/Express with MongoDB) enforces every rule. The screens only hid
 | Super Admin | Platform owner | Everything, across all companies; edits the public website |
 | Company Admin | Owner of one parking business | Everything inside the company: locations, users, roles, passes, reports, company plan, audit log |
 | Location Admin | Site manager | Same as above for their own locations only (no company settings, no roles) |
-| Entry Operator | Gate staff at entry | Register entries |
-| Exit Operator | Gate staff at exit | Process exits and collect payments; open and close shifts |
-| Collection Operator | Cashier / supervisor | Collect payments and view reports |
+| Supervisor | Shift in-charge | Entry, exit and payments, plus reports, re-entry, and cancelling or releasing a ticket with a reason. Cannot manage users, tariffs, locations or settings |
+| Operator | One person on a gate | Entry, exit and payments with one login (the gate screens only: no reports, passes, wallets, corrections or settings). This is the role offered when adding gate staff; internally `GATE_OPERATOR` |
+| Entry Operator (older) | Gate staff at entry | Register entries. No longer offered when adding a user; existing users keep it |
+| Exit Operator (older) | Gate staff at exit | Process exits and collect payments; open and close shifts |
+| Collection Operator (older) | Cashier | Collect payments and view reports |
+| Viewer | Owner's representative, auditor | Read-only: reports and the live picture; changes nothing |
+| Government Officer | Officer of a government body | Signs in on their own page, `/government/login`, and sees only the **totals and lists of vehicles that entered and left** for the locations the admin chose. Vehicle numbers, times, type, ticket and gate, but no money, and nothing else in the product |
 
 A company admin can also create **custom roles** (Roles page): pick a base role (which decides rank and whether the person sees one location or all) and a list of permissions. Changes apply immediately. Nobody can hand out permissions they do not hold themselves. Operators whose role has only gate permissions are sent to the operator area; anyone with more gets the dashboard.
 
+### Government officers
+
+A company admin (or a location admin, for their own locations) adds an officer on the Users page: pick the role **Government Officer** and choose at least one location. The officer **does not use a seat** of the plan. Officers sign in at **/government/login** (company code, Login ID or email, password); the normal login page refuses them, and the Government page refuses everyone else. After signing in they see one page: the number of vehicles that entered, exited and are inside now; entries and exits by day, by vehicle type and by location; and the list of vehicles with their numbers and times, which can be searched and downloaded as Excel, CSV or PDF. Whatever address they type, they cannot open anything else, and the server enforces this on every request, not only the screen.
+
+### Signing in: company code first
+
+Every company has a **company code** (the company admin chooses it when registering: 4 to 12 letters or digits, checked as they type, and it cannot be changed later; shown on the dashboard, the Users page and My profile). **Everyone signs in with it**, admins included: the login page asks for the company code, a **Login ID or email**, and the password. The code is remembered on that computer. Because several companies use the platform, the same email or Login ID is never tried across companies: it is looked up inside the company whose code was typed. Without a code nobody can sign in, except the platform's own administrator, who has no company and uses an email alone.
+
+A company admin or location admin gives staff a **Login ID** (Users page) so they do not need an email. A Login ID is unique inside the company; the same ID can exist in another company. A user can have both an email and a Login ID. A user with no email cannot use "Forgot password": the admin sets a new password (Edit user, "Reset password"). Wrong passwords lock the account for 15 minutes after ten tries.
+
+### Lanes
+
+## The Locations table
+
+**Dashboard > Parking Locations** lists every location in one table: parking type, user licence (seats in use / allowed), valid upto with a Renew link to Billing, six gate switches you can tick right there (photo auto capture, print photo, exit amount edit, allow re-entry, print ticket number, print receipt for pass vehicles), auto exit, tariffs, capacity with an Update window, lanes, and Edit and Close. It has search, a records-per-page choice, **Download Excel** and **Print**. Each link opens that location on the right tab: Tariffs, Auto exit, Lanes. **Auto exit** sets, for each vehicle type, how many days a ticket may stay open before the system closes it and what the vehicle still owes; **Run now** applies it at once. No payment is recorded, so follow the amount up yourself. **Lanes** lists every gate with its lane code, FASTag lane, camera serial number, the operators tied to it and the cameras and readers attached to it; it can be searched and is shown ten to a page. An admin can switch a lane on or off there: a lane that is off (shown as De-Active) takes no entries, exits or manual barrier lifts, and keeps its set-up. Lane names must be different from each other (capital letters do not count). Renaming a lane on the Details tab carries the new name to its operators and devices; a lane that operators or devices still use cannot be removed until they are moved (or switch it off instead).
+
+On the Users page, after choosing the locations someone works at, you can tick the **lanes** (gates) they may use. Nothing ticked at a location means every lane there. A user with lanes only sees those lanes on the Entry and Exit screens, and the server refuses any other lane (entry, exit, open barrier). A lane that does not suit the direction (an exit lane on the entry screen) does not count.
+
+### The Users page
+
+**Dashboard > Users** is a table like the Users List of ismartparking: serial number, name, role, login ID, mobile, email, locations and lanes, and a status switch (Active or Inactive; a person is never deleted, so their tickets keep their name). It has search, filters by role and status, sorting, a records-per-page choice, **Download Excel** and **Print**. **Add user** and **Edit** open a form with the role, the locations, the lanes and four yes or no choices for the gate:
+* *Reprint allowed*: No stops the person printing a ticket or receipt again (the print buttons disappear on the gate screens and the server refuses).
+* *Show entry collection*, *Show exit collection*, *Show total collection*: No hides those figures from the person's Collection page and summary (the entry amount; the exit amount; and the cash, online, UPI, card, FASTag, wallet and total figures). This covers the operator Collection page and summary only; admin reports still show everything.
+
+A new user starts with all four set to Yes. Not built: a separate "Create pass allowed" or "Pass approval" switch (operators have no pass-sale screen).
+
+### User licences per location
+
+The plan includes a number of users. On the Users page a company admin shares them out between locations ("User licences"): a location with a limit takes no more staff than that (company admins use no location's seat), the limits together cannot exceed the plan, and a limit cannot go below the staff already there. The card shows used and left seats and the date the licences run to (the end of the paid period, or of the trial); "Buy or renew users" goes to Billing. Deactivating a user frees a seat; switching them back on needs one. A location without a limit has no limit of its own.
+
 ## 3. Getting in
 
-* **Register** creates a company and its first admin. **Login**, **Forgot password** and **Reset password** work by email link (when email is switched on).
+* **Register** is plan first: step 1 chooses the 14 day free trial or a paid plan (users and length, with the price worked out, like the calculator on the home page); step 2 takes the company, the **company code**, admin, mobile number, optional billing details (GSTIN, city, state) and password. A paid plan goes straight to the payment screen with the choice filled in. The price calculator's "Register and buy this plan" opens step 2 with the plan already chosen. Registering creates a company and its first admin. **Login**, **Forgot password** and **Reset password** work by email link (when email is switched on).
 * Login attempts are rate-limited and a user who is locked out must wait. Changing your password or role ends your other sessions.
 * **My profile**: edit name and mobile number, change password, and choose which alerts reach your email (urgent only, warnings and urgent, every alert, never).
 
 ## 4. The dashboard (back office)
 
-**Overview.** A getting-started checklist for new companies, then live cards: occupancy, alerts, traffic today by hour, revenue for the last 7 days, payments today, exceptions today, activity per operator, and a comparison of all locations. A **Trends** panel shows 7, 14, 30 or 90 days. Everything can be filtered to one location.
+**Overview.** Laid out like the ismartparking dashboard. A getting-started checklist for new companies and a **Renew** banner when the subscription is close to ending. A **date range** (From, To; starts on today, up to 92 days) next to the location picker sets the period of the day figures. Six cards: Total Parked (Current), Today's Total Revenue (Total Revenue for another period), **Locations Near Expiry** (locations whose plan ends within 30 days or has ended), Total Passes, **Current Active Passes Revenue** (what was paid for passes valid now) and Reprint Tickets Count. The **Vehicle Type Summary** (entries, exits, parked, cash, online, UPI QR, FASTag and total per vehicle type, with an **Action** link that opens that type's vehicles in Reports for the same dates; a Card column appears only when someone paid by card). **Over All (One Month)** tiles, with a red **Exit Parked Vehicle** tile for people who can correct tickets (admins and supervisors): it lists the vehicles inside, and Exit lets one out without payment after a reason of at least 5 characters (audited, same as "Exit without payment" on Vehicles Inside; it takes no money). Two full-day charts across 24 hourly slots, **Vehicle Momentum (Full Day Traffic Flow)** (entries and exits) and **Revenue Overview – Full Day**, then revenue for the last 7 days and vehicles inside through the day (today only). The **Individual Location Summary** lists each location with its type, plan status (Running, Expiring Soon with days left, Expired), expiry date, package and validity, and a **Renew** button for company admins. Also: alerts, payments, exceptions and activity per operator for the chosen period, and occupancy and collection per location. A **Trends** panel shows 7, 14, 30 or 90 days. Everything can be filtered to one location.
 
 **Parking Locations.** Add and edit locations. Each location opens with tabs:
 * *Details*: name, address, timing, capacity per vehicle type.
 * *Slots*: the individual spaces and how many are free.
 * *Tariffs*: the price rules (see section 7).
+* *Gate rules*: switches for this location: allow re-entry, let the exit person change the amount (always with a reason, recorded and audited), close forgotten tickets after N hours (no payment is taken and admins are told), **re-entries each operator may make in a day** (0 = no limit) with a **re-entry counter** (see below), print the ticket number, print the photo, take the entry photo by itself, give a receipt to pass holders, and the email addresses that get this location's end-of-day report.
+* *Re-entry counter* (inside Gate rules, admins only): each ticket an operator replaces with Re-Entry is counted for that operator, per location and day. The panel lists today's count per operator (with "Limit reached" when the daily limit is used up) and a **Reset counter** button that starts counting again from now. When an operator is at the limit, Re-Entry is refused for them with "ask an admin"; operators never see the count or the limit on their screens, and only admins can change the limit or reset the counter. An admin can always cancel the ticket and make a new entry.
+* *Online booking* (inside Details): fee per vehicle class, a **waiting time** (how long a booking is kept after the arrival time) and **customer can cancel until** N minutes before arrival (0 = no online cancelling).
 * *Receipt*: header line, ticket and receipt footers, address and GST switches, QR on or off, with a live preview of the ticket and the receipt.
 
 **Vehicles.** A register of vehicles (plate, type, owner, phone). Search by plate, see visit history, block a vehicle (blocked vehicles are flagged or refused at entry).
 
-**Monthly Passes.** Sell a pass for days, weeks or months; renew, suspend, resume, cancel. See section 8.
+**Monthly Passes.** Tiles (active, ending soon, expired, suspended, sold this month) and tabs: *Passes* (filters, select many and extend, set dates, suspend, resume or cancel in one go), *Pass users* (everyone who holds a pass, grouped by mobile number), *Companies* (a company master you can attach passes to), *Vehicles* (every vehicle on a pass, with Excel/PDF) and *Receipts* (one per sale or renewal) and *Bulk upload* (sell up to 200 passes from a CSV file: download the template, fill it, upload; each row is a normal sale and fails alone with a reason). See section 8.
 
 **Hardware.** Register devices, copy their keys, watch online/offline status, send test commands. See section 9.
 
-**Reports.** Fourteen reports, each downloadable as CSV, Excel or PDF: revenue, collection, vehicle history, occupancy, operators, peak hours, occupancy trend, length of stay, payment methods, exceptions (cancelled entries, admin releases, lost tickets, refunds, failed online payments, vehicles inside over 24 hours), passes, hardware, repeat vehicles, and a location comparison. Location admins only see their own locations.
+**Reports.** Seventeen reports, each downloadable as CSV, Excel or PDF: revenue, collection, vehicle history, occupancy, operators, peak hours, occupancy trend, length of stay, payment methods, exceptions (cancelled entries, admin releases, lost tickets, refunds, failed online payments, vehicles inside over 24 hours), passes, hardware, repeat vehicles, a location comparison, and the **Operator collection** report (per operator: entries, reprints, exits, cash/UPI/card/online/FASTag, pass sales, refunds, the **system collection** and the **actual collection**, which adds the cash differences found when the operator's shifts were closed) plus a **Day summary**. The **FASTag & online** report lists every FASTag charge or online payment, including declined and pending ones, with accepted / in progress / declined tiles, a status filter and a day-by-day view. Collection by operator can be limited to one vehicle type. Reports can be filtered by entry or exit operator, and switched between **Current** (the last 90 days, set by `REPORT_CURRENT_DAYS`) and **Old** (before that). Location admins only see their own locations.
 
 **Users.** Add staff, assign a role and the locations they work at, switch accounts off, reset passwords. You can only manage people ranked below you.
 
@@ -66,7 +103,7 @@ A company admin can also create **custom roles** (Roles page): pick a base role 
 
 **Website** (Super Admin only). Manage the public site's enquiries (leads), FAQ, blog posts and testimonials.
 
-**Gate Operations** (link) opens the operator area for admins who also work a gate.
+**Gate Operations** (menu link) opens the operator area. Admins do not see it: the gates are run by the operators an admin assigns on the Users page. Supervisors and custom roles that work a gate keep the link.
 
 ## 5. The operator area (gate screens)
 
@@ -76,21 +113,21 @@ The header has **Bookings (n)** (every customer who booked ahead and has not arr
 
 **Home.** The plan and its valid-till date, the day's money (advances taken, exits, cash, online, UPI, card, FASTag, total) and counts of entries, exits, available and parked, for all vehicles and per vehicle type. Staff who cannot handle money see counts only.
 
-**Vehicle Entry.** One screen:
+**Vehicle Entry.** One screen in three panels: in the middle the camera, the plate box, the vehicle-type buttons and **Create ticket**; on the left the camera suggestions, the ticket that was just made and customer bookings; on the right **Entry History** with search, Print and Re-Entry. The lane strip on top shows LN, location, plaza, FASTag lane, the parking type, **Open barrier** and the **AUTO ENTRY** switch (hover it for what it does). The location and gate pickers appear only when the operator has a choice. The camera panel says "Connecting to the camera… Attempt n of 5" and tries again by itself before offering **Try again**. The vehicle type chooses itself when the vehicle arrives: from the plate's earlier visits, else from the camera, else from the vehicle type set for that lane (Locations > Details > gates > "Vehicle type of this lane"). The line above the type buttons says where it came from, or asks the operator to check when the camera could not tell. After every ticket the buttons go back to the lane's type, so one vehicle's type never carries over to the next. On the screen:
 * a live camera panel (start it once; it is remembered) and a plate box;
 * large vehicle-type buttons that show how many spaces are free (Car, Bike, Taxi, Coach / Bus / Truck, Tempo / SUV / Mini bus);
 * *Capture & read plate* or *Auto-read* fill in the plate for you (the operator always checks it);
 * *Auto entry* (off every time the page opens) creates the ticket by itself when a plate is read at 85% certainty or more with nothing to double-check;
 * *Read from photo* for a picture from a phone;
 * **Create ticket** prints a ticket with a QR code;
-* optional **advance payment** (cash, UPI, card or FASTag) for staff who may collect money;
+* no payment at entry: the fee is worked out and paid at the exit (a customer's online booking fee paid in advance is still set against it);
 * **customer bookings**: a booked plate shows who booked; *Use for entry* fills the form and marks the booking arrived;
 * a pass banner when the vehicle holds a valid pass;
 * suggestions from gate cameras and readers (plate, UHF pass tag, FASTag) with a tap to use or dismiss;
 * **Open barrier** in the lane bar, to lift the barrier by hand (audited, limited per minute);
 * a table of vehicles inside: search, reprint a ticket, **Re-Entry** (cancel and issue a new ticket), see the advance.
 
-**Vehicle Exit.**
+**Vehicle Exit.** The search box is on the left ("Type min 3 characters to search…"; clicking it lists the vehicles inside) and the camera panel sits above **Today's Exit** on the right. (If the location allows it, an *Edit amount* box lets the person change what is collected, with a reason; the change is recorded.)
 * type any part of a vehicle number (3 characters or more) or a ticket or pass code, or scan the QR with the camera or a USB scanner, or tick *Ticket is lost*;
 * the bill shows the fee, any advance already paid and what is still due;
 * payment by cash (with change to give back), UPI, card, FASTag (recorded, or really charged when a FASTag partner is set up: `docs/fastag.md`), or **online** (a QR payment link that confirms by itself);
@@ -144,6 +181,10 @@ A pass lets a vehicle in and out free for whole calendar days at chosen location
 * An optional holder email receives a confirmation, a renewal notice and one reminder in the last 7 days. Admins are alerted too.
 * A pass can be suspended (the vehicle pays normally), resumed, or cancelled.
 * The pass page prints a card with a QR code.
+* **Company → GST on passes (%)** sets the GST share of a pass price; pass sales and receipts use it (a rate sent with a sale wins).
+* Passes can belong to a **company** (a master list you keep under Passes → Companies); filter and report by company.
+* Several passes can be extended, re-dated, suspended, resumed or cancelled together (up to 200). No money is taken that way: use Renew for a paid extension.
+* "Receipts" are worked out from the pass payments (taxable value and tax split out; number `passNumber/n`). They are not a separate GST invoice series.
 
 ## 9. Hardware
 
@@ -153,7 +194,7 @@ Every device has its own key (`hwk_...`, shown once). A gate agent at the site c
 |---|---|---|
 | Boom barrier | Opens after a legitimate entry, paid or free exit, or admin release; retries safely; never twice for the same event | Needs a relay the agent can drive |
 | Thermal printer | Prints tickets and bills; reprint button; test print | ESC/POS printers via shared name, network or command |
-| ANPR camera | Posts a plate; it becomes a suggestion with a confidence score. The Python AI service can read a webcam or IP camera and show a live picture with the plate box | A suggestion only (or AUTO ENTRY / EXIT when the operator switches it on and the reading is confident); accuracy with real models and cameras is not proven yet |
+| ANPR camera | Posts a plate (and, if it can, the kind of vehicle); it becomes a suggestion with a confidence score, the plate fills the vehicle number box and the vehicle type chooses itself. An optional live picture address shows the camera's picture on the Entry and Exit screens; the operator can always type the number | A suggestion only (or AUTO ENTRY / EXIT when the operator switches it on and the reading is confident); accuracy with a real ANPR camera is not proven yet |
 | UHF / RFID reader | A pass tag read becomes a "Pass tag" suggestion | Suggestion only; unknown tags are logged |
 | FASTag reader | The vehicle number becomes a "FASTag" suggestion | Charging needs a FASTag partner (`docs/fastag.md`); otherwise record only |
 | CCTV camera | Takes an entry and exit photo that is filed on the ticket; test button | Camera address stays on the gate PC |
@@ -173,6 +214,7 @@ Devices that go quiet are marked Offline with one alert per outage. A failing de
 
 ## 11. Background work
 
+* every 15 minutes: for locations with *close forgotten tickets after N hours* on, close tickets open longer than that (no payment; a notification tells admins);
 * every minute: close or confirm plan purchases and hardware orders; every 5 minutes: send due end-of-day report emails;
 * every minute: ask the gateway about payments whose webhook never arrived; mark silent devices offline;
 * daily: warn about passes ending within 7 days (and email the holder);
@@ -208,7 +250,9 @@ Devices that go quiet are marked Offline with one alert per outage. A failing de
 * Hardware shop is built (`docs/shop.md`), untested with real Razorpay. FASTag charging is built against a simulator (`docs/fastag.md`), no real partner yet. Still planned: valet, reseller portal, mobile app (phase 4).
 * Plan checkout, GST invoices, OTP signup, map picker and report emails are built (`docs/billing.md`) but untested with real Razorpay, Twilio, email and Google Maps keys.
 * A Windows installer program (.exe) for the gate agent: today the Hardware page downloads a zip that needs Node.js.
-* Refund buttons for online booking fees (the app flags them and alerts an admin; the refund is made in the gateway). Customer cancelling their own booking online.
+* Refund buttons for online booking fees (the app flags them and alerts an admin; the refund is made in the gateway). A customer can cancel their own booking online (when the location allows it), but the refund of a paid fee is still made by hand.
+* Bank settlement statements for FASTag and online payments. The *FASTag & online* report shows what our system recorded, with a day-by-day view of accepted money; it is not the bank's settlement report.
 * Push alerts; a delivery log for emails and texts; holder self-unsubscribe; WhatsApp message templates (SMS and WhatsApp are built through Twilio but untested live).
-* Logo printing and free-layout receipt design.
-* Tested against real hardware, real Razorpay, a real recognition provider and real email delivery: so far only simulators and automated tests.
+* Logo printing and free-layout receipt design. The entry photo on a ticket shows on the screen/browser ticket, not on the thermal printer.
+* "Old" reports are just older dates in the same database, not a separate archive.
+* Tested against real hardware, real Razorpay, a real ANPR camera and real email delivery: so far only simulators and automated tests.

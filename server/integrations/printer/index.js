@@ -5,6 +5,7 @@
 
 const { EscPos, columnsFor } = require("./escpos");
 const { utcOffsetMinutes } = require("../../utils/time");
+const { resolveOperations } = require("../../utils/operations");
 const { resolveReceiptSettings, wantsQr } = require("../../utils/receiptSettings");
 
 const COMMAND_DEFAULTS = Object.freeze({
@@ -42,11 +43,14 @@ const header = (printer, company, location, settings) => {
 };
 
 // What goes on the slip handed to the driver at the entry gate.
-const buildTicket = ({ company, location, session, settings: rawSettings }, { paperWidthMm = 80, printQr = false } = {}) => {
+const buildTicket = ({ company, location, session, settings: rawSettings, operations: rawOperations }, { paperWidthMm = 80, printQr = false } = {}) => {
   const settings = resolveReceiptSettings(rawSettings);
   const p = new EscPos({ columns: columnsFor(paperWidthMm) });
   header(p, company, location, settings);
-  p.align("center").line("PARKING TICKET").bold(true).size(2).line(session.ticketNumber).size(1).bold(false).align("left");
+  p.align("center").line("PARKING TICKET");
+  // A location may keep the number off the paper (the QR code still carries it).
+  if (resolveOperations(rawOperations).printTicketNumber) p.bold(true).size(2).line(session.ticketNumber).size(1).bold(false);
+  p.align("left");
   p.rule();
   p.pair("Vehicle", session.vehicleNumber);
   p.pair("Type", session.vehicleType);

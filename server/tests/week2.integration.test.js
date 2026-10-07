@@ -1,6 +1,6 @@
 // API tests for Week 2: location details, slots, vehicles, tariffs, fee
 // preview and operators. Needs MongoDB (see tests/helpers.js).
-const { setup, it, api, registerCompany, login, assert } = require("./helpers");
+const { setup, it, api, registerCompany, login, withCode, assert } = require("./helpers");
 
 setup();
 
@@ -311,12 +311,12 @@ it("operators: profile, shift, reassignment and access reset", async () => {
   const reset = await api("PUT", `/api/users/${s.op._id}`, { token: s.a.token, body: { password: "NewPassword456" } });
   assert.equal(reset.status, 200);
   assert.equal((await api("GET", "/api/auth/me", { token: movedToken })).status, 401);
-  assert.equal((await api("POST", "/api/auth/login", { body: { email: "w2-entry@example.com", password: "Password123" } })).status, 401);
+  assert.equal((await api("POST", "/api/auth/login", { body: await withCode({ email: "w2-entry@example.com", password: "Password123" }) })).status, 401);
   await login("w2-entry@example.com", "NewPassword456");
 
   // Deactivate and reactivate.
   await api("PUT", `/api/users/${s.op._id}`, { token: s.a.token, body: { isActive: false } });
-  assert.equal((await api("POST", "/api/auth/login", { body: { email: "w2-entry@example.com", password: "NewPassword456" } })).status, 403);
+  assert.equal((await api("POST", "/api/auth/login", { body: await withCode({ email: "w2-entry@example.com", password: "NewPassword456" }) })).status, 403);
   await api("PUT", `/api/users/${s.op._id}`, { token: s.a.token, body: { isActive: true } });
   await login("w2-entry@example.com", "NewPassword456");
 

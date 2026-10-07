@@ -28,6 +28,7 @@ router.post(
   controller.createBooking
 );
 router.get("/bookings/:id", readLimiter, validateIdParam(), controller.getBooking);
+router.post("/bookings/:id/cancel", readLimiter, validateIdParam(), controller.cancelBooking);
 router.post(
   "/bookings/:id/simulate",
   readLimiter,

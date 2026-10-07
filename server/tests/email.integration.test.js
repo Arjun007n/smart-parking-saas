@@ -1,6 +1,6 @@
 // Emails through the API (simulated provider): alert recipients and levels, password reset, preferences.
 // Needs MongoDB (see tests/helpers.js).
-const { setup, it, api, registerCompany, login, assert } = require("./helpers");
+const { setup, it, api, registerCompany, login, withCode, assert } = require("./helpers");
 const email = require("../integrations/email");
 const emailService = require("../services/emailService");
 const { notify } = require("../services/notificationService");
@@ -161,7 +161,7 @@ it("password reset emails the link, and the answer is the same for unknown addre
 
   const done = await api("POST", "/api/auth/reset-password", { body: { token: link[1], password: "BrandNewPass123" } });
   assert.equal(done.status, 200, JSON.stringify(done.body));
-  assert.equal((await api("POST", "/api/auth/login", { body: { email: "em-annex@example.com", password: "BrandNewPass123" } })).status, 200);
+  assert.equal((await api("POST", "/api/auth/login", { body: await withCode({ email: "em-annex@example.com", password: "BrandNewPass123" }) })).status, 200);
 });
 
 it("password reset with email off sends nothing", async () => {

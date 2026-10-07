@@ -74,8 +74,17 @@ const getBooking = async (req, res) => {
   // Opening the page also closes a payment window that ran out, so the customer sees the truth.
   await online.expireUnpaid({ _id: booking._id });
   booking = await findByToken(req);
-  const location = await Location.findById(booking.locationId).select("name address").lean();
+  const location = await Location.findById(booking.locationId).select("name address onlineBooking").lean();
   res.json({ success: true, data: { booking: online.viewOf(booking, location), simulated: Boolean(gateway.provider() && gateway.provider().simulated) } });
+};
+
+// POST /api/public/booking/bookings/:id/cancel?token=
+// The customer cancels their own booking, when the parking allows it (see onlineBooking.cancelBeforeMinutes).
+const cancelBooking = async (req, res) => {
+  const booking = await findByToken(req);
+  const location = await Location.findById(booking.locationId).select("name address onlineBooking").lean();
+  const cancelled = await online.cancelByCustomer(booking, location);
+  res.json({ success: true, data: { booking: online.viewOf(cancelled, location) } });
 };
 
 // POST /api/public/booking/bookings/:id/simulate?token=   { outcome }
@@ -95,8 +104,8 @@ const simulate = async (req, res) => {
     ...(outcome === "FAILED" ? { reason: "Declined in the simulator" } : {}),
   }, req);
   const fresh = await Booking.findById(booking._id);
-  const location = await Location.findById(fresh.locationId).select("name address").lean();
+  const location = await Location.findById(fresh.locationId).select("name address onlineBooking").lean();
   res.json({ success: true, data: { outcome: result.outcome, booking: online.viewOf(fresh, location) } });
 };
 
-module.exports = { listLocations, getLocation, createBooking, getBooking, simulate };
+module.exports = { listLocations, getLocation, createBooking, getBooking, cancelBooking, simulate };

@@ -20,7 +20,7 @@ const PREVIEW_URL = /^https?:\/\/\S{1,290}$/;
 
 const heartbeat = async (req, res) => {
   const device = req.device;
-  // An ANPR camera's AI service may tell where its live picture is, so the Entry and Exit screens find
+  // An ANPR camera (or the gate agent for it) may tell where its live picture is, so the Entry and Exit screens find
   // it without anyone pasting the address. Only the camera's own key can set it, and only http(s).
   const url = req.body && req.body.previewUrl;
   if (device.type === "ANPR_CAMERA" && typeof url === "string" && PREVIEW_URL.test(url) && (device.config || {}).previewUrl !== url) {
@@ -94,7 +94,7 @@ const reportPlate = async (req, res) => {
   res.status(duplicate ? 200 : 201).json({
     success: true,
     data: {
-      id: detection._id, duplicate, plate: detection.plate, direction: detection.direction, needsReview: detection.needsReview,
+      id: detection._id, duplicate, plate: detection.plate, direction: detection.direction, vehicleType: detection.vehicleType, needsReview: detection.needsReview,
       reviewReasons: detection.reviewReasons, hits: detection.hits,
     },
   });

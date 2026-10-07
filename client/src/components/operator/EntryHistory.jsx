@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { parkingApi } from '../../services/api'
 import { errorMessage } from '../../utils/errors'
-import { SESSION_STATUS, VEHICLE_LABELS, dateTime, money } from '../../utils/format'
+import { SESSION_STATUS, VEHICLE_LABELS, dateTime, money, timeOnly } from '../../utils/format'
 import { Alert, Badge, Button, Card, Field } from '../ui'
 import { Skeleton } from '../motion'
 
@@ -41,7 +41,8 @@ function ReEntryButton({ session, onDone }) {
   )
 }
 
-export default function EntryHistory({ locationId, onPrint, onReEntry }) {
+// `compact` is the narrow panel beside the entry form: fewer columns, times only, no page-wide table.
+export default function EntryHistory({ locationId, onPrint, onReEntry, compact = false }) {
   const [text, setText] = useState('')
   const [q, setQ] = useState('')
   const [page, setPage] = useState(1)
@@ -66,13 +67,15 @@ export default function EntryHistory({ locationId, onPrint, onReEntry }) {
   if (!locationId) return null
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1
   const first = data ? (data.page - 1) * data.pageSize : 0
+  // The Advance column is only worth its width when somebody paid one.
+  const anyAdvance = Boolean(data && data.sessions.some((s) => s.advance?.amount))
 
   return (
     <Card title="Entry History" className="no-print">
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <p className="text-sm text-slate-500">Vehicles inside now{data ? ` · ${data.total}` : ''}</p>
         <Field
-          className="w-full sm:w-64"
+          className={compact ? 'w-full' : 'w-full sm:w-64'}
           label="Search"
           name="entry-search"
           placeholder="Vehicle number or ticket"
@@ -87,7 +90,7 @@ export default function EntryHistory({ locationId, onPrint, onReEntry }) {
       ) : data && data.sessions.length > 0 ? (
         <>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-left text-sm">
+            <table className={`w-full text-left ${compact ? 'text-xs' : 'min-w-[640px] text-sm'}`}>
               <thead className="bg-slate-100 text-slate-600">
                 <tr>
                   <th className="px-3 py-2 font-medium">#</th>
@@ -95,8 +98,8 @@ export default function EntryHistory({ locationId, onPrint, onReEntry }) {
                   <th className="px-3 py-2 font-medium">Vehicle</th>
                   <th className="px-3 py-2 font-medium">Type</th>
                   <th className="px-3 py-2 font-medium">In time</th>
-                  <th className="px-3 py-2 font-medium">Advance</th>
-                  <th className="px-3 py-2 font-medium">Status</th>
+                  {(!compact || anyAdvance) && <th className="px-3 py-2 font-medium">Advance</th>}
+                  {!compact && <th className="px-3 py-2 font-medium">Status</th>}
                 </tr>
               </thead>
               <tbody>
@@ -118,11 +121,13 @@ export default function EntryHistory({ locationId, onPrint, onReEntry }) {
                         <p className="font-mono text-xs text-slate-500">{session.ticketNumber}</p>
                       </td>
                       <td className="px-3 py-2">{VEHICLE_LABELS[session.vehicleType]}</td>
-                      <td className="px-3 py-2 text-slate-600">{dateTime(session.entryTime)}</td>
-                      <td className="px-3 py-2 text-slate-600">{session.advance?.amount ? money(session.advance.amount) : '—'}</td>
-                      <td className="px-3 py-2">
-                        <Badge tone={status.tone}>{status.label}</Badge>
-                      </td>
+                      <td className="px-3 py-2 text-slate-600">{compact ? timeOnly(session.entryTime) : dateTime(session.entryTime)}</td>
+                      {(!compact || anyAdvance) && <td className="px-3 py-2 text-slate-600">{session.advance?.amount ? money(session.advance.amount) : '—'}</td>}
+                      {!compact && (
+                        <td className="px-3 py-2">
+                          <Badge tone={status.tone}>{status.label}</Badge>
+                        </td>
+                      )}
                     </tr>
                   )
                 })}

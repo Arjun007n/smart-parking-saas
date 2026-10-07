@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const email = require("../integrations/email");
 const emailService = require("../services/emailService");
 
-const KEYS = ["EMAIL_PROVIDER", "EMAIL_FROM", "RESEND_API_KEY", "EMAIL_REPLY_TO", "EMAIL_TIMEOUT_MS", "EMAIL_ALERT_HOURLY_CAP", "NODE_ENV", "RECOGNITION_PROVIDER", "PAYMENT_PROVIDER"];
+const KEYS = ["EMAIL_PROVIDER", "EMAIL_FROM", "RESEND_API_KEY", "EMAIL_REPLY_TO", "EMAIL_TIMEOUT_MS", "EMAIL_ALERT_HOURLY_CAP", "NODE_ENV", "PAYMENT_PROVIDER"];
 const saved = { fetch: globalThis.fetch, errors: console.error };
 for (const k of KEYS) saved[k] = process.env[k];
 test.afterEach(() => {
@@ -206,7 +206,6 @@ test("startup refuses a bad email setup", () => {
   process.env.MONGO_URI = process.env.MONGO_URI || "mongodb://x";
   process.env.JWT_SECRET = "z".repeat(40);
   delete process.env.PAYMENT_PROVIDER;
-  delete process.env.RECOGNITION_PROVIDER;
   process.env.EMAIL_PROVIDER = "postcard";
   assert.throws(validateEnv, /EMAIL_PROVIDER/);
   process.env.EMAIL_PROVIDER = "simulated";

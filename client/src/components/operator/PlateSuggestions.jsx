@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { anprApi } from '../../services/api'
 import { errorMessage } from '../../utils/errors'
-import { timeOnly } from '../../utils/format'
+import { VEHICLE_LABELS, timeOnly } from '../../utils/format'
 import { useFallbackInterval } from '../../hooks/useLive'
 import { Alert, Badge, Button } from '../ui'
 
@@ -82,6 +82,7 @@ export default function PlateSuggestions({ locationId, direction, onUse, usedId,
                   {d.plate || 'Not read'}
                 </span>
                 {sourceLabel(d) && <span className="ml-2"><Badge tone="blue">{sourceLabel(d)}</Badge></span>}
+                {d.vehicleType && <span className="ml-2"><Badge tone="green">{VEHICLE_LABELS[d.vehicleType] || d.vehicleType}</Badge></span>}
                 <span className="ml-2 text-xs text-slate-500">
                   {d.confidence != null && !d.source?.match(/RFID|FASTAG/) ? `${Math.round(d.confidence * 100)}% sure · ` : ''}
                   {timeOnly(d.lastSeenAt)}

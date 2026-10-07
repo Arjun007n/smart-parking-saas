@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { hardwareApi, parkingApi } from '../../services/api'
+import { useAuth } from '../../hooks/useAuth'
 import { errorMessage } from '../../utils/errors'
 import { Alert, Button } from '../ui'
 
@@ -53,13 +54,14 @@ function BarrierLine({ barrier, sessionId, direction }) {
 }
 
 function PrintLine({ print, sessionId, label }) {
+  const { user } = useAuth()
   const again = useMutation({ mutationFn: () => parkingApi.print(sessionId) })
   const current = again.data || print
   const { data } = useCommand(current)
   const status = data?.status || current.status
   const name = label.toLowerCase()
 
-  const button = (
+  const button = user?.access?.reprint === false ? null : (
     <Button variant="secondary" className="px-3 py-1 text-xs" loading={again.isPending} onClick={() => again.mutate()}>
       Print again
     </Button>

@@ -45,6 +45,8 @@ router.post(
     imageUrl: { type: "string", max: 500, pattern: /^https?:\/\/\S+$/, message: "must be an http(s) address" },
     // AUTO: a camera set up for both directions lets the server decide (see anprService.ingest).
     direction: { type: "string", enum: ["ENTRY", "EXIT", "AUTO"] },
+    // What the camera thinks the vehicle is (car, bike, truck ...). Words we do not know are ignored.
+    vehicleType: { type: "string", max: 40 },
   }),
   controller.reportPlate
 );

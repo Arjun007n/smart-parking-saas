@@ -11,6 +11,7 @@
 //     capturedAt  ISO date-time
 //     imageUrl    http(s) address of the photo
 //     direction   ENTRY | EXIT (needed when the camera is registered for BOTH)
+//     vehicleType what kind of vehicle the camera saw (car, bike, truck, bus, taxi, tempo ...); optional
 //
 // To support a vendor whose camera sends something else, add an adapter below
 // that returns the standard format, then select it with device.vendor. Vendors
@@ -31,6 +32,24 @@ const normalizeConfidence = (value) => {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return undefined;
   const fraction = value > 1 ? value / 100 : value;
   return Math.min(1, Math.round(fraction * 1000) / 1000);
+};
+
+// The words cameras use for the kind of vehicle, turned into our five types. Anything not recognised is left out
+// (the operator's choice then stands), never guessed.
+const VEHICLE_WORDS = {
+  CAR: ["car", "sedan", "suv", "hatchback", "jeep", "van", "minivan", "mpv", "light vehicle", "lmv", "4 wheeler", "four wheeler", "4w"],
+  BIKE: ["bike", "motorbike", "motorcycle", "scooter", "scooty", "moped", "two wheeler", "2 wheeler", "2w", "cycle", "bicycle"],
+  HEAVY: ["heavy", "truck", "lorry", "bus", "trailer", "hmv", "tanker", "container", "coach"],
+  TAXI: ["taxi", "cab", "auto", "rickshaw", "auto rickshaw", "three wheeler", "3 wheeler", "3w"],
+  TEMPO: ["tempo", "pickup", "pick up", "mini truck", "minitruck", "lcv", "light truck", "delivery van", "tata ace"],
+};
+const normalizeVehicleType = (value) => {
+  if (typeof value !== "string") return undefined;
+  const word = value.trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+  if (!word) return undefined;
+  const upper = word.toUpperCase().replace(/ /g, "");
+  if (Object.keys(VEHICLE_WORDS).includes(upper)) return upper;
+  return Object.keys(VEHICLE_WORDS).find((type) => VEHICLE_WORDS[type].includes(word));
 };
 
 const adapters = {
@@ -73,6 +92,7 @@ const parseDetection = (body, { vendor, minConfidence } = {}) => {
     plateRaw, plate, confidence,
     capturedAt: input.capturedAt instanceof Date ? input.capturedAt : undefined,
     imageUrl: input.imageUrl, deviceEventId: input.eventId, direction: input.direction,
+    vehicleType: normalizeVehicleType(input.vehicleType),
     reviewReasons,
   };
 };
@@ -86,5 +106,5 @@ const dedupeKey = ({ locationId, direction, plate }, now = Date.now(), windowSec
 
 module.exports = {
   DEFAULT_MIN_CONFIDENCE, DUPLICATE_WINDOW_SECONDS, PLATE_PATTERN, INDIAN_PLATE,
-  normalizeConfidence, parseDetection, dedupeKey, adapters,
+  normalizeConfidence, normalizeVehicleType, parseDetection, dedupeKey, adapters,
 };

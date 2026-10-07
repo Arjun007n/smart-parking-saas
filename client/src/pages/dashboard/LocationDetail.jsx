@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { locationApi } from '../../services/api'
 import { useAuth } from '../../hooks/useAuth'
@@ -9,11 +9,16 @@ import DetailsForm from '../../components/location/DetailsForm'
 import SlotsPanel from '../../components/location/SlotsPanel'
 import TariffsPanel from '../../components/location/TariffsPanel'
 import ReceiptPanel from '../../components/location/ReceiptPanel'
+import OperationsPanel from '../../components/location/OperationsPanel'
+import AutoExitPanel from '../../components/location/AutoExitPanel'
+import LanesPanel from '../../components/location/LanesPanel'
 
 export default function LocationDetail() {
   const { id } = useParams()
   const { can, company } = useAuth()
-  const [tab, setTab] = useState('details')
+  // The Locations table links straight to a tab with ?tab=tariffs, lanes, autoexit, rules, receipt, slots.
+  const [params] = useSearchParams()
+  const [tab, setTab] = useState(params.get('tab') || 'details')
   const { data: location, isLoading, error } = useQuery({
     queryKey: ['location', id],
     queryFn: () => locationApi.get(id),
@@ -27,6 +32,9 @@ export default function LocationDetail() {
     { key: 'details', label: 'Details', show: canManage },
     { key: 'slots', label: 'Slots', show: true },
     { key: 'tariffs', label: 'Tariffs', show: can('TARIFF_MANAGE') },
+    { key: 'rules', label: 'Gate rules', show: canManage },
+    { key: 'autoexit', label: 'Auto exit', show: canManage },
+    { key: 'lanes', label: 'Lanes', show: true },
     { key: 'receipt', label: 'Receipt', show: canManage },
   ].filter((t) => t.show)
   const current = tabs.some((t) => t.key === tab) ? tab : tabs[0].key
@@ -65,6 +73,9 @@ export default function LocationDetail() {
         {current === 'details' && <DetailsForm key={location.updatedAt} location={location} />}
         {current === 'slots' && <SlotsPanel location={location} canManage={canManage} />}
         {current === 'tariffs' && <TariffsPanel location={location} />}
+        {current === 'rules' && <OperationsPanel key={location.updatedAt} location={location} />}
+        {current === 'autoexit' && <AutoExitPanel key={location.updatedAt} location={location} />}
+        {current === 'lanes' && <LanesPanel location={location} canManage={canManage} onEdit={() => setTab('details')} />}
         {current === 'receipt' && <ReceiptPanel location={location} company={company} />}
       </Card>
     </div>

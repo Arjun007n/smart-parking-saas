@@ -60,6 +60,19 @@ const canTakePayments = () => {
   return Boolean(chosen && chosen.isConfigured() && chosen.hostedPage);
 };
 
+// How long before the arrival time a customer may still cancel their own booking. 0 = they cannot.
+const MAX_CANCEL_MINUTES = 7 * 24 * 60;
+const cancelBeforeOf = (location) => {
+  const minutes = Number(location && location.onlineBooking && location.onlineBooking.cancelBeforeMinutes);
+  return Number.isFinite(minutes) && minutes > 0 ? Math.min(MAX_CANCEL_MINUTES, Math.floor(minutes)) : 0;
+};
+
+// Can the customer cancel this booking now? Only a booking that is confirmed and still waiting.
+const canCustomerCancel = (booking, location, now = new Date()) => {
+  const before = cancelBeforeOf(location);
+  return before > 0 && booking.status === "BOOKED" && now.getTime() <= new Date(booking.expectedAt).getTime() - before * 60000;
+};
+
 const offerOf = (location) => {
   const types = (location.vehicleTypes || []).map((type) => ({ type, fee: feeFor(location, type) }));
   return {
@@ -77,6 +90,8 @@ const offerOf = (location) => {
     paymentAvailable: canTakePayments(),
     note: (location.onlineBooking && location.onlineBooking.note) || "",
     graceHours: bookings.GRACE_HOURS,
+    waitingMinutes: bookings.waitingMinutesOf(location),
+    cancelBeforeMinutes: cancelBeforeOf(location),
     maxDaysAhead: bookings.MAX_DAYS_AHEAD,
     hours: location.operatingHours,
   };
@@ -90,7 +105,7 @@ const createOnline = async ({ location, vehicleNumber, vehicleType, customerName
   if (!location.vehicleTypes.includes(vehicleType)) {
     throw new AppError(`This parking does not accept ${vehicleType.toLowerCase()} vehicles`, 400);
   }
-  if (expectedAt < bookings.graceCutoff(now)) throw new AppError("The arrival time has already passed", 400);
+  if (expectedAt < bookings.graceCutoff(now, location)) throw new AppError("The arrival time has already passed", 400);
   if (expectedAt > new Date(now.getTime() + bookings.MAX_DAYS_AHEAD * 86400000)) {
     throw new AppError(`A booking can be at most ${bookings.MAX_DAYS_AHEAD} days ahead`, 400);
   }
@@ -110,6 +125,7 @@ const createOnline = async ({ location, vehicleNumber, vehicleType, customerName
   const token = newToken();
   const base = {
     companyId, locationId: location._id, vehicleNumber, vehicleType, expectedAt, customerName, phone,
+    holdUntil: bookings.holdUntilFor(location, expectedAt),
     ...(note ? { note } : {}), source: "ONLINE", amount, accessHash: hashToken(token),
   };
 
@@ -172,7 +188,30 @@ const viewOf = (booking, location) => ({
   },
   location: location ? { name: location.name, address: location.address && location.address.line1, city: location.address && location.address.city } : undefined,
   graceHours: bookings.GRACE_HOURS,
+  waitingMinutes: bookings.waitingMinutesOf(location),
+  canCancel: location ? canCustomerCancel(booking, location) : false,
+  cancelBeforeMinutes: location ? cancelBeforeOf(location) : 0,
+  ...(booking.cancelReason ? { cancelReason: booking.cancelReason } : {}),
 });
+
+// The customer cancels their own booking. A paid fee is flagged for refund, as for a staff cancel.
+const CUSTOMER_CANCEL_REASON = "Cancelled by customer";
+const cancelByCustomer = async (booking, location, now = new Date()) => {
+  if (!canCustomerCancel(booking, location, now)) {
+    const before = cancelBeforeOf(location);
+    if (before <= 0) throw new AppError("This parking does not allow cancelling online. Please call the parking.", 409);
+    if (booking.status !== "BOOKED") throw new AppError("This booking can no longer be cancelled", 409);
+    throw new AppError(`A booking can be cancelled up to ${before} minutes before the arrival time`, 409);
+  }
+  const cancelled = await Booking.findOneAndUpdate(
+    { _id: booking._id, status: "BOOKED" },
+    { $set: { status: "CANCELLED", cancelReason: CUSTOMER_CANCEL_REASON } },
+    { returnDocument: "after" }
+  );
+  if (!cancelled) throw new AppError("This booking can no longer be cancelled", 409);
+  await audit.record(SYSTEM_REQ, "BOOKING_CANCELLED", { entity: "Booking", entityId: cancelled._id, companyId: cancelled.companyId, meta: { by: "customer", vehicleNumber: cancelled.vehicleNumber } });
+  return flagRefundIfPaid(cancelled);
+};
 
 // ---- payment results -------------------------------------------------------------
 
@@ -225,7 +264,7 @@ const settle = async (event, req = SYSTEM_REQ) => {
 
   // A payment that arrives late (after we gave up waiting) still confirms the booking if the
   // arrival time has not passed and nobody else took the plate in the meantime.
-  const stillUseful = existing.expectedAt >= bookings.graceCutoff();
+  const stillUseful = existing.holdUntil ? existing.holdUntil >= new Date() : existing.expectedAt >= bookings.graceCutoff();
   let paid = null;
   if (stillUseful) {
     try {
@@ -357,5 +396,5 @@ const flagRefundIfPaid = async (booking) => {
 
 module.exports = {
   EXPIRED_REASON, SYSTEM_REQ, newToken, hashToken, tokenMatches, codeOf, feeFor, isOpenForBooking, canTakePayments,
-  offerOf, viewOf, createOnline, settle, expireUnpaid, sweep, applyToSession, flagRefundIfPaid,
+  offerOf, viewOf, cancelBeforeOf, canCustomerCancel, cancelByCustomer, CUSTOMER_CANCEL_REASON, createOnline, settle, expireUnpaid, sweep, applyToSession, flagRefundIfPaid,
 };

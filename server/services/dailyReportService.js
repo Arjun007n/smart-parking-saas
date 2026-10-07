@@ -101,24 +101,31 @@ const buildSummary = async ({ companyId, dateText }) => {
     };
   });
 
+  return { dateText, rows, totals: totalsOf(rows, failedOnline) };
+};
+
+// The totals line of a list of location rows.
+const totalsOf = (rows, failedOnline = 0) => {
   const total = (pick) => rows.reduce((t, r) => t + pick(r), 0);
   const methodTotals = Object.fromEntries([...METHODS, "COMPLIMENTARY"].map((m) => [m, round2(total((r) => r.byMethod[m] || 0))]));
   return {
-    dateText,
-    rows,
-    totals: {
-      entries: total((r) => r.entries),
-      exits: total((r) => r.exits),
-      inside: total((r) => r.inside),
-      capacity: total((r) => r.capacity),
-      collected: round2(total((r) => r.collected)),
-      refunded: round2(total((r) => r.refunded)),
-      passSales: round2(total((r) => r.passSales)),
-      passCount: total((r) => r.passCount),
-      byMethod: methodTotals,
-      failedOnline,
-    },
+    entries: total((r) => r.entries),
+    exits: total((r) => r.exits),
+    inside: total((r) => r.inside),
+    capacity: total((r) => r.capacity),
+    collected: round2(total((r) => r.collected)),
+    refunded: round2(total((r) => r.refunded)),
+    passSales: round2(total((r) => r.passSales)),
+    passCount: total((r) => r.passCount),
+    byMethod: methodTotals,
+    failedOnline,
   };
+};
+
+// The same summary reduced to one location.
+const summaryForLocation = (summary, locationId) => {
+  const rows = summary.rows.filter((r) => String(r.locationId) === String(locationId));
+  return { dateText: summary.dateText, rows, totals: totalsOf(rows, 0) };
 };
 
 // ---- the message ------------------------------------------------------------------------------
@@ -185,6 +192,31 @@ const sendReport = async ({ company, dateText = localDateText(), to, partial = f
   return result.sent ? { sent: true, sentTo: result.sentTo } : { sent: false, reason: result.reason || "The email service could not send it" };
 };
 
+// Locations can have their own list of addresses (Location.reportRecipients). Each gets the same
+// report reduced to that one location. Returns how many location emails went out.
+const sendLocationReports = async ({ company, dateText = localDateText(), partial = false, summary } = {}) => {
+  if (!email.isEnabled()) return 0;
+  const locations = await Location.find({ companyId: company._id, isActive: true, "reportRecipients.0": { $exists: true } })
+    .select("name reportRecipients");
+  if (!locations.length) return 0;
+  const full = summary || (await buildSummary({ companyId: company._id, dateText }));
+  let sent = 0;
+  for (const location of locations) {
+    try {
+      const message = renderReport({
+        companyName: `${company.name} - ${location.name}`, summary: summaryForLocation(full, location._id), partial, url: `${env.clientUrl}/dashboard`,
+      });
+      const result = await email.send({
+        to: location.reportRecipients, ...message, key: partial ? undefined : `daily:${company._id}:${location._id}:${dateText}`,
+      });
+      if (result.sent) sent += 1;
+    } catch (error) {
+      console.error(`Daily report for ${location.name} failed:`, error.message);
+    }
+  }
+  return sent;
+};
+
 // Run every few minutes. Sends each company's report once, at its chosen time, for the local day that is ending.
 // Returns how many reports went out.
 const runDue = async (now = new Date()) => {
@@ -206,6 +238,8 @@ const runDue = async (now = new Date()) => {
     if (!claim.modifiedCount) continue;
     try {
       const result = await sendReport({ company, dateText: today });
+      // The location lists get theirs whether or not the company-wide list could be sent.
+      await sendLocationReports({ company, dateText: today });
       if (result.sent) sent += 1;
       else {
         console.error(`Daily report for ${company.name} not sent: ${result.reason}`);
@@ -220,4 +254,4 @@ const runDue = async (now = new Date()) => {
   return sent;
 };
 
-module.exports = { METHODS, minutesToText, textToMinutes, buildSummary, renderReport, recipientsOf, sendReport, runDue };
+module.exports = { METHODS, minutesToText, textToMinutes, buildSummary, totalsOf, summaryForLocation, renderReport, recipientsOf, sendReport, sendLocationReports, runDue };

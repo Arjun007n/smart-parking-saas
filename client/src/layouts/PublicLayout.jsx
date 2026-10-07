@@ -117,6 +117,7 @@ export default function PublicLayout() {
           <Link to="/privacy-policy" className="hover:text-white hover:underline">Privacy Policy</Link>
           <Link to="/terms-conditions" className="hover:text-white hover:underline">Terms &amp; Conditions</Link>
           <Link to="/sitemap" className="hover:text-white hover:underline">Sitemap</Link>
+          <Link to="/government/login" className="hover:text-white hover:underline">Government login</Link>
           <InstallApp className="rounded border border-slate-500 px-2 py-0.5 text-slate-200 hover:bg-white/10" />
         </div>
       </footer>

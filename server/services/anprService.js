@@ -8,7 +8,7 @@ const { parseDetection, dedupeKey, DUPLICATE_WINDOW_SECONDS } = require("../inte
 const AnprDetection = require("../models/AnprDetection");
 const ParkingSession = require("../models/ParkingSession");
 const Vehicle = require("../models/Vehicle");
-const recognition = require("../integrations/recognition");
+const Location = require("../models/Location");
 const Pass = require("../models/Pass");
 const passes = require("./passService");
 const { cleanTag } = require("../utils/tag");
@@ -35,7 +35,11 @@ const enrich = async ({ device, direction, plate, reasons }) => {
       found.matchedTicketNumber = open.ticketNumber;
       reasons.push(`Already inside (ticket ${open.ticketNumber})`);
     }
-    const vehicle = await Vehicle.findOne({ companyId: device.companyId, plateNumber: plate }).select("isBlocked blockedReason");
+    const vehicle = await Vehicle.findOne({ companyId: device.companyId, plateNumber: plate }).select("isBlocked blockedReason type");
+    if (vehicle && vehicle.type) {
+      found.vehicleType = vehicle.type;
+      found.vehicleTypeFrom = "HISTORY";
+    }
     if (vehicle && vehicle.isBlocked) {
       found.blocked = true;
       reasons.push(`Vehicle is blocked: ${vehicle.blockedReason || "no reason given"}`);
@@ -111,6 +115,14 @@ const ingest = async (device, body, extra = {}) => {
   const known = await enrich({ device, direction, plate: parsed.plate, reasons });
   const key = dedupeKey({ locationId: device.locationId, direction, plate: parsed.plate }, now.getTime());
 
+  // Neither the plate's history nor the camera said what it is: use the vehicle type set for this lane.
+  let laneType;
+  if (direction === "ENTRY" && !known.vehicleType && !parsed.vehicleType && device.gate) {
+    const location = await Location.findById(device.locationId).select("gates").lean();
+    const lane = location && (location.gates || []).find((g) => g.name === device.gate);
+    laneType = lane && lane.vehicleType;
+  }
+
   let detection;
   try {
     detection = await AnprDetection.create({
@@ -132,6 +144,9 @@ const ingest = async (device, body, extra = {}) => {
       reviewReasons: reasons,
       dedupeKey: key,
       lastSeenAt: now,
+      // The camera's own word for the vehicle, unless we already know this plate.
+      ...(parsed.vehicleType ? { vehicleType: parsed.vehicleType, vehicleTypeFrom: "CAMERA" } : {}),
+      ...(laneType ? { vehicleType: laneType, vehicleTypeFrom: "LANE" } : {}),
       ...known,
     });
   } catch (error) {
@@ -192,43 +207,6 @@ const ingestFastag = async (device, body) => {
   );
 };
 
-// Handles one picture an operator took. `reading` is what the recognition
-// provider answered ({ plate, confidence }). A picture that gave no readable
-// plate stores nothing (the operator just types the number); a readable one
-// becomes the same PENDING suggestion a gate camera makes, so the normal
-// entry / exit flow (detectionId) confirms it. Returns { detection, duplicate, parsed, reasons }.
-const ingestPhotoReading = async ({ companyId, locationId, direction, userId }, reading) => {
-  const now = new Date();
-  const parsed = parseDetection(reading, { minConfidence: recognition.minConfidence() });
-  if (!parsed.plate) return { detection: null, duplicate: false, parsed, reasons: parsed.reviewReasons };
-
-  const windowStart = new Date(now.getTime() - DUPLICATE_WINDOW_SECONDS * 1000);
-  const bump = (filter) => bumpExistingDetection(filter, parsed, now);
-  const repeat = await bump({ companyId, locationId, direction, plate: parsed.plate, status: "PENDING", lastSeenAt: { $gte: windowStart } });
-  if (repeat) return { detection: repeat, duplicate: true, parsed, reasons: repeat.reviewReasons };
-
-  const reasons = [...parsed.reviewReasons];
-  const known = await enrich({ device: { companyId, locationId }, direction, plate: parsed.plate, reasons });
-  const key = dedupeKey({ locationId, direction, plate: parsed.plate }, now.getTime());
-
-  let detection;
-  try {
-    detection = await AnprDetection.create({
-      companyId, locationId, direction, source: "PHOTO", readBy: userId,
-      plateRaw: parsed.plateRaw, plate: parsed.plate, confidence: parsed.confidence,
-      capturedAt: now, lastSeenAt: now, dedupeKey: key,
-      needsReview: reasons.length > 0, reviewReasons: reasons,
-      ...known,
-    });
-  } catch (error) {
-    if (!isDuplicateKey(error)) throw error;
-    const winner = await bump({ companyId, dedupeKey: key, status: "PENDING" });
-    if (winner) return { detection: winner, duplicate: true, parsed, reasons: winner.reviewReasons };
-    throw error;
-  }
-  return { detection, duplicate: false, parsed, reasons };
-};
-
 // Marks a suggestion as used once the operator has made the entry / looked up
 // the exit, keeping what the camera read and what the operator used.
 // Never throws: the entry or exit itself must not fail because of this.
@@ -262,4 +240,4 @@ const linkDetection = async (req, detectionId, { session, plate, direction }) =>
   }
 };
 
-module.exports = { ingest, ingestTag, ingestFastag, ingestPhotoReading, linkDetection, inferDirection };
+module.exports = { ingest, ingestTag, ingestFastag, linkDetection, inferDirection };

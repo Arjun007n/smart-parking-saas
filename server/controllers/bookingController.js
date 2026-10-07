@@ -34,7 +34,7 @@ const createBooking = async (req, res) => {
 
   const now = new Date();
   const expectedAt = req.body.expectedAt || now;
-  if (expectedAt < bookings.graceCutoff(now)) throw new AppError("The arrival time has already passed", 400);
+  if (expectedAt < bookings.graceCutoff(now, location)) throw new AppError("The arrival time has already passed", 400);
   if (expectedAt > new Date(now.getTime() + bookings.MAX_DAYS_AHEAD * 86400000)) {
     throw new AppError(`A booking can be at most ${bookings.MAX_DAYS_AHEAD} days ahead`, 400);
   }
@@ -48,6 +48,7 @@ const createBooking = async (req, res) => {
   try {
     booking = await Booking.create({
       companyId: location.companyId, locationId: location._id, vehicleNumber, vehicleType, expectedAt,
+      holdUntil: bookings.holdUntilFor(location, expectedAt),
       ...(customerName ? { customerName } : {}), ...(phone ? { phone } : {}), ...(note ? { note } : {}),
       createdBy: req.user._id,
     });

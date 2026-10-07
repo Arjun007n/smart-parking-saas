@@ -10,6 +10,7 @@ const AnprDetection = require("../models/AnprDetection");
 const Notification = require("../models/Notification");
 const ParkingSession = require("../models/ParkingSession");
 const Company = require("../models/Company");
+const Vehicle = require("../models/Vehicle");
 
 setup();
 
@@ -175,6 +176,55 @@ it("ANPR: a clear plate becomes one suggestion, repeats only add hits", async ()
   assert.equal(stored.plateRaw, "mh12 ab 1234", "the original text is kept for audit");
   assert.equal(stored.imageUrl, "https://cams.example.com/1.jpg");
   assert.equal(stored.confidence, 0.97, "the best confidence is kept");
+});
+
+it("ANPR: the vehicle type comes from the camera, and a plate we already know keeps its own type", async () => {
+  const bus = await device("cam-in", "POST", "/anpr", { plate: "GJ05CD4321", confidence: 0.95, vehicleType: "Bus" });
+  assert.equal(bus.status, 201, JSON.stringify(bus.body));
+  assert.equal(bus.body.data.vehicleType, "HEAVY");
+  const stored = await AnprDetection.findById(bus.body.data.id);
+  assert.equal(stored.vehicleType, "HEAVY");
+  assert.equal(stored.vehicleTypeFrom, "CAMERA");
+
+  // A plate seen before is the vehicle we remember, whatever the camera guesses today.
+  await Vehicle.create({ companyId: s.a.company._id, plateNumber: "UP32EF5678", type: "TEMPO" });
+  const known = await device("cam-in", "POST", "/anpr", { plate: "UP32EF5678", confidence: 0.95, vehicleType: "car" });
+  assert.equal(known.body.data.vehicleType, "TEMPO");
+  assert.equal((await AnprDetection.findById(known.body.data.id)).vehicleTypeFrom, "HISTORY");
+
+  // A word the platform does not know is ignored; the plate is still a normal suggestion.
+  const odd = await device("cam-in", "POST", "/anpr", { plate: "TN09GH1111", confidence: 0.95, vehicleType: "hovercraft" });
+  assert.equal(odd.status, 201);
+  assert.equal(odd.body.data.vehicleType, undefined);
+
+  // The operator's list carries the type so the entry screen can choose it.
+  const list = await api("GET", `/api/anpr?locationId=${s.loc._id}&direction=ENTRY`, { token: s.a.token });
+  assert.equal(list.body.data.find((d) => d.plate === "GJ05CD4321").vehicleType, "HEAVY");
+});
+
+it("ANPR: a lane with a vehicle type of its own gives that type when nothing else knows it", async () => {
+  const setLane = (vehicleType) => api("PUT", `/api/locations/${s.loc._id}`, {
+    token: s.a.token,
+    body: { gates: [{ name: "Gate A", type: "ENTRY", ...(vehicleType ? { vehicleType } : {}) }, { name: "Gate B", type: "EXIT" }] },
+  });
+  assert.equal((await api("PUT", `/api/locations/${s.loc._id}`, { token: s.a.token, body: { gates: [{ name: "Gate A", type: "ENTRY", vehicleType: "SPACESHIP" }] } })).status, 400);
+  const saved = await setLane("BIKE");
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.equal(saved.body.data.gates.find((g) => g.name === "Gate A").vehicleType, "BIKE");
+
+  const lane = await device("cam-in", "POST", "/anpr", { plate: "KL07LA1234", confidence: 0.95 });
+  assert.equal(lane.body.data.vehicleType, "BIKE");
+  assert.equal((await AnprDetection.findById(lane.body.data.id)).vehicleTypeFrom, "LANE");
+
+  // What the camera sees beats the lane's setting.
+  const seen = await device("cam-in", "POST", "/anpr", { plate: "KL07LB5678", confidence: 0.95, vehicleType: "truck" });
+  assert.equal(seen.body.data.vehicleType, "HEAVY");
+  assert.equal((await AnprDetection.findById(seen.body.data.id)).vehicleTypeFrom, "CAMERA");
+
+  // Taking the type off the lane puts things back.
+  assert.equal((await setLane(null)).status, 200);
+  const none = await device("cam-in", "POST", "/anpr", { plate: "KL07LC9999", confidence: 0.95 });
+  assert.equal(none.body.data.vehicleType, undefined);
 });
 
 it("ANPR: parallel reports of the same new plate make exactly one suggestion", async () => {

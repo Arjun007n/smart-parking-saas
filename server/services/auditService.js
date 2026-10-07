@@ -8,7 +8,7 @@ const record = async (req, action, details = {}) => {
     await AuditLog.create({
       companyId: details.companyId || req.companyId || (actor && actor.companyId) || undefined,
       actorId: actor ? actor._id : undefined,
-      actorEmail: actor ? actor.email : details.email,
+      actorEmail: actor ? actor.email || actor.loginId : details.email,
       action,
       entity: details.entity,
       entityId: details.entityId,

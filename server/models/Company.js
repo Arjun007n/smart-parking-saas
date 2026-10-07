@@ -4,10 +4,15 @@ const { SUBSCRIPTION_STATUSES } = require("./constants");
 const companySchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true, maxlength: 150 },
+    // The code staff type at sign-in together with their Login ID. Made once, never changed
+    // (see services/accountService.js); old companies get theirs when the server starts.
+    code: { type: String, trim: true, uppercase: true, maxlength: 12, unique: true, sparse: true },
     legalName: { type: String, trim: true, maxlength: 200 },
     businessType: { type: String, trim: true, maxlength: 100 },
     gstNumber: { type: String, trim: true, uppercase: true, maxlength: 20 },
     taxId: { type: String, trim: true, maxlength: 50 },
+    // GST charged on passes (a share of the pass price when it is sold, already inside the amount). 0 = none.
+    passGstPercent: { type: Number, default: 0, min: 0, max: 100 },
     billingContact: {
       name: { type: String, trim: true },
       email: { type: String, trim: true, lowercase: true },
@@ -55,6 +60,12 @@ const companySchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// A new company gets its sign-in code before it is saved.
+companySchema.pre("validate", async function giveCode() {
+  if (this.code || !this.isNew) return;
+  this.code = await require("../services/accountService").uniqueCompanyCode(this.constructor);
+});
 
 companySchema.index({ subscriptionStatus: 1, trialEndsAt: 1 });
 companySchema.index({ name: 1 });

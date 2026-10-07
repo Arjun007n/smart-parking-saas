@@ -18,6 +18,7 @@ const companyFields = {
     pattern: /^[0-9]{2}[A-Z0-9]{13}$/, message: "must be a valid 15-character GSTIN",
   },
   taxId: text(50),
+  passGstPercent: { type: "number", min: 0, max: 100 },
   logoUrl: { type: "string", max: 500, pattern: /^https:\/\//, message: "must be an https link" },
   billingContact: {
     type: "object",

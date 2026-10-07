@@ -157,3 +157,84 @@ body {
 
 /* Public website: the same Montserrat face as the gate screens. */
 .site-skin { font-family: Montserrat, Arial, Helvetica, sans-serif; }
+
+/* ---- Admin look (the dashboard for company staff): a white page, a header with a logo cell and icon cells,
+   a horizontal menu with drop-downs, thin bordered cards, plain navy card titles, bordered tables, a footer.
+   Scoped to .admin-skin (applied by layouts/DashboardLayout), so the gate screens keep their own look. ---- */
+.admin-skin { background: #fff; font-size: 14px; }
+.admin-header { position: sticky; top: 0; z-index: 40; background: #fff; border-bottom: 1px solid #e3e6ee; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06); }
+.admin-topbar { display: flex; align-items: stretch; min-height: 3.9rem; }
+.admin-logo { display: flex; align-items: center; justify-content: center; width: 4.5rem; border-right: 1px solid #e3e6ee; }
+.admin-logo span { display: flex; width: 2.5rem; height: 2.5rem; align-items: center; justify-content: center; border-radius: 0.6rem; color: #fff; font-size: 1.35rem; font-weight: 800; background: linear-gradient(135deg, #007bff, #0056b3); }
+.admin-cell { position: relative; display: flex; align-items: center; justify-content: center; min-width: 3.6rem; padding: 0 0.6rem; border-left: 1px solid #e3e6ee; color: #1e3d73; background: transparent; cursor: pointer; }
+.admin-cell:hover { background: #f4f7fc; }
+.admin-title { display: flex; flex-direction: column; justify-content: center; padding: 0 1rem; }
+.admin-title-main { font-size: 1.1rem; font-weight: 800; color: #1e3d73; line-height: 1.2; }
+.admin-title-sub { font-size: 0.7rem; color: #6b7280; }
+.admin-avatar { display: flex; width: 2.2rem; height: 2.2rem; align-items: center; justify-content: center; border-radius: 9999px; background: #1e3d73; color: #fff; }
+.admin-count { position: absolute; top: 0.55rem; right: 0.45rem; min-width: 1.1rem; padding: 0 0.3rem; border-radius: 9999px; background: #dc3545; color: #fff; font-size: 0.65rem; font-weight: 700; line-height: 1.1rem; text-align: center; }
+
+.admin-menu { background: #fff; border-top: 1px solid #eef0f6; }
+.admin-menu ul { display: flex; flex-wrap: wrap; align-items: center; gap: 0.15rem; margin: 0; padding: 0.3rem 0.75rem; list-style: none; }
+.admin-menu-link { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.45rem 0.8rem; border-radius: 0.4rem; color: #292b3a; font-size: 0.8125rem; font-weight: 500; white-space: nowrap; background: transparent; cursor: pointer; border: 0; }
+.admin-menu-link:hover { background: #eef3fb; }
+.admin-menu-link.is-active { background: #e4eefc; color: #0b5ed7; font-weight: 600; }
+.admin-dropdown { position: absolute; top: 100%; left: 0; z-index: 50; min-width: 12.5rem; padding: 0.35rem; background: #fff; border: 1px solid rgba(72, 94, 144, 0.16); border-radius: 0.4rem; box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12); }
+.admin-dropdown-link { display: block; padding: 0.5rem 0.75rem; border-radius: 0.3rem; color: #292b3a; font-size: 0.8125rem; background: transparent; border: 0; cursor: pointer; }
+.admin-dropdown-link:hover { background: #eef3fb; }
+.admin-dropdown-link.is-active { color: #0b5ed7; font-weight: 600; }
+@media (min-width: 1024px) { .admin-burger { display: none; } }
+.admin-dropdown-right { left: auto; right: 0; min-width: 14rem; }
+@media (max-width: 1023px) {
+  .admin-menu { display: none; }
+  .admin-menu.is-open { display: block; max-height: 70vh; overflow-y: auto; }
+  .admin-menu ul { flex-direction: column; align-items: stretch; }
+  .admin-menu-link { width: 100%; }
+  .admin-menu .admin-dropdown { position: static; box-shadow: none; border: 0; margin-left: 1.2rem; }
+  .admin-title-sub { display: none; }
+}
+
+.admin-footer { position: relative; padding: 0.9rem 4rem; border-top: 1px solid #e3e6ee; text-align: center; font-size: 0.72rem; letter-spacing: 0.03em; text-transform: uppercase; color: #292b3a; background: #fff; }
+.admin-top { position: absolute; right: 1rem; top: 50%; transform: translateY(-50%); display: flex; width: 2.1rem; height: 2.1rem; align-items: center; justify-content: center; border-radius: 9999px; border: 0; background: #0d6efd; color: #fff; cursor: pointer; }
+
+/* Cards: thin border, small corners, no shadow, a plain navy title (no coloured bar). */
+.admin-skin .ring-slate-200 { --tw-ring-color: rgba(72, 94, 144, 0.16); }
+.admin-skin .shadow-sm { --tw-shadow: 0 0 #0000; --tw-shadow-colored: 0 0 #0000; }
+.admin-skin .rounded-xl.bg-white { border-radius: 0.35rem; }
+.gate-skin.admin-skin .sp-card-head { margin: 0 0 0.9rem; padding: 0; background: transparent; border-radius: 0; }
+.gate-skin.admin-skin .sp-card-head h2 { color: #1e3d73; font-size: 1.05rem; font-weight: 600; letter-spacing: 0; text-transform: none; }
+.gate-skin.admin-skin h1 { color: #292b3a; font-size: 1.5rem; font-weight: 400; }
+
+/* Tables: bordered cells, bold navy headings on white. `table-navy` gives the navy heading bar. */
+.admin-skin table { border-collapse: collapse; }
+.gate-skin.admin-skin table thead th { background: #fff; color: #1e3d73; font-size: 0.8rem; font-weight: 700; letter-spacing: 0; text-transform: none; border: 1px solid #dee2e6; }
+.admin-skin table td { border: 1px solid #e5e7eb; padding: 0.45rem 0.6rem; }
+.admin-skin table tbody tr:nth-child(even) { background: #fafbfd; }
+.gate-skin.admin-skin table.table-navy thead th { background: #1e3d73; color: #fff; border-color: #1e3d73; }
+.admin-skin table.table-navy tbody tr:nth-child(even) { background: #fff; }
+.admin-skin table.table-navy tfoot td, .admin-skin table.table-navy tr.row-total td { font-weight: 700; background: #f1f4fa; }
+
+/* Boxes, fields. */
+.admin-skin input:not([type="radio"]):not([type="checkbox"]),
+.admin-skin select,
+.admin-skin textarea { border-radius: 0.3rem; border-color: #ced4da; }
+
+/* KPI cards: an icon square, a value and a label. */
+.kpi-card { display: flex; align-items: center; gap: 0.75rem; padding: 0.7rem 0.9rem; border: 1px solid rgba(72, 94, 144, 0.16); border-radius: 0.35rem; background: #fff; }
+.kpi-icon { display: flex; width: 2.3rem; height: 2.3rem; flex: none; align-items: center; justify-content: center; border-radius: 0.4rem; background: #e8f0fe; color: #0b5ed7; }
+.kpi-value { font-size: 1.1rem; font-weight: 700; color: #111; line-height: 1.2; }
+.kpi-label { font-size: 0.75rem; font-weight: 500; color: #292b3a; }
+.kpi-tag { margin-left: auto; padding: 0.1rem 0.45rem; border-radius: 0.25rem; border: 1px solid #f5c2c7; background: #f8d7da; color: #b02a37; font-size: 0.65rem; font-weight: 700; white-space: nowrap; }
+
+/* Pastel one-month tiles. */
+.pastel-tile { border-radius: 0.5rem; padding: 0.9rem 0.6rem; text-align: center; }
+.pastel-tile .pastel-value { font-size: 1.5rem; font-weight: 700; line-height: 1.2; }
+.pastel-tile .pastel-label { font-size: 0.75rem; font-weight: 600; opacity: 0.85; }
+.pastel-green { background: #e3f4ea; color: #198754; }
+.pastel-red { background: #fbe4e6; color: #dc3545; }
+.pastel-blue { background: #e1ecfe; color: #0d6efd; }
+.pastel-orange { background: #fdf0d8; color: #c27a0a; }
+.pastel-purple { background: #efe7fb; color: #6f42c1; }
+.pastel-lavender { background: #e9e9fb; color: #5b5bd6; }
+.pastel-mint { background: #dff5ee; color: #12805c; }
+.pastel-peach { background: #fde8dc; color: #c4561c; }

@@ -26,7 +26,7 @@ api.interceptors.response.use(
     const isAuthCall = error.config?.url?.startsWith('/auth/')
     if (error.response?.status === 401 && !isAuthCall && tokenStore.get()) {
       tokenStore.clear()
-      window.location.assign('/login')
+      window.location.assign(window.location.pathname.startsWith('/government') ? '/government/login' : '/login')
     }
     return Promise.reject(error)
   },
@@ -37,6 +37,7 @@ const unwrap = (promise) => promise.then((res) => res.data.data)
 
 export const authApi = {
   register: (body) => unwrap(api.post('/auth/register', body)),
+  // body.portal: 'government' for the Government login page.
   login: (body) => unwrap(api.post('/auth/login', body)),
   me: () => unwrap(api.get('/auth/me')),
   logout: () => api.post('/auth/logout'),
@@ -47,6 +48,8 @@ export const authApi = {
   resetPassword: (body) => api.post('/auth/reset-password', body).then((res) => res.data),
   // Does signup ask for a code sent to the mobile number? ({ otpRequired })
   signupOptions: () => unwrap(api.get('/auth/signup-options')),
+  // Is this company code free? ({ code, available, reason? })
+  checkCompanyCode: (code) => unwrap(api.get('/auth/company-code', { params: { code } })),
   sendOtp: (phone) => unwrap(api.post('/auth/otp/send', { phone })),
   verifyOtp: (phone, code) => unwrap(api.post('/auth/otp/verify', { phone, code })),
 }
@@ -119,6 +122,17 @@ export const locationApi = {
   create: (body) => unwrap(api.post('/locations', body)),
   update: (id, body) => unwrap(api.put(`/locations/${id}`, body)),
   deactivate: (id) => unwrap(api.delete(`/locations/${id}`)),
+  // The table as a file: format 'xlsx' | 'csv' | 'pdf'.
+  download: (format = 'xlsx') => downloadFile('/locations/export', {}, `parking-locations.${format}`, format),
+  // Applies one vehicle type's auto exit rule now.
+  runAutoExit: (id, vehicleType) => unwrap(api.post(`/locations/${id}/auto-exit/run`, { vehicleType })),
+  // The re-entry counter (admins only): the limit and today's re-entries per operator; reset starts again from now.
+  reEntries: (id) => unwrap(api.get(`/locations/${id}/re-entries`)),
+  resetReEntries: (id) => unwrap(api.post(`/locations/${id}/re-entries/reset`)),
+  // The Lanes tab: lanes with their operators and devices; params { q, page, limit }.
+  lanes: (id, params) => unwrap(api.get(`/locations/${id}/lanes`, { params })),
+  // Switches one lane on or off.
+  setLaneStatus: (id, laneId, isActive) => unwrap(api.patch(`/locations/${id}/lanes/${laneId}/status`, { isActive })),
 }
 
 export const userApi = {
@@ -126,6 +140,11 @@ export const userApi = {
   create: (body) => unwrap(api.post('/users', body)),
   update: (id, body) => unwrap(api.put(`/users/${id}`, body)),
   deactivate: (id) => unwrap(api.delete(`/users/${id}`)),
+  // The Users table as a file: format 'xlsx' | 'csv' | 'pdf'.
+  download: (format = 'xlsx') => downloadFile('/users/export', {}, `users.${format}`, format),
+  // Seats per location: limit, in use, valid upto.
+  licences: () => unwrap(api.get('/users/licences')),
+  setLicence: (locationId, limit) => unwrap(api.put(`/users/licences/${locationId}`, { limit })),
 }
 
 export const roleApi = {
@@ -165,6 +184,8 @@ export const parkingApi = {
   exits: (params) => unwrap(api.get('/parking/exits', { params })),
   receipt: (id) => unwrap(api.get(`/parking/sessions/${id}/receipt`)),
   session: (id) => unwrap(api.get(`/parking/sessions/${id}`)),
+  // Counts a ticket printed again from the browser (the collection report shows reprints per operator).
+  reprint: (id) => unwrap(api.post(`/parking/sessions/${id}/reprint`)),
   // Vehicle photos. The upload body is the picture itself.
   uploadPhoto: (id, blob, kind) =>
     unwrap(api.post(`/parking/sessions/${id}/photos`, blob, { params: { kind }, headers: { 'Content-Type': blob.type }, timeout: 30000 })),
@@ -210,6 +231,24 @@ export const passApi = {
   setVehicleTag: (id, body) => unwrap(api.put(`/passes/${id}/vehicles/tag`, body)),
   // For gate staff: does this vehicle have a pass, and is it good at this location?
   lookup: (params) => unwrap(api.get('/passes/lookup', { params })),
+  // The numbers above the pass list, every vehicle on a pass, pass receipts, and changing several passes at once.
+  summary: () => unwrap(api.get('/passes/summary')),
+  vehicles: (params) => unwrap(api.get('/passes/vehicles', { params })),
+  invoices: (params) => unwrap(api.get('/passes/invoices', { params })),
+  downloadInvoices: (params, format) => downloadFile('/passes/invoices', params, `pass-receipts.${format}`, format),
+  downloadVehicles: (params, format) => downloadFile('/passes/vehicles', params, `pass-vehicles.${format}`, format),
+  bulk: (body) => unwrap(api.post('/passes/bulk', body)),
+  // Pass users (the people who hold passes) and selling many passes from a CSV file.
+  users: (params) => unwrap(api.get('/passes/users', { params })),
+  downloadUsers: (params, format) => downloadFile('/passes/users', params, `pass-users.${format}`, format),
+  bulkUpload: (body) => unwrap(api.post('/passes/bulk-upload', body)),
+}
+
+// Firms, societies and schools that buy passes for their people.
+export const passCompanyApi = {
+  list: (params) => unwrap(api.get('/pass-companies', { params })),
+  create: (body) => unwrap(api.post('/pass-companies', body)),
+  update: (id, body) => unwrap(api.put(`/pass-companies/${id}`, body)),
 }
 
 export const walletApi = {
@@ -261,11 +300,6 @@ export const anprApi = {
   dismiss: (id) => unwrap(api.post(`/anpr/${id}/dismiss`)),
   // The live picture address of the camera at a gate ({ previewUrl, camera }; previewUrl is null when there is none).
   preview: (params) => unwrap(api.get('/anpr/preview', { params })),
-  // Can this server read a plate from a photo? ({ photoReading, maxBytes })
-  options: () => unwrap(api.get('/anpr/options')),
-  // Sends a picture (the body is the picture itself); answers { detection, plate, confidence, reviewReasons, readable }.
-  read: (locationId, direction, blob, testPlate) =>
-    unwrap(api.post('/anpr/read', blob, { params: { locationId, direction, ...(testPlate ? { testPlate } : {}) }, headers: { 'Content-Type': blob.type }, timeout: 30000 })),
 }
 
 export const dashboardApi = {
@@ -295,6 +329,15 @@ export const operatorApi = {
   download: (kind, params, format = 'xlsx') => downloadFile(`/operator/${kind}`, params, `${kind}.${format}`, format),
 }
 
+// The government officer's reports: entries and exits, with vehicle numbers and no money.
+export const governmentApi = {
+  locations: () => unwrap(api.get('/government/locations')),
+  summary: (params) => unwrap(api.get('/government/summary', { params })),
+  movements: (params) => unwrap(api.get('/government/movements', { params })),
+  // format: 'xlsx' | 'csv' | 'pdf'
+  download: (params, format = 'xlsx') => downloadFile('/government/movements', params, `vehicle-movements.${format}`, format),
+}
+
 export const bookingApi = {
   list: (params) => unwrap(api.get('/bookings', { params })),
   create: (body) => unwrap(api.post('/bookings', body)),
@@ -307,10 +350,12 @@ export const publicBookingApi = {
   location: (id) => unwrap(api.get(`/public/booking/locations/${id}`)),
   create: (body) => unwrap(api.post('/public/booking/bookings', body)),
   get: (id, token) => unwrap(api.get(`/public/booking/bookings/${id}`, { params: { token } })),
+  cancel: (id, token) => unwrap(api.post(`/public/booking/bookings/${id}/cancel`, {}, { params: { token } })),
   simulate: (id, token, outcome) => unwrap(api.post(`/public/booking/bookings/${id}/simulate`, { outcome }, { params: { token } })),
 }
 
 export const reportApi = {
+  periods: () => unwrap(api.get('/reports/periods')),
   get: (name, params) => unwrap(api.get(`/reports/${name}`, { params })),
   // format: 'csv' | 'xlsx' | 'pdf'
   download: (name, params, format = 'csv') => downloadFile(`/reports/${name}`, params, `${name}.${format}`, format),

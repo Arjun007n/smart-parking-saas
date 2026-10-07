@@ -1,6 +1,7 @@
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { parkingApi } from '../../services/api'
+import { useAuth } from '../../hooks/useAuth'
 import { errorMessage } from '../../utils/errors'
 import { PAYMENT_LABELS, SESSION_STATUS, VEHICLE_LABELS, dateTime, duration, money } from '../../utils/format'
 import { printThermal } from '../../utils/print'
@@ -27,6 +28,7 @@ export default function Receipt() {
   })
 
   // Sends the receipt to the thermal printer at the gate (if one is set up).
+  const { user } = useAuth()
   const thermal = useMutation({ mutationFn: () => parkingApi.print(id) })
 
   if (isLoading) return <PageLoader />
@@ -45,9 +47,11 @@ export default function Receipt() {
           ← Back to exit
         </Link>
         <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" loading={thermal.isPending} onClick={() => thermal.mutate()}>
-            Print on gate printer
-          </Button>
+          {user?.access?.reprint !== false && (
+            <Button variant="secondary" loading={thermal.isPending} onClick={() => thermal.mutate()}>
+              Print on gate printer
+            </Button>
+          )}
           <Button variant="secondary" onClick={() => printThermal(80)}>Print 80 mm slip</Button>
           <Button onClick={() => window.print()}>Print / save as PDF</Button>
         </div>

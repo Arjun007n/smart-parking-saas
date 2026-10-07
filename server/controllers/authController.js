@@ -5,6 +5,7 @@ const { ROLES } = require("../config/permissions");
 const { accessOf } = require("../services/roleService");
 const audit = require("../services/auditService");
 const loginGuard = require("../services/loginGuard");
+const account = require("../services/accountService");
 const emailService = require("../services/emailService");
 const otp = require("../services/otpService");
 const email = require("../integrations/email");
@@ -30,7 +31,8 @@ const authResponse = async (user, company) => {
 // POST /api/auth/register
 // Registers a new company together with its first Company Admin.
 const register = async (req, res) => {
-  const { companyName, name, email, password, phoneToken } = req.body;
+  const { companyName, name, email, password, phoneToken, gstNumber, city, state } = req.body;
+  const chosenCode = account.normalizeCompanyCode(req.body.companyCode);
   let { phone } = req.body;
 
   // With SIGNUP_OTP=on the mobile number must have been proven with a text-message code.
@@ -44,11 +46,27 @@ const register = async (req, res) => {
     throw new AppError("An account with this email already exists", 409);
   }
 
-  const company = await Company.create({
-    name: companyName,
-    billingContact: { name, email, phone },
-    trialEndsAt: new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000),
-  });
+  // The admin picks the company code everyone signs in with; without one, a code is made.
+  if (chosenCode) {
+    const problem = await account.codeProblem(Company, chosenCode);
+    if (problem) throw new AppError(problem, 409);
+  }
+
+  let company;
+  try {
+    company = await Company.create({
+      ...(chosenCode ? { code: chosenCode } : {}),
+      name: companyName,
+      billingContact: { name, email, phone },
+      ...(gstNumber ? { gstNumber } : {}),
+      ...(city || state ? { address: { ...(city ? { city } : {}), ...(state ? { state } : {}) } } : {}),
+      trialEndsAt: new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000),
+    });
+  } catch (error) {
+    // Two companies picking the same code at the same moment: the second one loses.
+    if (error.code === 11000 && chosenCode) throw new AppError("This company code is already taken", 409);
+    throw error;
+  }
 
   let user;
   try {
@@ -66,6 +84,13 @@ const register = async (req, res) => {
   });
 
   res.status(201).json({ success: true, data: await authResponse(user, company) });
+};
+
+// GET /api/auth/company-code?code=ABC123   is this company code free? (for the signup form)
+const checkCompanyCode = async (req, res) => {
+  const code = account.normalizeCompanyCode(req.query.code);
+  const problem = code ? await account.codeProblem(Company, code) : "Enter a company code";
+  res.json({ success: true, data: { code, available: !problem, ...(problem ? { reason: problem } : {}) } });
 };
 
 // GET /api/auth/signup-options   what the signup page should ask for
@@ -86,14 +111,39 @@ const verifyOtp = async (req, res) => {
 };
 
 // POST /api/auth/login
+// Every company signs in with its own company code: { companyCode, loginId | email, password }.
+// The one exception is the platform's own administrator (no company), who signs in with an email alone.
 const login = async (req, res) => {
-  const { email, password } = req.body;
-  const invalid = new AppError("Invalid email or password", 401);
+  const { password } = req.body;
+  const code = account.normalizeCompanyCode(req.body.companyCode);
+  const loginId = account.normalizeLoginId(req.body.loginId);
+  const email = req.body.email;
+  if (!email && !loginId) throw new AppError("Enter your login ID or email, and your password", 400);
 
-  const user = await User.findOne({ email }).select("+password +failedLogins +lockedUntil");
+  const needCode = new AppError("Enter your company code to sign in", 401);
+  const invalid = new AppError("Invalid company code, login ID or password", 401);
+  const select = "+password +failedLogins +lockedUntil";
+  const who = { email: email || `${loginId}@${code || "-"}` };
+
+  let user = null;
+  if (code) {
+    const company = await Company.findOne({ code }).select("_id");
+    if (company) user = await User.findOne({ companyId: company._id, ...(email ? { email } : { loginId }) }).select(select);
+  } else if (email) {
+    // No code: only the platform administrator may sign in this way.
+    user = await User.findOne({ email, role: ROLES.SUPER_ADMIN }).select(select);
+    if (!user) {
+      await loginGuard.burnTime(password);
+      await audit.record(req, "AUTH_LOGIN_FAILED", who);
+      throw needCode;
+    }
+  } else {
+    await loginGuard.burnTime(password);
+    throw needCode;
+  }
   if (!user) {
     await loginGuard.burnTime(password); // same response time as for a real account
-    await audit.record(req, "AUTH_LOGIN_FAILED", { email });
+    await audit.record(req, "AUTH_LOGIN_FAILED", who);
     throw invalid;
   }
 
@@ -108,11 +158,18 @@ const login = async (req, res) => {
     const next = loginGuard.afterFailure(user.failedLogins);
     await User.updateOne({ _id: user._id }, { $set: next });
     await audit.record(req, next.lockedUntil ? "AUTH_ACCOUNT_LOCKED" : "AUTH_LOGIN_FAILED", {
-      email, companyId: user.companyId,
+      ...who, companyId: user.companyId,
     });
     throw invalid;
   }
   if (!user.isActive) throw new AppError("This account has been deactivated", 403);
+
+  // Government officers have their own login page, and nobody else may use it.
+  const officer = user.role === ROLES.GOVERNMENT_OFFICER;
+  if (req.body.portal === "government" && !officer) throw invalid;
+  if (officer && req.body.portal !== "government") {
+    throw new AppError("Government officers sign in on the Government login page", 403);
+  }
 
   let company = null;
   if (user.role !== ROLES.SUPER_ADMIN) {
@@ -244,4 +301,4 @@ const resetPassword = async (req, res) => {
   res.json({ success: true, message: "Password updated. Please log in." });
 };
 
-module.exports = { register, signupOptions, sendOtp, verifyOtp, login, me, logout, changePassword, forgotPassword, resetPassword, updatePreferences, updateProfile };
+module.exports = { register, checkCompanyCode, signupOptions, sendOtp, verifyOtp, login, me, logout, changePassword, forgotPassword, resetPassword, updatePreferences, updateProfile };

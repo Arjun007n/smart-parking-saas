@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { publicBookingApi } from '../../services/api'
 import { errorMessage } from '../../utils/errors'
-import { VEHICLE_LABELS, localInput, money } from '../../utils/format'
+import { VEHICLE_LABELS, localInput, money, waitText } from '../../utils/format'
 import { usePageTitle } from '../../hooks/usePageTitle'
 import { PageHeader } from '../../layouts/PublicLayout'
 import { Alert, Button, Field, Select } from '../../components/ui'
@@ -109,7 +109,7 @@ export default function BookLocation() {
               name="book-time"
               type="datetime-local"
               required
-              hint={`We keep the booking for ${offer.graceHours} hours after this time. A booking does not reserve a particular space.`}
+              hint={`We keep the booking for ${waitText(offer.waitingMinutes ?? offer.graceHours * 60)} after this time.${offer.cancelBeforeMinutes > 0 ? ` You can cancel up to ${waitText(offer.cancelBeforeMinutes)} before.` : ''} A booking does not reserve a particular space.`}
               value={form.expectedAt}
               onChange={(event) => set({ expectedAt: event.target.value })}
             />

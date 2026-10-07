@@ -47,12 +47,12 @@ const locationsInScope = async (req, { activeOnly = false } = {}) => {
   return Location.find(filter).sort({ name: 1 }).limit(1000);
 };
 
-// Reads an optional ?operatorId= filter.
-const operatorIdFromQuery = (req) => {
-  const { operatorId } = req.query;
+// Reads an optional ?operatorId= filter (or another query name holding a person's id).
+const operatorIdFromQuery = (req, name = "operatorId") => {
+  const operatorId = req.query[name];
   if (operatorId === undefined || operatorId === "") return null;
   if (typeof operatorId !== "string" || !mongoose.isValidObjectId(operatorId)) {
-    throw new AppError("Invalid operatorId", 400);
+    throw new AppError(`Invalid ${name}`, 400);
   }
   return new mongoose.Types.ObjectId(operatorId);
 };

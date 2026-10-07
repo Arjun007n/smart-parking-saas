@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { anprApi } from '../services/api'
 
-// The camera registered for a gate and direction (the AI service or any plate-reading camera).
+// The camera registered for a gate and direction (an ANPR camera).
 // `hasCamera`: there is one, so the screen uses it and does not ask for the computer's own camera.
 // `ready`: the answer is known (a failed question counts as "no gate camera", so nothing is blocked).
 export function useGateCamera(locationId, direction, gate) {
@@ -10,7 +10,7 @@ export function useGateCamera(locationId, direction, gate) {
     queryFn: () => anprApi.preview({ locationId, direction, ...(gate ? { gate } : {}) }),
     enabled: Boolean(locationId),
     staleTime: 60_000,
-    // Until the AI service has told the server its picture address, look again every 10 seconds.
+    // Until the camera has a live picture address, look again every 10 seconds (it may be set on the Hardware page meanwhile).
     refetchInterval: (query) => (query.state.data?.previewUrl ? false : 10_000),
   })
   return {

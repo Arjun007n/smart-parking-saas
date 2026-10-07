@@ -24,8 +24,8 @@ parking site also carry `locationId`.
 
 | Model | Purpose | Key fields |
 |---|---|---|
-| Company | A tenant (also `subscription` {period start/end, users, months}, `reportEmail` {enabled, recipients, sendAtMinutes}) | name, GST/tax, billingContact, address, subscriptionStatus, plan limits, onboarding flags |
-| User | Login account (`phoneVerified` after OTP signup) | email (unique), password (hashed), role, companyId, locationIds, isActive, emailAlerts (OFF, CRITICAL default, IMPORTANT, ALL), tokenVersion |
+| Company | A tenant (also `passGstPercent`, the GST share of a pass price used when a sale sends no rate; also `subscription` {period start/end, users, months}, `reportEmail` {enabled, recipients, sendAtMinutes}) | name, `code` (sign-in code, unique, made once; old companies get one at server start), GST/tax, billingContact, address, subscriptionStatus, plan limits, onboarding flags |
+| User | Login account (`phoneVerified` after OTP signup) | email (unique when set), loginId (unique per company), lanes, password (hashed), role (includes `GOVERNMENT_OFFICER`, which needs at least one location and uses no seat), companyId, locationIds, isActive, emailAlerts (OFF, CRITICAL default, IMPORTANT, ALL), access (reprint, showEntryCollection, showExitCollection, showTotalCollection: yes/no, unset = yes), tokenVersion |
 | PlanOrder | A plan purchase | companyId, users, months, price breakup, status (PENDING, PAID, FAILED, CANCELLED), transactionId, payUrl |
 | Invoice | GST invoice for a paid plan order (`kind` PLAN) or shop order (`kind` SHOP) | number (SP/26-27/00001, one series for both), seller and buyer snapshot, `lines` and `shipTo` (shop), taxable value, CGST/SGST or IGST, total |
 | Wallet | A prepaid parking card of a company's customer | companyId, number (W-XXXXXXXX), holderName, phone, vehicles (max 5, one wallet per vehicle), status (ACTIVE, BLOCKED), balancePaise (whole paise), lowBalanceAlert |
@@ -35,14 +35,15 @@ parking site also carry `locationId`.
 | ShopOrder | A hardware order | number (HW/26-27/0001), lines (prices copied), goods, shipping, gst, total, shipTo, payment status, fulfilment (NONE, PROCESSING, SHIPPED, DELIVERED, CANCELLED), courier, tracking, history |
 | Otp | Signup code | phone, hashed code, attempts, expiresAt (auto-deleted) |
 | Operator | Operator profile | userId, employeeCode, shift, lastActiveAt |
-| Location | A parking site | name, address, coordinates, operatingHours, vehicleTypes, capacity, occupied, gates, zones |
+| Location | A parking site | name, address, coordinates, operatingHours, `parkingType` (NORMAL or AIRPORT), vehicleTypes, capacity, occupied, gates (each with `isActive` (off = no entries or exits), `cameraSerial` and an optional `vehicleType` for the lane), zones, `userLicence.limit` (staff seats; none = no limit of its own), `operations` (gate switches: allowReEntry, exitAmountEdit, autoExitHours, `reEntryLimit` (re-entries per operator per day, 0 = none), `reEntryCountFrom` (set by the admin's counter reset), `autoExitRules` [{vehicleType, active, days, amount}], printTicketNumber, printPhoto, photoAutoCapture, printPassReceipt), `reportRecipients` (emails for the end-of-day report), `onlineBooking` {enabled, fees per class, note, `waitingMinutes`, `cancelBeforeMinutes`} |
 | ParkingSlot | A single bay | code, zone, floor, type, status |
 | Vehicle | A known vehicle | plateNumber (normalised), type, owner, phone, isBlocked |
 | Tariff | Pricing rules | vehicleType, gracePeriodMinutes, slabs, minimum/max daily fee, tax |
-| ParkingSession | One visit / ticket | ticketNumber, vehicleNumber, status, isOpen, entry/exit time, fee (incl. advanceApplied, due), advance (taken at entry), photos (up to 6; the picture files live on disk) |
+| ParkingSession | One visit / ticket | ticketNumber, vehicleNumber, status, isOpen, entry/exit time, fee (incl. advanceApplied, due), advance (taken at entry), photos (up to 6; the picture files live on disk), `reprints` (ticket reprints), `reEntry` (true on a ticket that replaced another; counted per operator), `feeEdit` (calculated amount, reason, by, at, when the exit amount was changed), `autoClosed` (closed by the auto-exit switch) |
 | Payment | Money collected | amount, kind (FEE or ADVANCE), method, status, transactionId, refund; for online payments also provider, payUrl, expiresAt, gatewayPaymentId |
-| Pass | A daily, weekly or monthly pass for one or more vehicles | passNumber, passType, vehicles[], maxVehicles, vehicleChanges[], vehicleNumber (mirrors the first vehicle), holderName, startDate/endDate, locationIds, status, isCurrent |
-| Booking | A customer who booked ahead | vehicleNumber, vehicleType, expectedAt, status (AWAITING_PAYMENT, BOOKED, ARRIVED, CANCELLED, EXPIRED), customerName, phone, sessionId, source (STAFF or ONLINE), amount, payment (state, transactionId, provider, gateway ids, payUrl, expiresAt, paidAt, appliedToSessionId), accessHash (hash of the customer's secret link; never returned) |
+| PassCompany | A company master for passes (companies whose staff hold passes) | companyId, name (unique per company), contact, phone, email, gstin, address, isActive |
+| Pass | A daily, weekly or monthly pass for one or more vehicles | passCompanyId, passNumber, passType, vehicles[], maxVehicles, vehicleChanges[], vehicleNumber (mirrors the first vehicle), holderName, startDate/endDate, locationIds, status, isCurrent |
+| Booking | A customer who booked ahead | vehicleNumber, vehicleType, expectedAt, `holdUntil` (arrival time plus the location's waiting time; after it an unused booking expires), status (AWAITING_PAYMENT, BOOKED, ARRIVED, CANCELLED, EXPIRED), customerName, phone, sessionId, source (STAFF or ONLINE), amount, payment (state, transactionId, provider, gateway ids, payUrl, expiresAt, paidAt, appliedToSessionId), accessHash (hash of the customer's secret link; never returned) |
 | PassPayment | Money taken for a pass or its renewal | passId, amount, method (incl. COMPLIMENTARY), locationId, collectedBy |
 | Role | A company's custom role | companyId, name, baseRole, permissions (users reference it with `customRoleId`) |
 | AuditLog | Who did what | action, actor, entity, meta, ip |
@@ -55,7 +56,7 @@ parking site also carry `locationId`.
 | Hardware | A camera, barrier controller or printer at a location | type, gate, direction, keyHash (never returned), isOnline, lastSeenAt, config |
 | HardwareCommand | An instruction for one device (open barrier, print) | type, payload, status, attempts, expiresAt, idempotencyKey (removed after 30 days) |
 | HardwareEvent | Device came online/offline, command failed, device error | type, severity, message (removed after 60 days) |
-| AnprDetection | A plate seen by a camera, waiting for an operator | plate, plateRaw, confidence, status, needsReview, hits, source (CAMERA or PHOTO), hardwareId (cameras only), readBy (photo reads) (removed after 60 days) |
+| AnprDetection | A plate seen by a camera, waiting for an operator | plate, plateRaw, confidence, vehicleType + vehicleTypeFrom (CAMERA, HISTORY or LANE), status, needsReview, hits, source (CAMERA or PHOTO), hardwareId (cameras only), readBy (photo reads) (removed after 60 days) |
 
 Session statuses: `ACTIVE`, `PAYMENT_PENDING`, `COMPLETED`, `CANCELLED`,
 `LOST_TICKET`, `PASS_EXIT`, `MANUAL_OVERRIDE`. `isOpen` is true for the first two.
@@ -67,7 +68,7 @@ Session statuses: `ACTIVE`, `PAYMENT_PENDING`, `COMPLETED`, `CANCELLED`,
 | fastagcharges | `sessionId` unique where `active` | One live FASTag attempt per vehicle |
 | wallets | `number` unique; `companyId, vehicles` unique (only when it has vehicles) | One wallet per vehicle |
 | wallettxns | `idempotencyKey` unique (when set); `walletId, createdAt`; `shiftId, type` | A repeated request changes nothing; ledger and shift totals |
-| users | `email` unique | Login |
+| users | `email` unique (only users who have one); `companyId` + `loginId` unique (only users who have one) | Login by email, or by company code + Login ID |
 | users | `companyId, role, isActive` | Team lists, plan limits |
 | users | `companyId, locationIds` | Users of a location |
 | companies | `subscriptionStatus, trialEndsAt` | Expiry checks |

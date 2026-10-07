@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { operatorApi, parkingApi } from '../../services/api'
+import { useAuth } from '../../hooks/useAuth'
 import { errorMessage } from '../../utils/errors'
 import { PAYMENT_LABELS, VEHICLE_LABELS, money, timeOnly } from '../../utils/format'
 import { Alert, Button, Card, Field } from '../ui'
@@ -21,6 +22,8 @@ export default function TodaysExit({ locationId }) {
 
   const params = { pageSize: 10, page, ...(locationId ? { locationId } : {}), ...(q ? { q } : {}) }
   const { data, error } = useQuery({ queryKey: ['operator-list', 'exits', params], queryFn: () => operatorApi.exits(params), refetchInterval: 20_000 })
+  const { user } = useAuth()
+  const mayPrint = user?.access?.reprint !== false
   const print = useMutation({ mutationFn: (id) => parkingApi.print(id) })
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1
 
@@ -55,7 +58,7 @@ export default function TodaysExit({ locationId }) {
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{money(row.payable)}</span>
                       <Link to={`/operator/receipt/${row.id}`} className="text-blue-700 underline">View</Link>
-                      <button type="button" className="text-blue-700 underline" onClick={() => print.mutate(row.id)}>Print</button>
+                      {mayPrint && <button type="button" className="text-blue-700 underline" onClick={() => print.mutate(row.id)}>Print</button>}
                     </div>
                   </td>
                 </tr>

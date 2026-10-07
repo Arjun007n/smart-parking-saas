@@ -7,7 +7,13 @@ const { cleanTag } = require("../utils/tag");
 const emailService = require("../services/emailService");
 const messageService = require("../services/messageService");
 const mail = require("../integrations/email");
-const { getAccessibleLocation } = require("../utils/scope");
+const { getAccessibleLocation, locationScopedFilter } = require("../utils/scope");
+const { dayRange, addDaysLocal } = require("../utils/time");
+const { round2 } = require("../services/collectionService");
+const { respond, wantsExport, pageFrom: reportPage, CSV_LIMIT } = require("./reportController");
+const { assertPassCompany } = require("./passCompanyController");
+const PassCompany = require("../models/PassCompany");
+const Company = require("../models/Company");
 const { isCompanyWide } = require("../config/permissions");
 const Pass = require("../models/Pass");
 const { PASS_TYPES } = require("../models/Pass");
@@ -17,6 +23,7 @@ const Vehicle = require("../models/Vehicle");
 const ParkingSession = require("../models/ParkingSession");
 const Shift = require("../models/Shift");
 const Location = require("../models/Location");
+const { VEHICLE_TYPES } = require("../models/constants");
 
 const PAGE_SIZE = 50;
 const toId = (id) => new mongoose.Types.ObjectId(id);
@@ -64,6 +71,12 @@ const checkPayment = ({ amount, method, transactionId }) => {
 
 // Records the money for a sale or renewal, in the collecting person's open shift.
 const recordPayment = async (req, { pass, location, kind, period, amount, method, transactionId, taxPercent }) => {
+  // No rate sent: use the company's pass GST rate (Company → Pass GST).
+  let rate = taxPercent;
+  if (rate === undefined || rate === null) {
+    const company = await Company.findById(pass.companyId).select("passGstPercent").lean();
+    rate = company && company.passGstPercent ? company.passGstPercent : 0;
+  }
   const shift = await Shift.findOne({ operatorId: req.user._id, locationId: location._id, status: "OPEN" });
   try {
     return await PassPayment.create({
@@ -72,7 +85,7 @@ const recordPayment = async (req, { pass, location, kind, period, amount, method
       passId: pass._id,
       kind,
       amount,
-      tax: passes.taxIncluded(amount, taxPercent),
+      tax: passes.taxIncluded(amount, rate),
       method,
       ...(transactionId ? { transactionId } : {}),
       periodUnit: period.unit,
@@ -124,8 +137,9 @@ const cleanEmail = (value) => {
   return text;
 };
 
-const createPass = async (req, res) => {
-  const body = req.body;
+// Sells one pass for the signed-in person: creates it, records the money, links the vehicles.
+// Used by the single sale and by the bulk upload. Throws an AppError when the sale cannot be made.
+const sellPass = async (req, body) => {
   const holderEmail = cleanEmail(body.email);
   const location = await getAccessibleLocation(req, body.locationId, { mustBeActive: true });
   const companyId = location.companyId;
@@ -136,6 +150,7 @@ const createPass = async (req, res) => {
   const amount = body.amount;
   checkPayment({ amount, method: body.method, transactionId: body.transactionId });
   const period = passes.newPeriod({ startText: body.startDate, months: body.months, unit: body.unit, count: body.count });
+  const passCompanyId = await assertPassCompany(companyId, body.passCompanyId);
 
   for (const vehicle of vehicles) {
     const existing = await passes.findCurrentPass(companyId, vehicle.number);
@@ -148,6 +163,7 @@ const createPass = async (req, res) => {
   try {
     pass = await passes.createPassWithNumber({
       companyId, locationIds, vehicles: vehicles.map((v) => ({ ...v, addedBy: req.user._id })), maxVehicles,
+      ...(passCompanyId ? { passCompanyId } : {}),
       passType: body.passType || "REGULAR", holderName: body.holderName,
       phone: body.phone, email: holderEmail || undefined, notes: body.notes, startDate: period.start, endDate: period.end, createdBy: req.user._id,
       vehicleNumber: vehicles[0].number, vehicleType: vehicles[0].type,
@@ -179,6 +195,11 @@ const createPass = async (req, res) => {
 
   emailService.sendPassNotice({ pass, kind: "NEW" });
   messageService.sendPassNotice({ pass, kind: "NEW" });
+  return { pass, payment };
+};
+
+const createPass = async (req, res) => {
+  const { pass, payment } = await sellPass(req, req.body);
   res.status(201).json({ success: true, data: { pass: withState(pass), payment } });
 };
 
@@ -254,7 +275,8 @@ const cancelPass = changeStatus("cancel", "CANCELLED", ["ACTIVE", "SUSPENDED"], 
 // PUT /api/passes/:id   (holder details; the vehicle number cannot change)
 const updatePass = async (req, res) => {
   const pass = await findInScope(req);
-  const { locationIds, ...details } = req.body;
+  const { locationIds, passCompanyId, ...details } = req.body;
+  if (passCompanyId !== undefined) pass.passCompanyId = passCompanyId ? await assertPassCompany(pass.companyId, passCompanyId) : undefined;
   if (details.email !== undefined) details.email = cleanEmail(details.email) || undefined;
   if (details.maxVehicles !== undefined && details.maxVehicles < passes.passVehicles(pass).length) {
     throw new AppError("The pass already has more vehicles than that. Remove a vehicle first.", 400);
@@ -423,6 +445,15 @@ const listPasses = async (req, res) => {
   }
   const conditions = [scopeFilter(req), stateFilter(req.query.state, now)];
   if (req.query.type) conditions.push({ passType: req.query.type });
+  if (req.query.passCompanyId) {
+    if (!mongoose.isValidObjectId(req.query.passCompanyId)) throw new AppError("Invalid company", 400);
+    conditions.push({ passCompanyId: toId(req.query.passCompanyId) });
+  }
+  if (req.query.locationId) {
+    if (!mongoose.isValidObjectId(req.query.locationId)) throw new AppError("Invalid locationId", 400);
+    // A pass that works everywhere also works at this location.
+    conditions.push({ $or: [{ locationIds: toId(req.query.locationId) }, { "locationIds.0": { $exists: false } }] });
+  }
 
   const q = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 40) : "";
   if (q) {
@@ -443,6 +474,241 @@ const listPasses = async (req, res) => {
     Pass.countDocuments(filter),
   ]);
   res.json({ success: true, data: { passes: list.map((p) => withState(p, now)), total, page, pageSize: PAGE_SIZE } });
+};
+
+
+// ------------------------------------------------- company-wide views
+
+const nameMap = async (Model, ids, field = "name") => {
+  const rows = await Model.find({ _id: { $in: ids.filter(Boolean) } }).select(field).lean();
+  return new Map(rows.map((r) => [String(r._id), r]));
+};
+
+// GET /api/passes/summary
+// The numbers above the pass list: passes by state, vehicles, companies, and what valid passes brought in.
+const passSummary = async (req, res) => {
+  const now = new Date();
+  const scope = scopeFilter(req);
+  const [byState, vehicleRows, companies, revenueRows, userRows] = await Promise.all([
+    Promise.all(["ACTIVE", "EXPIRING", "EXPIRED", "SUSPENDED", "UPCOMING"].map((state) =>
+      Pass.countDocuments({ $and: [scope, stateFilter(state, now)] }).then((count) => [state, count])
+    )),
+    Pass.aggregate([
+      { $match: { ...scope, isCurrent: true } },
+      { $group: { _id: null, passes: { $sum: 1 }, vehicles: { $sum: { $size: { $ifNull: ["$vehicles", []] } } } } },
+    ]),
+    PassCompany.countDocuments({ ...req.tenantFilter, isActive: true }),
+    PassPayment.aggregate([
+      { $match: { ...locationScopedFilter(req), amount: { $gt: 0 } } },
+      { $lookup: { from: Pass.collection.name, localField: "passId", foreignField: "_id", as: "p", pipeline: [{ $project: { status: 1, startDate: 1, endDate: 1 } }] } },
+      { $unwind: "$p" },
+      { $match: { "p.status": "ACTIVE", "p.startDate": { $lte: now }, "p.endDate": { $gt: now } } },
+      { $group: { _id: null, revenue: { $sum: "$amount" } } },
+    ]),
+    // Pass users: one per phone number (or per name when there is no phone).
+    Pass.aggregate([
+      { $match: { ...scope, isCurrent: true } },
+      { $group: { _id: { $cond: [{ $gt: [{ $strLenCP: { $ifNull: ["$phone", ""] } }, 0] }, "$phone", { $toLower: "$holderName" }] } } },
+      { $count: "users" },
+    ]),
+  ]);
+  const states = Object.fromEntries(byState);
+  res.json({
+    success: true,
+    data: {
+      passes: vehicleRows[0] ? vehicleRows[0].passes : 0,
+      vehicles: vehicleRows[0] ? vehicleRows[0].vehicles : 0,
+      companies,
+      users: userRows[0] ? userRows[0].users : 0,
+      active: states.ACTIVE, expiring: states.EXPIRING, expired: states.EXPIRED, suspended: states.SUSPENDED, upcoming: states.UPCOMING,
+      activeRevenue: revenueRows[0] ? round2(revenueRows[0].revenue) : 0,
+    },
+  });
+};
+
+// GET /api/passes/vehicles?q=&state=&passCompanyId=&page=
+// Every vehicle on a current pass, one row each (a shared pass lists all its vehicles).
+const listPassVehicles = async (req, res) => {
+  const now = new Date();
+  const conditions = [scopeFilter(req), stateFilter(req.query.state, now)];
+  if (req.query.passCompanyId) {
+    if (!mongoose.isValidObjectId(req.query.passCompanyId)) throw new AppError("Invalid company", 400);
+    conditions.push({ passCompanyId: toId(req.query.passCompanyId) });
+  }
+  const q = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 40) : "";
+  const plate = q ? normalizePlate(q) : "";
+  const match = { $and: conditions };
+  const exporting = wantsExport(req);
+  const page = reportPage(req);
+
+  const pipeline = [
+    { $match: match },
+    { $unwind: "$vehicles" },
+    ...(q ? [{ $match: { $or: [{ "vehicles.number": { $regex: `^${escapeRegex(plate)}` } }, { holderName: { $regex: escapeRegex(q), $options: "i" } }, { "vehicles.tag": q.toUpperCase() }] } }] : []),
+  ];
+  const [rows, counted] = await Promise.all([
+    Pass.aggregate([...pipeline, { $sort: { endDate: 1, "vehicles.number": 1 } }, { $skip: exporting ? 0 : (page - 1) * PAGE_SIZE }, { $limit: exporting ? CSV_LIMIT : PAGE_SIZE }]),
+    Pass.aggregate([...pipeline, { $count: "total" }]),
+  ]);
+  const companies = await nameMap(PassCompany, rows.map((r) => r.passCompanyId));
+  const data = rows.map((r) => ({
+    vehicleNumber: r.vehicles.number,
+    vehicleType: r.vehicles.type,
+    tag: r.vehicles.tag || "",
+    passNumber: r.passNumber,
+    passId: r._id,
+    holderName: r.holderName,
+    phone: r.phone || "",
+    company: r.passCompanyId && companies.get(String(r.passCompanyId)) ? companies.get(String(r.passCompanyId)).name : "",
+    state: passes.passState(r, now),
+    startDate: r.startDate,
+    endDate: r.endDate,
+  }));
+  req.reportKey = "pass-vehicles";
+  respond(req, res, "pass-vehicles", [
+    { key: "vehicleNumber", label: "Vehicle" }, { key: "vehicleType", label: "Type" }, { key: "tag", label: "Tag" },
+    { key: "passNumber", label: "Pass" }, { key: "holderName", label: "Holder" }, { key: "phone", label: "Phone" },
+    { key: "company", label: "Company" }, { key: "state", label: "State" }, { key: "startDate", label: "From" }, { key: "endDate", label: "Valid until (day after)" },
+  ], data, { total: counted[0] ? counted[0].total : 0, page, pageSize: PAGE_SIZE });
+};
+
+// GET /api/passes/invoices?from=&to=&locationId=&passCompanyId=&q=&page=
+// Pass receipts: one row for every pass sale or renewal with the amount split into taxable value and tax.
+const passInvoices = async (req, res) => {
+  const filter = { ...locationScopedFilter(req), amount: { $gt: 0 } };
+  if (req.query.locationId) {
+    if (!mongoose.isValidObjectId(req.query.locationId)) throw new AppError("Invalid locationId", 400);
+    filter.locationId = toId(req.query.locationId);
+    // Never widen a location admin's view beyond their own locations.
+    const scoped = locationScopedFilter(req).locationId;
+    if (scoped && !scoped.$in.some((id) => String(id) === req.query.locationId)) throw new AppError("Location not found", 404);
+  }
+  const from = typeof req.query.from === "string" && req.query.from ? dayRange(req.query.from).start : null;
+  const to = typeof req.query.to === "string" && req.query.to ? dayRange(req.query.to).end : null;
+  if (from || to) filter.paidAt = { ...(from ? { $gte: from } : {}), ...(to ? { $lt: to } : {}) };
+
+  // Narrowing by company or by who the pass is for means finding those passes first.
+  const passConditions = [];
+  if (req.query.passCompanyId) {
+    if (!mongoose.isValidObjectId(req.query.passCompanyId)) throw new AppError("Invalid company", 400);
+    passConditions.push({ passCompanyId: toId(req.query.passCompanyId) });
+  }
+  const q = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 40) : "";
+  if (q) {
+    passConditions.push({ $or: [
+      { passNumber: q.toUpperCase() }, { holderName: { $regex: escapeRegex(q), $options: "i" } }, { phone: q },
+      { "vehicles.number": { $regex: `^${escapeRegex(normalizePlate(q))}` } },
+    ] });
+  }
+  if (passConditions.length) {
+    filter.passId = { $in: await Pass.find({ $and: [{ companyId: req.companyId }, ...passConditions] }).distinct("_id") };
+  }
+
+  const exporting = wantsExport(req);
+  const page = reportPage(req);
+  const [payments, total, sums] = await Promise.all([
+    PassPayment.find(filter).sort({ paidAt: -1 }).skip(exporting ? 0 : (page - 1) * PAGE_SIZE).limit(exporting ? CSV_LIMIT : PAGE_SIZE),
+    PassPayment.countDocuments(filter),
+    PassPayment.aggregate([{ $match: filter }, { $group: { _id: null, amount: { $sum: "$amount" }, tax: { $sum: "$tax" } } }]),
+  ]);
+
+  const passList = await Pass.find({ _id: { $in: payments.map((p) => p.passId) } })
+    .select("passNumber holderName phone vehicleNumber passCompanyId").lean();
+  const passBy = new Map(passList.map((p) => [String(p._id), p]));
+  const [companies, locations, history] = await Promise.all([
+    nameMap(PassCompany, passList.map((p) => p.passCompanyId), "name gstNumber"),
+    nameMap(Location, payments.map((p) => p.locationId)),
+    // The receipt's running number on its pass: 1 for the sale, 2 for the first renewal, and so on.
+    PassPayment.find({ passId: { $in: passList.map((p) => p._id) }, amount: { $gt: 0 } }).sort({ paidAt: 1, _id: 1 }).select("passId").lean(),
+  ]);
+  const order = new Map();
+  const seen = new Map();
+  for (const h of history) {
+    const n = (seen.get(String(h.passId)) || 0) + 1;
+    seen.set(String(h.passId), n);
+    order.set(String(h._id), n);
+  }
+
+  const rows = payments.map((pay) => {
+    const pass = passBy.get(String(pay.passId)) || {};
+    const company = pass.passCompanyId ? companies.get(String(pass.passCompanyId)) : null;
+    return {
+      receiptNumber: pass.passNumber ? `${pass.passNumber}/${order.get(String(pay._id)) || 1}` : String(pay._id),
+      paidAt: pay.paidAt,
+      kind: pay.kind,
+      passId: pay.passId,
+      passNumber: pass.passNumber || "",
+      holder: pass.holderName || "",
+      phone: pass.phone || "",
+      vehicle: pass.vehicleNumber || "",
+      company: company ? company.name : "",
+      companyGst: company ? company.gstNumber || "" : "",
+      location: (locations.get(String(pay.locationId)) || {}).name || "",
+      periodStart: pay.periodStart,
+      periodEnd: pay.periodEnd,
+      method: pay.method,
+      taxable: round2(pay.amount - (pay.tax || 0)),
+      tax: round2(pay.tax || 0),
+      total: round2(pay.amount),
+      reference: pay.transactionId || "",
+    };
+  });
+
+  const totals = sums[0] ? { total: round2(sums[0].amount), tax: round2(sums[0].tax), taxable: round2(sums[0].amount - sums[0].tax) } : { total: 0, tax: 0, taxable: 0 };
+  req.reportKey = "pass-receipts";
+  respond(req, res, "pass-receipts", [
+    { key: "receiptNumber", label: "Receipt" }, { key: "paidAt", label: "Date" }, { key: "kind", label: "For" },
+    { key: "holder", label: "Holder" }, { key: "phone", label: "Phone" }, { key: "vehicle", label: "Vehicle" },
+    { key: "company", label: "Company" }, { key: "companyGst", label: "Company GST" }, { key: "location", label: "Location" },
+    { key: "method", label: "Method" }, { key: "taxable", label: "Taxable" }, { key: "tax", label: "Tax" }, { key: "total", label: "Total" }, { key: "reference", label: "Reference" },
+  ], rows, { total, totals, page, pageSize: PAGE_SIZE });
+};
+
+// POST /api/passes/bulk   { ids, action, days?, startDate?, endDate?, reason? }
+// Changes several passes at once. No money is taken here: use Renew for a paid extension.
+const BULK_ACTIONS = ["EXTEND", "SET_DATES", "SUSPEND", "RESUME", "CANCEL"];
+const bulkUpdate = async (req, res) => {
+  const { ids, action, days, startDate, endDate, reason } = req.body;
+  if (!BULK_ACTIONS.includes(action)) throw new AppError("Unknown action", 400);
+  if (!Array.isArray(ids) || ids.length === 0) throw new AppError("Choose at least one pass", 400);
+  if (action === "EXTEND" && !(days >= 1 && days <= 366)) throw new AppError("Enter the number of days to add (1 to 366)", 400);
+  if ((action === "SUSPEND" || action === "CANCEL") && (!reason || String(reason).trim().length < 5)) throw new AppError("Give a reason (at least 5 letters)", 400);
+  let newStart;
+  let newEnd;
+  if (action === "SET_DATES") {
+    if (!startDate || !endDate) throw new AppError("Enter both dates", 400);
+    newStart = dayRange(startDate).start;
+    newEnd = dayRange(endDate).end; // the pass runs through the whole last day
+    if (newEnd <= newStart) throw new AppError("The last day must not be before the first day", 400);
+  }
+
+  const found = await Pass.find({ $and: [{ _id: { $in: ids.map(toId) } }, scopeFilter(req)] });
+  const done = [];
+  const skipped = [];
+  for (const pass of found) {
+    if (pass.status === "CANCELLED") { skipped.push({ passNumber: pass.passNumber, reason: "Already cancelled" }); continue; }
+    if (action === "EXTEND") pass.endDate = addDaysLocal(pass.endDate, days);
+    else if (action === "SET_DATES") { pass.startDate = newStart; pass.endDate = newEnd; }
+    else if (action === "SUSPEND") {
+      if (pass.status !== "ACTIVE") { skipped.push({ passNumber: pass.passNumber, reason: "Not active" }); continue; }
+      Object.assign(pass, { status: "SUSPENDED", statusReason: String(reason).trim(), statusChangedBy: req.user._id, statusChangedAt: new Date() });
+    } else if (action === "RESUME") {
+      if (pass.status !== "SUSPENDED") { skipped.push({ passNumber: pass.passNumber, reason: "Not suspended" }); continue; }
+      Object.assign(pass, { status: "ACTIVE", statusReason: undefined, statusChangedBy: req.user._id, statusChangedAt: new Date() });
+    } else if (action === "CANCEL") {
+      Object.assign(pass, { status: "CANCELLED", statusReason: String(reason).trim(), statusChangedBy: req.user._id, statusChangedAt: new Date() });
+    }
+    await pass.save();
+    if (action === "CANCEL") await Promise.all(passes.passVehicles(pass).map((v) => unlinkVehicle(pass.companyId, v.number, pass._id)));
+    done.push(pass.passNumber);
+  }
+  skipped.push(...ids.filter((id) => !found.some((p) => String(p._id) === String(id))).map(() => ({ passNumber: "", reason: "Not found" })));
+
+  await audit.record(req, "PASS_BULK_UPDATE", {
+    entity: "Pass", companyId: req.companyId,
+    meta: { action, changed: done.length, skipped: skipped.length, ...(days ? { days } : {}), ...(startDate ? { startDate, endDate } : {}), ...(reason ? { reason } : {}) },
+  });
+  res.json({ success: true, data: { changed: done.length, skipped } });
 };
 
 // GET /api/passes/:id
@@ -475,7 +741,128 @@ const lookupPass = async (req, res) => {
   res.json({ success: true, data: { pass: summary } });
 };
 
+// GET /api/passes/users?q=&passCompanyId=&page=
+// Pass users: the people (or firms' staff) who hold passes. Passes with the same phone number (or, with no
+// phone, the same name) are one user. Counts are of current passes only.
+const listPassUsers = async (req, res) => {
+  const now = new Date();
+  const conditions = [scopeFilter(req), { isCurrent: true }];
+  if (req.query.passCompanyId) {
+    if (!mongoose.isValidObjectId(req.query.passCompanyId)) throw new AppError("Invalid company", 400);
+    conditions.push({ passCompanyId: toId(req.query.passCompanyId) });
+  }
+  const q = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 40) : "";
+  if (q) {
+    const like = { $regex: escapeRegex(q), $options: "i" };
+    conditions.push({ $or: [{ holderName: like }, { phone: like }, { email: like }, { "vehicles.number": { $regex: `^${escapeRegex(normalizePlate(q))}` } }] });
+  }
+  const exporting = wantsExport(req);
+  const page = reportPage(req);
+  const live = { $and: [{ $eq: ["$status", "ACTIVE"] }, { $lte: ["$startDate", now] }, { $gt: ["$endDate", now] }] };
+  const grouped = [
+    { $match: { $and: conditions } },
+    {
+      $group: {
+        _id: { $cond: [{ $gt: [{ $strLenCP: { $ifNull: ["$phone", ""] } }, 0] }, "$phone", { $toLower: "$holderName" }] },
+        holderName: { $last: "$holderName" },
+        phone: { $last: "$phone" },
+        email: { $last: "$email" },
+        passCompanyId: { $last: "$passCompanyId" },
+        passes: { $sum: 1 },
+        active: { $sum: { $cond: [live, 1, 0] } },
+        vehicles: { $push: "$vehicles.number" },
+        lastEnd: { $max: "$endDate" },
+      },
+    },
+  ];
+  const [rows, counted] = await Promise.all([
+    Pass.aggregate([...grouped, { $sort: { holderName: 1 } }, { $skip: exporting ? 0 : (page - 1) * PAGE_SIZE }, { $limit: exporting ? CSV_LIMIT : PAGE_SIZE }]),
+    Pass.aggregate([...grouped, { $count: "total" }]),
+  ]);
+  const companies = await nameMap(PassCompany, rows.map((r) => r.passCompanyId), "name gstNumber");
+  const data = rows.map((r) => {
+    const company = r.passCompanyId ? companies.get(String(r.passCompanyId)) : null;
+    return {
+      holderName: r.holderName,
+      company: company ? company.name : "",
+      phone: r.phone || "",
+      email: r.email || "",
+      gstNumber: company ? company.gstNumber || "" : "",
+      vehicles: new Set(r.vehicles.flat()).size,
+      passes: r.passes,
+      active: r.active,
+      lastEnd: r.lastEnd,
+    };
+  });
+  req.reportKey = "pass-users";
+  respond(req, res, "pass-users", [
+    { key: "holderName", label: "Pass user" }, { key: "company", label: "Company" }, { key: "phone", label: "Mobile" }, { key: "email", label: "Email" },
+    { key: "gstNumber", label: "Company GST no." }, { key: "vehicles", label: "Vehicles" }, { key: "passes", label: "Passes" }, { key: "active", label: "Active now" },
+    { key: "lastEnd", label: "Latest end (day after)" },
+  ], data, { total: counted[0] ? counted[0].total : 0, page, pageSize: PAGE_SIZE });
+};
+
+// POST /api/passes/bulk-upload   { locationId, rows: [...] }
+// Sells many passes in one go (a company's staff, a society's residents). Each row is a normal sale: it
+// takes money in the collecting person's shift and fails alone with a reason if something is wrong.
+const MAX_BULK_ROWS = 200;
+const text = (value) => (value === undefined || value === null ? "" : String(value).trim());
+
+const rowToBody = async (req, row, locationId) => {
+  const vehicleType = text(row.vehicleType).toUpperCase();
+  if (!VEHICLE_TYPES.includes(vehicleType)) throw new AppError(`Vehicle type must be one of ${VEHICLE_TYPES.join(", ")}`, 400);
+  const amount = Number(text(row.amount) === "" ? 0 : row.amount);
+  if (!Number.isFinite(amount) || amount < 0 || amount > 10000000) throw new AppError("Amount must be a number, 0 or more", 400);
+  const method = text(row.method).toUpperCase() || (amount === 0 ? "COMPLIMENTARY" : "CASH");
+  const unit = text(row.unit).toUpperCase() || "MONTH";
+  const count = text(row.count) === "" ? 1 : Number(row.count);
+  if (!Number.isInteger(count) || count < 1 || count > 366) throw new AppError("Count must be a whole number from 1 to 366", 400);
+  const passType = text(row.passType).toUpperCase() || "REGULAR";
+  if (!PASS_TYPES.includes(passType)) throw new AppError(`Pass type must be one of ${PASS_TYPES.join(", ")}`, 400);
+  const holderName = text(row.holderName);
+  if (holderName.length < 2 || holderName.length > 100) throw new AppError("Holder name needs 2 to 100 letters", 400);
+  const startDate = text(row.startDate);
+  if (startDate && !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) throw new AppError("Start date must look like 2026-03-02", 400);
+  let passCompanyId;
+  const companyName = text(row.company);
+  if (companyName) {
+    const company = await PassCompany.findOne({ ...req.tenantFilter, isActive: true, name: { $regex: `^${escapeRegex(companyName)}$`, $options: "i" } }).select("_id");
+    if (!company) throw new AppError(`Company "${companyName}" is not in the company master. Add it first.`, 400);
+    passCompanyId = String(company._id);
+  }
+  return {
+    locationId, holderName, vehicleNumber: text(row.vehicleNumber), vehicleType, passType, unit, count, amount, method,
+    ...(startDate ? { startDate } : {}),
+    ...(text(row.phone) ? { phone: text(row.phone).slice(0, 20) } : {}),
+    ...(text(row.email) ? { email: text(row.email) } : {}),
+    ...(text(row.notes) ? { notes: text(row.notes).slice(0, 300) } : {}),
+    ...(text(row.transactionId) ? { transactionId: text(row.transactionId) } : {}),
+    ...(passCompanyId ? { passCompanyId } : {}),
+  };
+};
+
+const bulkUpload = async (req, res) => {
+  const { locationId, rows } = req.body;
+  if (!Array.isArray(rows) || rows.length === 0) throw new AppError("Add at least one row", 400);
+  if (rows.length > MAX_BULK_ROWS) throw new AppError(`Upload at most ${MAX_BULK_ROWS} passes at a time`, 400);
+  const results = [];
+  for (let i = 0; i < rows.length; i += 1) {
+    const row = rows[i] || {};
+    try {
+      const body = await rowToBody(req, row, locationId);
+      const { pass } = await sellPass(req, body);
+      results.push({ row: i + 1, ok: true, passNumber: pass.passNumber, vehicleNumber: pass.vehicleNumber, holderName: pass.holderName });
+    } catch (error) {
+      if (!(error instanceof AppError)) throw error;
+      results.push({ row: i + 1, ok: false, error: error.message, vehicleNumber: text(row.vehicleNumber), holderName: text(row.holderName) });
+    }
+  }
+  const created = results.filter((r) => r.ok).length;
+  await audit.record(req, "PASS_BULK_UPLOAD", { entity: "Pass", meta: { rows: rows.length, created, failed: rows.length - created, locationId } });
+  res.status(created ? 201 : 200).json({ success: true, data: { created, failed: rows.length - created, results } });
+};
+
 module.exports = {
   createPass, renewPass, suspendPass, resumePass, cancelPass, updatePass, listPasses, getPass, lookupPass,
-  addVehicle, removeVehicle, replaceVehicle, setVehicleTag,
+  addVehicle, removeVehicle, replaceVehicle, setVehicleTag, passSummary, listPassVehicles, passInvoices, bulkUpdate, listPassUsers, bulkUpload, sellPass, MAX_BULK_ROWS,
 };

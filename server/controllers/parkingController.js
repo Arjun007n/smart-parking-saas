@@ -10,6 +10,7 @@ const { publish, EVENTS } = require("../services/eventBus");
 const { notifyCapacity } = require("../services/notificationService");
 const { buildReceipt } = require("../services/receiptService");
 const hardware = require("../services/hardwareService");
+const lanes = require("../services/laneService");
 const anpr = require("../services/anprService");
 const passes = require("../services/passService");
 const advances = require("../services/advanceService");
@@ -22,7 +23,9 @@ const { can } = require("../middleware/permission");
 const ParkingSession = require("../models/ParkingSession");
 const Vehicle = require("../models/Vehicle");
 const messageService = require("../services/messageService");
+const { resolveOperations, editedFee } = require("../utils/operations");
 const Location = require("../models/Location");
+const reEntryCounter = require("../services/reEntryService");
 
 const PAGE_SIZE = 50;
 const pageFrom = (req) => Math.min(1000, Math.max(1, Number.parseInt(req.query.page, 10) || 1));
@@ -46,12 +49,14 @@ const rememberVehicle = async (companyId, plateNumber, type, locationId) => {
 // POST /api/parking/entry
 // (see also reEntry below, which cancels a ticket and issues a new one in one step)
 const createEntry = async (req, res) => {
-  const { locationId, vehicleType, gate, idempotencyKey, detectionId } = req.body;
+  const { locationId, vehicleType, idempotencyKey, detectionId } = req.body;
   const vehicleNumber = parsePlate(req.body.vehicleNumber);
   // Checked first: a bad advance must not leave a ticket behind.
   const advance = advances.checkAdvance(req.body.advance, can(req, P.PAYMENT_COLLECT));
   const location = await getAccessibleLocation(req, locationId, { mustBeActive: true });
   const companyId = location.companyId;
+  // Someone tied to particular lanes can only use those.
+  const gate = lanes.resolveGate(req, location, "ENTRY", req.body.gate, { soft: Boolean(req.laneSoft) });
 
   // A repeated request (double tap, network retry) returns the first ticket.
   const findRepeat = () => (idempotencyKey ? ParkingSession.findOne({ companyId, idempotencyKey }) : null);
@@ -65,6 +70,7 @@ const createEntry = async (req, res) => {
     const known = location.gates.find((g) => g.name === gate);
     if (!known || known.type === "EXIT") throw new AppError("That is not an entry gate of this location", 400);
   }
+  lanes.assertLaneActive(location, gate);
 
   if (advance) await advances.assertReferenceFree(advance.transactionId);
 
@@ -102,6 +108,7 @@ const createEntry = async (req, res) => {
       entryTime: new Date(),
       entryGate: gate,
       entryOperatorId: req.user._id,
+      ...(req.reEntry ? { reEntry: true } : {}),
       ...(passHere ? { passId: pass._id } : {}),
       idempotencyKey,
     });
@@ -256,18 +263,20 @@ const findSessionForExit = async (location, { ticketNumber, vehicleNumber }) => 
 // - Otherwise it becomes PAYMENT_PENDING and is closed by POST /api/payments.
 // Calling this again recalculates the fee for the current time.
 const startExit = async (req, res) => {
-  const { locationId, ticketNumber, vehicleNumber, gate, detectionId } = req.body;
+  const { locationId, ticketNumber, vehicleNumber, detectionId, editedAmount, editReason } = req.body;
   const lostTicket = Boolean(req.body.lostTicket);
   if (!ticketNumber && !vehicleNumber) throw new AppError("Enter a ticket number or a vehicle number", 400);
   if (lostTicket && !vehicleNumber) throw new AppError("For a lost ticket, enter the vehicle number", 400);
 
   const location = await getAccessibleLocation(req, locationId);
+  const gate = lanes.resolveGate(req, location, "EXIT", req.body.gate);
   const session = await findSessionForExit(location, { ticketNumber: lostTicket ? null : ticketNumber, vehicleNumber });
 
   if (gate && location.gates.length) {
     const known = location.gates.find((g) => g.name === gate);
     if (!known || known.type === "ENTRY") throw new AppError("That is not an exit gate of this location", 400);
   }
+  lanes.assertLaneActive(location, gate);
 
   // A FASTag charge that is waiting to be confirmed (or was taken and not yet turned into a payment) fixes
   // the fee: working it out again could leave the customer charged one amount against another fee.
@@ -292,7 +301,26 @@ const startExit = async (req, res) => {
   const pass = await passes.findCurrentPass(session.companyId, session.vehicleNumber);
   const passHere = passes.isValidAt(pass, session.locationId, exitTime);
   const passInfo = passes.summarize(pass, session.locationId, exitTime);
-  const fee = calculateFee(tariff, { entryTime: session.entryTime, exitTime, lostTicket, hasValidPass: passHere });
+  const calculated = calculateFee(tariff, { entryTime: session.entryTime, exitTime, lostTicket, hasValidPass: passHere });
+  // The person at the exit may change the amount when the location allows it. The reason is
+  // required and the change is kept on the ticket and in the audit log.
+  let fee = calculated;
+  let feeEdit = null;
+  if (editedAmount !== undefined && editedAmount !== null) {
+    if (!resolveOperations(location.operations).exitAmountEdit) {
+      throw new AppError("Changing the amount is switched off for this location", 403);
+    }
+    if (!editReason || String(editReason).trim().length < 5) throw new AppError("Give a reason (at least 5 letters) for changing the amount", 400);
+    if (passHere) throw new AppError("A pass holder leaves without paying, so there is no amount to change", 409);
+    if (Math.abs(editedAmount - calculated.total) > 0.004) {
+      fee = editedFee(calculated, editedAmount);
+      feeEdit = { calculated: calculated.total, reason: String(editReason).trim().slice(0, 200), by: req.user._id, at: new Date() };
+    }
+  }
+  const recordFeeEdit = (closedOrPending) => feeEdit && audit.record(req, "PARKING_FEE_EDITED", {
+    entity: "ParkingSession", entityId: closedOrPending._id, companyId: closedOrPending.companyId,
+    meta: { ticketNumber: closedOrPending.ticketNumber, calculated: feeEdit.calculated, charged: fee.total, reason: feeEdit.reason },
+  });
 
   if (detectionId) await anpr.linkDetection(req, detectionId, { session, plate: session.vehicleNumber, direction: "EXIT" });
 
@@ -307,6 +335,11 @@ const startExit = async (req, res) => {
     ...(passHere ? { passId: pass._id } : {}),
     durationMinutes: fee.durationMinutes,
     lostTicket,
+    // Always written, so a fee worked out again without a change clears an earlier one.
+    "feeEdit.calculated": feeEdit ? feeEdit.calculated : null,
+    "feeEdit.reason": feeEdit ? feeEdit.reason : null,
+    "feeEdit.by": feeEdit ? feeEdit.by : null,
+    "feeEdit.at": feeEdit ? feeEdit.at : null,
     fee: {
       subtotal: fee.subtotal, tax: fee.tax, total: fee.total,
       taxPercent: fee.taxPercent, taxInclusive: fee.taxInclusive,
@@ -332,6 +365,7 @@ const startExit = async (req, res) => {
         closed = (await ParkingSession.findByIdAndUpdate(closed._id, { $set: { "fee.advanceRefunded": refunded } }, { returnDocument: "after" })) || closed;
       }
     }
+    await recordFeeEdit(closed);
     await audit.record(req, "PARKING_EXIT", {
       entity: "ParkingSession", entityId: closed._id, companyId: closed.companyId,
       meta: {
@@ -358,6 +392,7 @@ const startExit = async (req, res) => {
     { returnDocument: "after" }
   );
   if (!pending) throw new AppError("This vehicle has already exited", 409);
+  await recordFeeEdit(pending);
 
   // A wallet linked to this vehicle can pay the fee: offered at the exit screen.
   const linkedWallet = await wallets.findForVehicle(session.companyId, session.vehicleNumber).catch(() => null);
@@ -405,6 +440,10 @@ const reEntryWindowMinutes = () => Math.max(1, Number(process.env.RE_ENTRY_WINDO
 
 const reEntry = async (req, res) => {
   const session = await findInScope(req);
+  const reEntryLocation = await getAccessibleLocation(req, session.locationId);
+  if (!resolveOperations(reEntryLocation.operations).allowReEntry) {
+    throw new AppError("Re-entry is switched off for this location. Ask an admin to cancel the ticket and make a new entry.", 403);
+  }
   const key = `reentry-${session._id}`;
   // A double tap returns the ticket the first tap made.
   const repeat = await ParkingSession.findOne({ companyId: session.companyId, idempotencyKey: key });
@@ -414,7 +453,14 @@ const reEntry = async (req, res) => {
   if (session.advance && session.advance.amount > 0) {
     throw new AppError("This ticket carries an advance payment. Ask an admin to cancel it (the advance is given back), then make a new entry.", 409);
   }
-  const admin = can(req, P.LOCATION_MANAGE);
+  const admin = can(req, P.LOCATION_MANAGE) || can(req, P.SESSION_OVERRIDE);
+  // The admin's daily limit per operator. The operator is only told to ask an admin: the count is not shown.
+  if (!admin && (await reEntryCounter.limitReached(reEntryLocation, req.user._id))) {
+    await audit.record(req, "PARKING_RE_ENTRY_LIMIT", {
+      entity: "ParkingSession", entityId: session._id, companyId: session.companyId, meta: { ticketNumber: session.ticketNumber },
+    });
+    throw new AppError("Re-entry is not available for you right now. Ask an admin to cancel the ticket and make a new entry.", 403);
+  }
   const ageMinutes = (Date.now() - new Date(session.entryTime).getTime()) / 60000;
   if (!admin && ageMinutes > reEntryWindowMinutes()) {
     throw new AppError(`This ticket is more than ${reEntryWindowMinutes()} minutes old. Ask an admin to cancel it.`, 403);
@@ -437,6 +483,8 @@ const reEntry = async (req, res) => {
     meta: { ticketNumber: closed.ticketNumber, reason: "Re-entry", reEntry: true },
   });
 
+  req.reEntry = true;
+  req.laneSoft = true; // the old ticket's lane may not be the re-entering user's lane
   req.body = {
     locationId: String(location._id), vehicleNumber: session.vehicleNumber, vehicleType,
     ...(req.body.gate || session.entryGate ? { gate: req.body.gate || session.entryGate } : {}), idempotencyKey: key,
@@ -550,11 +598,13 @@ const manualLiftAllowed = (userId, now = Date.now()) => {
 };
 
 const openBarrierByHand = async (req, res) => {
-  const { locationId, direction, gate, reason } = req.body;
+  const { locationId, direction, reason } = req.body;
   if (!can(req, direction === "ENTRY" ? P.ENTRY_CREATE : P.EXIT_CREATE)) {
     throw new AppError("You do not have permission to do this", 403);
   }
   const location = await getAccessibleLocation(req, locationId, { mustBeActive: true });
+  const gate = lanes.resolveGate(req, location, direction, req.body.gate);
+  lanes.assertLaneActive(location, gate);
   if (!manualLiftAllowed(req.user._id)) throw new AppError("Too many barrier lifts in a minute. Wait a little.", 429);
 
   const result = await hardware.requestManualBarrier({
@@ -572,10 +622,31 @@ const openBarrierByHand = async (req, res) => {
   });
 };
 
+// POST /api/parking/sessions/:id/reprint
+// The ticket (or receipt) was printed again from the browser: counts it, so the collection
+// report can show how many reprints each operator made.
+// A person the admin switched "Reprint" off for cannot print a ticket or receipt again.
+const assertMayReprint = (req) => {
+  if (req.user.access && req.user.access.reprint === false) {
+    throw new AppError("You are not allowed to print a ticket or receipt again. Ask your admin.", 403);
+  }
+};
+
+const countReprint = async (req, res) => {
+  assertMayReprint(req);
+  const session = await findInScope(req);
+  const updated = await ParkingSession.findByIdAndUpdate(session._id, { $inc: { reprints: 1 } }, { returnDocument: "after" });
+  await audit.record(req, "PARKING_REPRINT", {
+    entity: "ParkingSession", entityId: session._id, companyId: session.companyId, meta: { ticketNumber: session.ticketNumber },
+  });
+  res.json({ success: true, data: { reprints: updated.reprints } });
+};
+
 // POST /api/parking/sessions/:id/print
 // Prints the ticket (vehicle still inside) or the receipt (vehicle has left)
 // on the thermal printer of that gate.
 const printSlip = async (req, res) => {
+  assertMayReprint(req);
   const session = await findInScope(req);
   const gate = req.body.gate;
   const result = session.isOpen
@@ -584,6 +655,7 @@ const printSlip = async (req, res) => {
         session, receipt: () => buildReceipt(session), requestedBy: req.user._id, ...(gate ? { gate } : {}),
       });
   if (!result) throw new AppError("No single printer is set up for this gate", 404);
+  await ParkingSession.updateOne({ _id: session._id }, { $inc: { reprints: 1 } });
 
   res.status(201).json({
     success: true,
@@ -592,5 +664,5 @@ const printSlip = async (req, res) => {
 };
 
 module.exports = {
-  requestBarrier, openBarrierByHand, reEntry, manualLiftAllowed, printSlip, createEntry, listEntries, listExits, getSession, startExit, cancelSession, overrideSession, getReceipt,
+  requestBarrier, openBarrierByHand, reEntry, manualLiftAllowed, printSlip, countReprint, createEntry, listEntries, listExits, getSession, startExit, cancelSession, overrideSession, getReceipt,
 };

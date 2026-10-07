@@ -171,8 +171,8 @@ function DeviceForm({ location, initial, creating, onSubmit, onCancel, saving, e
         )}
         {form.type === 'ANPR_CAMERA' && (
           <Field
-            label="Live picture address (optional)" name="previewUrl" placeholder="http://127.0.0.1:8090/stream.mjpg?token=..."
-            hint="Shown on the Entry and Exit screens. Printed by the AI service when it starts."
+            label="Live picture address (optional)" name="previewUrl" placeholder="http://192.168.1.50/video.mjpg"
+            hint="The camera's live video address (MJPEG). Shown on the Entry and Exit screens. Leave empty if you do not need a live picture there."
             value={form.previewUrl} onChange={set('previewUrl')}
           />
         )}

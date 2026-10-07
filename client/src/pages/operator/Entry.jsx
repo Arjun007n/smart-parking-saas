@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { parkingApi, paymentApi } from '../../services/api'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { parkingApi } from '../../services/api'
 import { useAuth } from '../../hooks/useAuth'
 import { useToast } from '../../hooks/useToast'
 import { playCue } from '../../utils/sound'
@@ -29,15 +29,24 @@ import PassBanner from '../../components/pass/PassBanner'
 import PhotoPanel from '../../components/operator/PhotoPanel'
 import QrCode from '../../components/QrCode'
 import { receiptSettings } from '../../utils/receiptSettings'
+import { operationSettings } from '../../utils/operations'
+import TicketPhoto from '../../components/operator/TicketPhoto'
 
-function Ticket({ session, locationName, repeated, settings }) {
+function Ticket({ session, locationName, repeated, settings, operations, reprinted = false }) {
+  const { user } = useAuth()
   const look = receiptSettings(settings)
+  const ops = operationSettings(operations)
+  const print = () => {
+    // A ticket opened again from the history is a reprint: counted for the operator's report.
+    if (reprinted) parkingApi.reprint(session._id).catch(() => {})
+    window.print()
+  }
   return (
     <div className="print-area rounded-xl border-2 border-dashed border-slate-400 bg-white p-6 text-center">
       <p className="text-sm font-semibold text-slate-600">{locationName}</p>
       {look.headerNote && <p className="text-xs text-slate-600">{look.headerNote}</p>}
       <p className="mt-1 text-xs uppercase tracking-wide text-slate-500">Parking ticket</p>
-      <p className="mt-3 font-mono text-3xl font-bold tracking-wider text-slate-900">{session.ticketNumber}</p>
+      {ops.printTicketNumber && <p className="mt-3 font-mono text-3xl font-bold tracking-wider text-slate-900">{session.ticketNumber}</p>}
       <p className="mt-3 text-xl font-semibold text-slate-900">{session.vehicleNumber}</p>
       <p className="text-sm text-slate-600">
         {VEHICLE_LABELS[session.vehicleType]} · In at {dateTime(session.entryTime)}
@@ -48,6 +57,7 @@ function Ticket({ session, locationName, repeated, settings }) {
           <QrCode value={session.ticketNumber} size={110} label={`QR code for ticket ${session.ticketNumber}`} />
         </div>
       )}
+      {ops.printPhoto && <TicketPhoto sessionId={session._id} />}
       {session.advance?.amount > 0 && (
         <p className="mt-3 text-sm font-semibold text-slate-800">
           Advance paid: {money(session.advance.amount)} ({PAYMENT_LABELS[session.advance.method] || session.advance.method})
@@ -55,9 +65,11 @@ function Ticket({ session, locationName, repeated, settings }) {
       )}
       <p className="mt-3 text-xs text-slate-500">{look.ticketFooter}</p>
       {repeated && <p className="mt-2 text-xs text-slate-500">(This ticket was already created.)</p>}
-      <Button variant="secondary" className="no-print mt-4" onClick={() => window.print()}>
-        Print ticket
-      </Button>
+      {!(reprinted && user?.access?.reprint === false) && (
+        <Button variant="secondary" className="no-print mt-4" onClick={print}>
+          Print ticket
+        </Button>
+      )}
     </div>
   )
 }
@@ -71,7 +83,10 @@ const RECENT_MS = 60_000
 // A ticket opened again from the entry history: print it in the browser (above)
 // or on the gate's thermal printer (below).
 function ReprintBar({ session }) {
+  const { user } = useAuth()
   const print = useMutation({ mutationFn: () => parkingApi.print(session._id) })
+  // The admin can switch reprinting off for a person.
+  if (user?.access?.reprint === false) return null
   return (
     <div className="no-print mt-3 space-y-2">
       <Button variant="secondary" loading={print.isPending} onClick={() => print.mutate()}>
@@ -83,17 +98,29 @@ function ReprintBar({ session }) {
   )
 }
 
-const ADVANCE_METHODS = ['CASH', 'UPI', 'CARD', 'FASTAG']
+// The vehicle type a suggestion carries, if this location takes that type.
+const knownType = (suggestion, location) =>
+  suggestion.vehicleType && (!location || location.vehicleTypes.includes(suggestion.vehicleType)) ? suggestion.vehicleType : ''
+
+// What the type buttons go back to for the next vehicle: the lane's own vehicle type, else a car.
+const defaultTypeFor = (location, gate) => {
+  const types = location ? location.vehicleTypes : []
+  const laneType = (location?.gates || []).find((g) => g.name === gate)?.vehicleType
+  if (laneType && types.includes(laneType)) return laneType
+  return types.includes('CAR') ? 'CAR' : types[0] || 'CAR'
+}
+
+// Where an automatically chosen vehicle type came from, for the line under the type buttons.
+const TYPE_SOURCE = {
+  CAMERA: 'the camera',
+  HISTORY: 'an earlier visit of this vehicle',
+  LANE: 'the vehicle type set for this lane',
+}
 
 function EntryForm({ locations, defaultId }) {
   const queryClient = useQueryClient()
-  // Taking money at the gate needs the permission to collect payments.
+  // No money is taken at entry: the fee is worked out and paid at the exit.
   const { can, company } = useAuth()
-  const canTakeAdvance = can('PAYMENT_COLLECT')
-  // With a FASTag partner set up, FASTag means charging the tag, which only the exit screen does.
-  const paymentOptions = useQuery({ queryKey: ['payment-options'], queryFn: paymentApi.options, staleTime: 5 * 60 * 1000, enabled: canTakeAdvance })
-  const fastagCharges = Boolean(paymentOptions.data?.fastag)
-  const advanceMethods = ADVANCE_METHODS.filter((value) => !(value === 'FASTAG' && fastagCharges))
   // One key per entry attempt; kept across retries, renewed after success.
   const [requestKey, setRequestKey] = useState(newRequestKey)
   const [ticket, setTicket] = useState(null)
@@ -108,6 +135,7 @@ function EntryForm({ locations, defaultId }) {
   const [autoEntryChoice, setAutoEntry] = useState(null)
   const recent = useRef({ plate: '', until: 0 })
   const ticketRef = useRef(null)
+  const cameraCapture = useRef(null)
   const {
     register,
     control,
@@ -119,26 +147,26 @@ function EntryForm({ locations, defaultId }) {
     formState: { errors },
   } = useForm({
     resolver: zodResolver(entrySchema),
-    defaultValues: {
-      ...initialLane(locations, defaultId, 'ENTRY'), vehicleNumber: '', vehicleType: 'CAR',
-      advanceAmount: '', advanceMethod: 'CASH', advanceReference: '',
-    },
+    defaultValues: (() => {
+      const lane = initialLane(locations, defaultId, 'ENTRY')
+      return { ...lane, vehicleNumber: '', vehicleType: defaultTypeFor(locations.find((l) => l._id === lane.locationId), lane.gate) }
+    })(),
   })
   const locationId = useWatch({ control, name: 'locationId' })
   const gate = useWatch({ control, name: 'gate' })
   const typedPlate = useWatch({ control, name: 'vehicleNumber' })
-  const advanceMethod = useWatch({ control, name: 'advanceMethod' })
   const location = locations.find((l) => l._id === locationId)
-  // FASTag only appears here while it is a record; once a partner is set up it is charged at the exit.
-  useEffect(() => {
-    if (fastagCharges && advanceMethod === 'FASTAG') setValue('advanceMethod', 'CASH')
-  }, [fastagCharges, advanceMethod, setValue])
+  const ops = operationSettings(location?.operations)
+  const types = location ? location.vehicleTypes : Object.keys(VEHICLE_LABELS)
   // This computer keeps its lane (location and gate) between visits.
   useRememberLane('ENTRY', locationId, gate)
   // With a camera registered for this gate, that one camera reads the plates (and fills the vehicle
   // number box). This computer's own camera is only shown when the operator asks for it.
   const gateCamera = useGateCamera(locationId, 'ENTRY', gate)
   const [ownCamera, setOwnCamera] = useState(false)
+  // How the vehicle type was chosen for the plate in the box: { from: CAMERA | HISTORY | LANE } or { from: null } when the
+  // camera could not tell (the operator is asked to check it).
+  const [typeNote, setTypeNote] = useState(null)
   const showOwnCamera = ownCamera
   // Until the operator uses the switch, automatic follows the camera: ON when this gate has one.
   const autoEntry = autoEntryChoice ?? gateCamera.hasCamera
@@ -149,22 +177,17 @@ function EntryForm({ locations, defaultId }) {
   const toast = useToast()
   const create = useMutation({
     // `auto` is set when the camera makes the ticket by itself: { detectionId, key, photo }.
-    mutationFn: ({ gate, advanceAmount, advanceMethod: method, advanceReference, auto, ...values }) =>
-      parkingApi.entry({
-        ...values,
+    mutationFn: ({ gate, auto, ...values }) => {
+      // The picture taken with the ticket (values.captured) goes up separately, not in the entry request.
+      const body = { ...values }
+      delete body.captured
+      return parkingApi.entry({
+        ...body,
         ...(gate ? { gate } : {}),
-        ...(canTakeAdvance && Number(advanceAmount) > 0
-          ? {
-              advance: {
-                amount: Number(advanceAmount),
-                method,
-                ...(method !== 'CASH' && advanceReference ? { transactionId: advanceReference } : {}),
-              },
-            }
-          : {}),
         ...(auto ? { detectionId: auto.detectionId } : detection ? { detectionId: detection._id } : {}),
         idempotencyKey: auto ? auto.key : requestKey,
-      }),
+      })
+    },
     onError: (error, values) => {
       // A car the camera keeps seeing must not be tried again every few seconds.
       if (values.auto) recent.current = { plate: cleanPlate(values.vehicleNumber), until: Date.now() + RECENT_MS }
@@ -188,7 +211,7 @@ function EntryForm({ locations, defaultId }) {
       setTicket({ ...data, auto: Boolean(values.auto), locationName: locations.find((l) => l._id === values.locationId)?.name })
       // The gate camera picture becomes this vehicle's entry photo (never blocks the ticket).
       setPhotoError('')
-      const picture = values.auto ? values.auto.photo : photo
+      const picture = values.auto ? values.auto.photo : values.captured || photo
       if (picture && !data.repeated) {
         parkingApi
           .uploadPhoto(data.session._id, picture, 'ENTRY')
@@ -199,13 +222,25 @@ function EntryForm({ locations, defaultId }) {
       queryClient.invalidateQueries({ queryKey: ['locations'] })
       queryClient.invalidateQueries({ queryKey: ['entries'] })
       resetField('vehicleNumber')
-      resetField('advanceAmount')
-      resetField('advanceReference')
+      // The next vehicle starts from the lane's type, not from the last vehicle's.
+      setValue('vehicleType', defaultTypeFor(locations.find((l) => l._id === values.locationId), values.gate))
+      setTypeNote(null)
       setFocus('vehicleNumber')
     },
   })
 
-  const types = location ? location.vehicleTypes : Object.keys(VEHICLE_LABELS)
+  // How many entry lanes this location has: with one (or none) there is nothing to choose.
+  const gateChoices = location ? location.gates.filter((g) => ['ENTRY', 'BOTH'].includes(g.type)).length : 0
+
+  // "Take the entry photo automatically": with this computer's camera on, the picture is taken as the
+  // ticket is made, unless one was already kept.
+  const submitEntry = async (values) => {
+    let captured = null
+    if (ops.photoAutoCapture && showOwnCamera && !photo && cameraCapture.current) {
+      captured = await cameraCapture.current().catch(() => null)
+    }
+    create.mutate({ ...values, ...(captured ? { captured } : {}) })
+  }
 
   // Automatic entry: the camera read a plate clearly, so make the ticket. Every
   // server rule still applies (blocked vehicle, already inside, full parking).
@@ -213,14 +248,18 @@ function EntryForm({ locations, defaultId }) {
   // vehicle type has room.
   const autoCreate = (suggestion, frame) => {
     const values = getValues()
-    const key = CAPACITY_KEY[values.vehicleType]
+    // The vehicle type the camera (or our memory of this plate) gave wins over the one chosen below.
+    const vehicleType = knownType(suggestion, location) || values.vehicleType
+    const key = CAPACITY_KEY[vehicleType]
     const free = location && key ? location.capacity[key] - location.occupied[key] : 1
     if (create.isPending || !suggestion.plate || values.vehicleNumber.trim() || free <= 0) return false
     setValue('vehicleNumber', suggestion.plate)
+    setValue('vehicleType', vehicleType)
+    setTypeNote({ from: knownType(suggestion, location) ? suggestion.vehicleTypeFrom || 'CAMERA' : null })
     create.mutate({
       locationId: values.locationId,
       vehicleNumber: suggestion.plate,
-      vehicleType: values.vehicleType,
+      vehicleType,
       gate: values.gate,
       auto: { detectionId: suggestion._id, key: `auto-${suggestion._id}`, photo: frame },
     })
@@ -230,6 +269,11 @@ function EntryForm({ locations, defaultId }) {
   const applySuggestion = (suggestion) => {
     setDetection(suggestion)
     if (suggestion.plate) setValue('vehicleNumber', suggestion.plate, { shouldValidate: true })
+    // The vehicle type fills in by itself when the camera or the plate's history says what it is.
+    const type = knownType(suggestion, location)
+    // No type known for this vehicle: go back to the lane's type rather than keep whatever was chosen before.
+    setValue('vehicleType', type || defaultTypeFor(location, getValues('gate')), { shouldValidate: true })
+    setTypeNote({ from: type ? suggestion.vehicleTypeFrom || 'CAMERA' : null })
     setFocus('vehicleNumber')
   }
 
@@ -240,61 +284,33 @@ function EntryForm({ locations, defaultId }) {
   }, [ticket])
 
   return (
-    <div className="space-y-6">
-      <LaneBar location={location} gate={gate} company={company}>
+    <div className="space-y-4">
+      <LaneBar location={location} gate={gate} company={company} parkingType={location?.parkingType}>
         {can('ENTRY_CREATE') && <OpenBarrierButton locationId={locationId} direction="ENTRY" gate={gate} />}
-        <AutoSwitch label="AUTO ENTRY" on={autoEntry} onChange={setAutoEntry} />
+        <AutoSwitch
+          label="AUTO ENTRY"
+          on={autoEntry}
+          onChange={setAutoEntry}
+          hint="When the gate camera reads a number plate clearly, the ticket is made, printed and the barrier opens by itself, with the vehicle type chosen below. No money is taken at entry. A wrong reading must be cancelled by an admin."
+        />
       </LaneBar>
-      {autoEntry && (
-        <p className="no-print rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900" role="status">
-          Automatic entry is ON. When the gate camera reads a number plate clearly (no "Check this plate" warning), the ticket is made, printed and the barrier
-          opens by itself, with the vehicle type chosen below and no advance. A wrong reading must be cancelled by an admin. Switch it off to pause.
-        </p>
-      )}
-      <LivePreview locationId={locationId} direction="ENTRY" gate={gate} />
-      <div className="grid gap-6 lg:grid-cols-5">
-        <div className="space-y-4 lg:col-span-3">
-          <Card className="no-print">
-            <LocationPicker locations={locations} selectedId={locationId} register={register} errors={errors} gateTypes={['ENTRY', 'BOTH']} />
-            <div className="mt-3">
-              <Button type="button" variant="secondary" onClick={() => setShowBookings((open) => !open)}>
-                {showBookings ? 'Hide customer bookings' : `View customer bookings${bookings.length ? ` (${bookings.length})` : ''}`}
-              </Button>
-            </div>
-          </Card>
+      {/* The lane is fixed by the admin for most operators, so the pickers only show when there is a choice. */}
+      <div className={`no-print rounded-lg border border-slate-200 bg-white p-3 ${locations.length > 1 || gateChoices > 1 ? '' : 'hidden'}`}>
+        <LocationPicker locations={locations} selectedId={locationId} register={register} errors={errors} gateTypes={['ENTRY', 'BOTH']} />
+      </div>
 
-          {showBookings && (
-            <BookingsPanel
-              location={location}
-              vehicleTypes={types}
-              onClose={() => setShowBookings(false)}
-              onUse={(b) => {
-                setValue('vehicleNumber', b.vehicleNumber, { shouldValidate: true })
-                setValue('vehicleType', b.vehicleType)
-                setShowBookings(false)
-                setFocus('vehicleNumber')
-              }}
-            />
-          )}
-
+      <div className="grid items-start gap-4 lg:grid-cols-12">
+        {/* Middle: the camera, the number, the vehicle type and the button (first on a phone). */}
+        <div className="order-1 space-y-4 lg:order-2 lg:col-span-5">
+          <LivePreview locationId={locationId} direction="ENTRY" gate={gate} />
           {showOwnCamera ? (
-            <EntryCamera
-              locationId={locationId}
-              canAutoRead={!typedPlate?.trim() && !create.isPending}
-              onDetection={applySuggestion}
-              onPhoto={setPhoto}
-              hasPhoto={Boolean(photo)}
-              isRecentPlate={(plate) => recent.current.plate === plate && Date.now() < recent.current.until}
-              autoEntry={autoEntry}
-              onAutoEntryChange={setAutoEntry}
-              onAutoEntry={autoCreate}
-            />
+            <EntryCamera onPhoto={setPhoto} hasPhoto={Boolean(photo)} captureRef={cameraCapture} />
           ) : (
-            <GateCameraNote camera={gateCamera} direction="ENTRY" gate={gate} fills="the vehicle number below" onUseOwn={() => setOwnCamera(true)} />
+            <GateCameraNote camera={gateCamera} direction="ENTRY" gate={gate} fills="the vehicle number below" onUseOwn={() => setOwnCamera(true)} ownLabel="Take an entry photo with this computer's camera" />
           )}
 
           <Card className="no-print">
-            <form onSubmit={handleSubmit((values) => create.mutate(values))} className="space-y-5" noValidate>
+            <form onSubmit={(event) => handleSubmit(submitEntry)(event)} className="space-y-5" noValidate>
               <Alert>{create.error && errorMessage(create.error)}</Alert>
               <Field
                 label="Vehicle number"
@@ -327,7 +343,15 @@ function EntryForm({ locations, defaultId }) {
                 </p>
               )}
               <fieldset>
-                <legend className="mb-2 text-sm font-medium text-slate-700">Vehicle type</legend>
+                <legend className="mb-2 text-sm font-medium text-slate-700">
+                  Vehicle type
+                  {typedPlate?.trim() && typeNote?.from && (
+                    <span className="ml-2 text-xs font-semibold text-green-700">Chosen automatically from {TYPE_SOURCE[typeNote.from]}</span>
+                  )}
+                  {typedPlate?.trim() && typeNote && !typeNote.from && (
+                    <span className="ml-2 text-xs font-semibold text-amber-700">The camera could not tell the type. Check it.</span>
+                  )}
+                </legend>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                   {types.map((type) => {
                     const key = CAPACITY_KEY[type]
@@ -349,47 +373,6 @@ function EntryForm({ locations, defaultId }) {
                 </div>
                 {errors.vehicleType && <p className="mt-1 text-sm text-red-600">{errors.vehicleType.message}</p>}
               </fieldset>
-              {canTakeAdvance && (
-                <fieldset className="rounded-xl border border-slate-200 p-4">
-                  <legend className="px-1 text-sm font-medium text-slate-700">Advance payment (optional)</legend>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <Field
-                      label="Amount (₹)"
-                      inputMode="decimal"
-                      placeholder="0"
-                      autoComplete="off"
-                      hint="Set against the fee when the vehicle leaves; any extra is given back"
-                      error={errors.advanceAmount?.message}
-                      {...register('advanceAmount')}
-                    />
-                    <fieldset>
-                      <legend className="mb-2 text-sm font-medium text-slate-700">Payment mode</legend>
-                      <div className="flex flex-wrap gap-2">
-                        {advanceMethods.map((value) => (
-                          <label
-                            key={value}
-                            className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium has-[:checked]:border-blue-600 has-[:checked]:bg-blue-50"
-                          >
-                            <input type="radio" value={value} {...register('advanceMethod')} />
-                            {PAYMENT_LABELS[value]}
-                          </label>
-                        ))}
-                      </div>
-                    </fieldset>
-                  </div>
-                  {advanceMethod !== 'CASH' && (
-                    <div className="mt-4">
-                      <Field
-                        label={`${PAYMENT_LABELS[advanceMethod]} reference (optional)`}
-                        autoComplete="off"
-                        hint="Transaction or approval number, if you have it"
-                        error={errors.advanceReference?.message}
-                        {...register('advanceReference')}
-                      />
-                    </div>
-                  )}
-                </fieldset>
-              )}
               <Button type="submit" loading={create.isPending} className="gate-btn-entry w-full py-4 text-lg font-bold">
                 Create ticket
               </Button>
@@ -397,7 +380,8 @@ function EntryForm({ locations, defaultId }) {
           </Card>
         </div>
 
-        <div className="space-y-6 lg:col-span-2">
+        {/* Left: camera suggestions, the ticket that was just made and customer bookings. */}
+        <div className="order-2 space-y-4 lg:order-1 lg:col-span-3">
           <PlateSuggestions
             locationId={locationId}
             direction="ENTRY"
@@ -424,7 +408,14 @@ function EntryForm({ locations, defaultId }) {
                     )}
                   </div>
                 )}
-                <Ticket session={ticket.session} locationName={ticket.locationName} repeated={ticket.repeated} settings={locations.find((l) => l._id === ticket.session.locationId)?.receiptSettings} />
+                <Ticket
+                  session={ticket.session}
+                  locationName={ticket.locationName}
+                  repeated={ticket.repeated}
+                  reprinted={Boolean(ticket.reprint)}
+                  settings={locations.find((l) => l._id === ticket.session.locationId)?.receiptSettings}
+                  operations={locations.find((l) => l._id === ticket.session.locationId)?.operations}
+                />
                 {ticket.reprint ? (
                   <ReprintBar session={ticket.session} />
                 ) : (
@@ -440,14 +431,37 @@ function EntryForm({ locations, defaultId }) {
               </Card>
             )}
           </div>
+          <Card className="no-print">
+            <Button type="button" variant="secondary" className="w-full" onClick={() => setShowBookings((open) => !open)}>
+              {showBookings ? 'Hide customer bookings' : `View customer bookings${bookings.length ? ` (${bookings.length})` : ''}`}
+            </Button>
+          </Card>
+          {showBookings && (
+            <BookingsPanel
+              location={location}
+              vehicleTypes={types}
+              onClose={() => setShowBookings(false)}
+              onUse={(b) => {
+                setValue('vehicleNumber', b.vehicleNumber, { shouldValidate: true })
+                setValue('vehicleType', b.vehicleType)
+                setShowBookings(false)
+                setFocus('vehicleNumber')
+              }}
+            />
+          )}
+
+        </div>
+
+        {/* Right: who is inside, with search, Print and Re-entry. */}
+        <div className="order-3 lg:col-span-4">
+          <EntryHistory
+            compact
+            locationId={locationId}
+            onPrint={reprint}
+            onReEntry={can('ENTRY_CREATE') ? (data) => setTicket({ ...data, locationName: location?.name }) : undefined}
+          />
         </div>
       </div>
-
-      <EntryHistory
-        locationId={locationId}
-        onPrint={reprint}
-        onReEntry={can('ENTRY_CREATE') ? (data) => setTicket({ ...data, locationName: location?.name }) : undefined}
-      />
     </div>
   )
 }

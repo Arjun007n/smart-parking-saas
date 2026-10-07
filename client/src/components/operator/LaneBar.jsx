@@ -14,7 +14,9 @@ const Detail = ({ label, value }) => (
 
 // The strip above the entry and exit screens, in one line: LN : lane  Area : ...  Plaza : ...  ORG ID : ...
 // and a FASTag badge. `children` (the barrier button, the auto switch) go on the right.
-export default function LaneBar({ location, gate, company, children }) {
+const PARKING_TYPE = { NORMAL: 'Parking', AIRPORT: 'Airport parking' }
+
+export default function LaneBar({ location, gate, company, parkingType, children }) {
   const status = useLiveStatus()
   const live = LIVE[status] || LIVE.offline
   const lane = (location?.gates || []).find((g) => g.name === gate)
@@ -29,6 +31,11 @@ export default function LaneBar({ location, gate, company, children }) {
       {lane?.fastagLaneId && (
         <span className="rounded border border-green-600 px-1.5 py-0.5 text-xs font-extrabold text-slate-800" title="FASTag lane">
           <span className="text-orange-500">FAS</span><span className="text-green-700">TAG</span> : {lane.fastagLaneId}
+        </span>
+      )}
+      {parkingType && (
+        <span className="rounded bg-slate-200 px-3 py-1 text-sm font-bold text-slate-700" title="Parking type of this location">
+          {PARKING_TYPE[parkingType] || 'Parking'}
         </span>
       )}
       <span className="ml-auto flex flex-wrap items-center gap-3">

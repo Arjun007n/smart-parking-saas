@@ -130,32 +130,20 @@ The six standard roles still exist. A company admin (`ROLE_MANAGE`, new) can als
 * Up to 50 custom roles per company. Created, changed and deleted roles are in the audit log
   (`ROLE_CREATE`, `ROLE_UPDATE`, `ROLE_DELETE`).
 
-## Plate reading from photos (days 18-21)
+## Plate reading (days 18-21)
 
-An operator can take or choose a picture of a vehicle on the Entry or Exit screen ("Read from
-photo"). The picture goes to a **recognition provider** that reads the plate. The answer is only a
-suggestion, exactly like a gate-camera reading: it becomes a waiting `AnprDetection` (source
-`PHOTO`), the plate is filled into the form, and the operator checks it and uses the normal entry or
-exit button. Nothing is opened automatically.
+The number plate comes from only two places: the gate's **ANPR camera** (it reads the plate itself and posts
+it to `POST /api/device/anpr`, see `docs/hardware.md`) or the operator **typing the number** on the Entry or
+Exit screen. The platform does not read plates from photos and has no AI or recognition service of its own.
 
-* Provider is chosen with `RECOGNITION_PROVIDER`: `none` (default, feature hidden), `simulated`
-  (development and tests only, never in production; it "reads" `PLATE:RJ14AB1234 CONF:0.93` written
-  inside the picture's bytes; on the screen a "test plate" box appears so any phone picture can be used), `http` (any service that takes the picture as the request body and
-  answers `{ plate, confidence }` or `{ results: [{ plate, score }] }`) and `platerecognizer`
-  (Plate Recognizer cloud, written from its public documentation and not yet tried live).
-  A wrong name or a missing key/URL stops the server at start.
-* The same checks as for cameras apply: plate cleaned and validated, low or missing confidence flagged
-  (`RECOGNITION_MIN_CONFIDENCE`, default 0.85), already-inside / blocked vehicles flagged on entry,
-  the open ticket matched on exit, the same plate read again within two minutes is one suggestion
-  with more hits. Confirming a suggestion is audited as `ANPR_CONFIRM` (with `source` and whether the
-  operator corrected the plate); each read is audited as `ANPR_PHOTO_READ`.
-* A picture that gives no readable plate stores nothing; the operator just types the number.
-* The picture is sent to the provider and is **not** stored by this feature (use the vehicle photos
-  on the ticket for that). With a cloud provider the picture leaves your server, so mention it in
-  your privacy policy.
-* Limits: 30 reads per IP per minute (`RECOGNITION_RATE_LIMIT_MAX`), picture size as for vehicle
-  photos (`PHOTO_MAX_BYTES`), provider timeout `RECOGNITION_TIMEOUT_MS` (default 8 seconds). A provider
-  failure shows "type the number instead"; details go to the server log, never the key.
+* A camera reading is only a **suggestion**: plate cleaned and validated, low or missing confidence flagged
+  (the camera's minimum, default 0.85), already-inside / blocked vehicles flagged on entry, the open ticket
+  matched on exit, the same plate seen again within two minutes is one suggestion with more hits. Using a
+  suggestion is audited as `ANPR_CONFIRM` (with `source` and whether the operator corrected the plate).
+* Vehicle photos on a ticket (taken at the gate or uploaded) are still kept as evidence; they are not read.
+* An earlier version could read plates from photos with a recognition provider (`RECOGNITION_*` settings,
+  `POST /api/anpr/read`, the Python `ai-service/`). All of that was removed; old `PHOTO` suggestions in the
+  database stay readable.
 
 ## Email (day 27)
 
@@ -232,12 +220,11 @@ The operator **Entry** screen is one screen: a live camera panel (start it once;
 large vehicle-type buttons that show how many spaces are free, **Create ticket**, the ticket beside the form, and
 a table of vehicles inside below (search, reprint a ticket, advance column).
 
-* **Camera.** *Capture & read plate* takes a still from the live camera and sends it through the same plate
-  reader as photos (`POST /api/anpr/read`). *Auto-read* (a tick box) tries every few seconds while the plate box is
-  empty. Both only **fill in the plate box**: the operator always checks it and presses *Create ticket*, so a camera can
-  never create a ticket by itself. The captured picture is saved as the vehicle's entry photo. Without a recognition
-  provider (`RECOGNITION_PROVIDER=none`) the camera still works for pictures; only the reading is off.
-* **Advance payment (optional).** Operators who can collect payments (`PAYMENT_COLLECT`) see *Advance payment*:
+* **Camera.** The plate comes from the gate's ANPR camera (suggestions beside the form, with a live picture when
+  the camera has a live picture address) or from typing. This computer's own camera is optional and only keeps a
+  picture of the vehicle: *Capture photo* saves it as the vehicle's entry photo. It never reads the number.
+* **No payment at entry.** The Entry screen no longer offers an advance payment: the fee is worked out and paid at the exit. The only money that arrives before the exit is a customer's own online booking fee (below). The server's advance support below is still there but nothing on the screen uses it.
+* **Advance payment (no longer on the Entry screen).** Operators who can collect payments (`PAYMENT_COLLECT`) used to see *Advance payment*:
   amount and mode (cash, UPI, card, with an optional reference). Entry-only operators do not see it, and the server
   refuses an advance from them (403) before any ticket is made. The advance is a Payment row of kind `ADVANCE`, in the
   collecting operator's open shift, so shift cash, the day's collection, reports and the dashboard count it with no
@@ -291,7 +278,7 @@ Added so gate staff have the same everyday screens as a typical parking-operator
   refused) is ignored for a minute; nothing happens while a number is typed, a ticket is being made or the chosen
   type is full; the server still refuses blocked vehicles, vehicles already inside and a full parking. It never
   takes an advance and uses the vehicle type selected on screen (the camera cannot tell cars from bikes), so
-  a wrong reading becomes a real ticket that an admin must cancel. Needs a recognition provider.
+  a wrong reading becomes a real ticket that an admin must cancel. Needs an ANPR camera registered for the gate.
   Auto *exit* below does the same for leaving, but never takes money.
 
 ## Exit screen
@@ -348,27 +335,21 @@ printing, free layout / drag-and-drop design, several languages, a different des
 * Limits: one server instance (connections live in memory); proxies must not buffer streams. See
   `docs/hardware.md`. Tests: `server/tests/live.test.js`, `gate-agent/tests/wake.test.js`.
 
-## AI service (webcam / IP camera plate reading)
+## ANPR camera on the Entry and Exit screens
 
-* `ai-service/` (Python: OpenCV, YOLO, EasyOCR) reads a camera and reports plates to `POST /api/device/anpr`
-  with the camera's own key. It repairs look-alike characters by the shape of Indian plates, needs a plate
-  on several pictures before reporting, retries when the server is down and tells the server when the camera
-  picture is lost or back.
-* A camera's `config.previewUrl` (sent by the AI service with each heartbeat; also editable on the Hardware page, "Live picture address") makes the Entry and Exit screens show
-  its live picture with the plate box (`GET /api/anpr/preview`). The stream needs a secret token.
+* A camera's `config.previewUrl` (editable on the Hardware page, "Live picture address") makes the Entry and Exit
+  screens show its live picture (`GET /api/anpr/preview`). It is optional; readings work without it.
 * New plates fill the Vehicle number box (entry) or the search box (exit) by themselves, and the AUTO ENTRY / AUTO EXIT
-  switch at the top of each screen now also works with the gate camera (camera plates only, never tags).
+  switch at the top of each screen works with the gate camera (camera plates only, never tags).
 * Automatic by default: with a gate camera, AUTO ENTRY and AUTO EXIT start on (pause switch); entry makes, prints and opens;
   exit finds the vehicle and shows the fee, and the barrier opens when the payment is recorded.
 * A camera reading that is not the usual shape of an Indian plate (for example `KA53IND02497`) is marked "Check this plate", so
   AUTO ENTRY and AUTO EXIT never act on it; it can still be used by hand.
-* One two-way camera: register it with direction "Entry and exit" (no gate), `"direction": "AUTO"` in the AI service's `config.json`;
+* One two-way camera: register it with direction "Entry and exit" (no gate) and send `"direction": "AUTO"`;
   the server sends a plate with an open ticket of 5+ minutes to Exit and any other plate to Entry.
 * One camera per gate: when an ANPR camera is registered for the gate and direction, the Entry and Exit screens show
-  only that camera (live picture and plate fill) and hide the this-computer camera panel (a link brings it back). Without a
-  gate camera the screen names the missing camera instead of showing the computer's camera.
-* Guide, limits and what is not proven yet: `docs/ai-service.md`. Tests: `ai-service/tests` (86) and
-  `server/tests/preview.integration.test.js`.
+  that camera's readings. Without one, the screen says no ANPR camera is set and the operator types the number.
+  Tests: `server/tests/preview.integration.test.js`.
 
 ## Gate controls, re-entry, five vehicle classes, online booking
 
@@ -387,7 +368,7 @@ within `RE_ENTRY_WINDOW_MINUTES` (default 15), older tickets need an admin with 
 repeating the same call returns the same new ticket. The old ticket is `CANCELLED` ("Re-entry: a new ticket was issued") and the
 space is not counted twice.
 
-**Payment mode at entry** already exists: the advance (cash, UPI, card, FASTag) taken with the entry. Nothing new was needed.
+**Payment mode at entry:** not used any more. Payment is taken at the exit.
 
 **Five vehicle classes.** Car, Bike, Coach / Bus / Truck (`HEAVY`), Taxi (`TAXI`) and Tempo / SUV / Mini bus (`TEMPO`). Each has its own
 capacity, occupied count, tariff, availability card, report row and collection row. The first three keep their old values so stored data
@@ -424,8 +405,7 @@ the page says so. This is a zip that needs Node.js 20 on the gate PC, not a Wind
 
 See `server/.env.example`: `PAYMENT_PROVIDER`, `PAYMENT_WEBHOOK_SECRET`, `RAZORPAY_KEY_ID`,
 `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `GATEWAY_PAYMENT_MINUTES`, `PHOTO_STORAGE_DIR`,
-`PHOTO_RETENTION_DAYS`, `PHOTO_MAX_BYTES`, `RECOGNITION_PROVIDER`, `RECOGNITION_URL`, `RECOGNITION_API_KEY`,
-`RECOGNITION_REGIONS`, `RECOGNITION_MIN_CONFIDENCE`, `RECOGNITION_TIMEOUT_MS`, `RECOGNITION_RATE_LIMIT_MAX`, `EMAIL_PROVIDER`, `RESEND_API_KEY`, `EMAIL_FROM`, `EMAIL_REPLY_TO`,
+`PHOTO_RETENTION_DAYS`, `PHOTO_MAX_BYTES`, `EMAIL_PROVIDER`, `RESEND_API_KEY`, `EMAIL_FROM`, `EMAIL_REPLY_TO`,
 `EMAIL_TIMEOUT_MS`, `EMAIL_ALERT_HOURLY_CAP`, `MESSAGING_PROVIDER`, `MESSAGING_CHANNELS`, `MESSAGING_DEFAULT_COUNTRY_CODE`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_SMS_FROM`, `TWILIO_MESSAGING_SERVICE_SID`, `TWILIO_WHATSAPP_FROM`, `MESSAGING_TIMEOUT_MS`, `MESSAGING_ALERT_HOURLY_CAP`, `MESSAGING_VISIT_MESSAGES`, `BOOKING_GRACE_HOURS`, `LIVE_MAX_STREAMS`, `RE_ENTRY_WINDOW_MINUTES`, `PUBLIC_API_URL`, `GATE_AGENT_DIR`.
 
 ## Known limits
@@ -443,4 +423,4 @@ See `server/.env.example`: `PAYMENT_PROVIDER`, `PAYMENT_WEBHOOK_SECRET`, `RAZORP
 The database-backed tests for this phase (`*.integration.test.js` for passes, gateway, reports,
 photos, roles, plate reading, email and advances) were written without a database to run them on: run `npm test` in `server` and
 report any failure (this also covers the newest ones: messaging, vehicle classes, hardware controls and online booking). Also untried: the Razorpay adapter against Razorpay, camera QR scanning, photo capture
-and plate reading in real phones, a real recognition provider (Plate Recognizer or other), real email delivery through Resend, the live camera panel in a browser, and `npm run build` for the client.
+in real phones, a real ANPR camera, real email delivery through Resend, the live camera panel in a browser, and `npm run build` for the client.

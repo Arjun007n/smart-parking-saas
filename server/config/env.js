@@ -18,14 +18,6 @@ const validateEnv = () => {
   if (process.env.NODE_ENV === "production" && payments.providerName() === "simulated") {
     throw new Error("PAYMENT_PROVIDER=simulated is for development only and cannot be used in production");
   }
-  // Plate reading from photos: same rules. A mistyped name or missing key stops the server.
-  const recognition = require("../integrations/recognition");
-  if (!recognition.isKnownProvider()) {
-    throw new Error(`RECOGNITION_PROVIDER "${recognition.providerName()}" is not known. Use none, simulated, http or platerecognizer.`);
-  }
-  if (process.env.NODE_ENV === "production" && recognition.providerName() === "simulated") {
-    throw new Error("RECOGNITION_PROVIDER=simulated is for development only and cannot be used in production");
-  }
   // Email: same rules.
   const mail = require("../integrations/email");
   if (!mail.isKnownProvider()) {
@@ -63,8 +55,6 @@ const validateEnv = () => {
   }
   const fastagProblems = fastag.provider().problems();
   if (fastagProblems.length) throw new Error(`FASTAG_PROVIDER=${fastag.providerName()}: ${fastagProblems.join("; ")}`);
-  const problems = recognition.provider().problems();
-  if (problems.length) throw new Error(`RECOGNITION_PROVIDER=${recognition.providerName()}: ${problems.join("; ")}`);
 };
 
 module.exports = {

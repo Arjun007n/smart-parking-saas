@@ -1,4 +1,4 @@
-// The live picture address of a gate camera (AI service). Needs MongoDB (see tests/helpers.js).
+// The live picture address of a gate camera. Needs MongoDB (see tests/helpers.js).
 const { setup, it, api, registerCompany, assert } = require("./helpers");
 
 setup();
@@ -53,7 +53,7 @@ it("the address is only accepted as an http(s) address, and is handed to the rig
   assert.equal((await preview("direction=SIDEWAYS")).status, 400);
 });
 
-it("the AI service tells the server its live picture address with a heartbeat", async () => {
+it("the camera (or its agent) tells the server its live picture address with a heartbeat", async () => {
   const made = await add("Exit cam", { direction: "EXIT", gate: "Gate B" });
   assert.equal(made.status, 201, JSON.stringify(made.body));
   const key = made.body.data.deviceKey;

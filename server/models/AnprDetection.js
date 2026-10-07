@@ -1,7 +1,8 @@
 const mongoose = require("mongoose");
+const { VEHICLE_TYPES } = require("./constants");
 
 const DETECTION_STATUSES = ["PENDING", "CONFIRMED", "DISMISSED", "EXPIRED"];
-// CAMERA: an ANPR camera. PHOTO: a picture an operator took. RFID: a pass tag read by a
+// CAMERA: an ANPR camera. PHOTO: a picture an operator took (older records only; plates are no longer read from photos). RFID: a pass tag read by a
 // UHF reader. FASTAG: a FASTag read by a reader.
 const DETECTION_SOURCES = ["CAMERA", "PHOTO", "RFID", "FASTAG"];
 
@@ -28,6 +29,12 @@ const anprDetectionSchema = new mongoose.Schema(
     // RFID / FASTAG readers: the tag that was read, and the pass it belongs to (RFID).
     tagId: { type: String, maxlength: 48 },
     passNumber: { type: String, maxlength: 40 },
+
+    // The kind of vehicle, when we know it, so the entry screen can choose it by itself: what the camera said, or
+    // what we remember of this plate from an earlier visit (a known vehicle wins over the camera), or, when neither
+    // knows, the vehicle type the admin set for this lane.
+    vehicleType: { type: String, enum: VEHICLE_TYPES },
+    vehicleTypeFrom: { type: String, enum: ["CAMERA", "HISTORY", "LANE"] },
 
     status: { type: String, enum: DETECTION_STATUSES, default: "PENDING" },
     // True when a person must look at it before using it.

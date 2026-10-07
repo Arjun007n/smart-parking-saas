@@ -33,6 +33,38 @@ router.get("/lookup", requireAnyPermission(P.ENTRY_CREATE, P.EXIT_CREATE, P.PASS
 
 router.use(requirePermission(P.PASS_MANAGE));
 router.get("/", controller.listPasses);
+router.get("/summary", controller.passSummary);
+router.get("/vehicles", controller.listPassVehicles);
+router.get("/invoices", controller.passInvoices);
+router.get("/users", controller.listPassUsers);
+router.post(
+  "/bulk-upload",
+  requireCompany,
+  validateBody({
+    locationId: { type: "objectId", required: true },
+    // Every cell is text (it comes from a CSV file); the controller turns and checks each one.
+    rows: {
+      type: "array", required: true, max: controller.MAX_BULK_ROWS,
+      of: { type: "object", fields: Object.fromEntries(
+        ["holderName", "phone", "email", "vehicleNumber", "vehicleType", "passType", "startDate", "unit", "count", "amount", "method", "company", "notes", "transactionId"]
+          .map((key) => [key, { type: "string", max: 300 }])
+      ) },
+    },
+  }),
+  controller.bulkUpload
+);
+router.post(
+  "/bulk",
+  validateBody({
+    ids: { type: "array", required: true, max: 200, of: { type: "objectId" } },
+    action: { type: "string", required: true, enum: ["EXTEND", "SET_DATES", "SUSPEND", "RESUME", "CANCEL"] },
+    days: { type: "number", integer: true, min: 1, max: 366 },
+    startDate: { type: "string", pattern: DATE, message: "must look like 2026-03-02" },
+    endDate: { type: "string", pattern: DATE, message: "must look like 2026-03-02" },
+    reason: { type: "string", max: 300 },
+  }),
+  controller.bulkUpdate
+);
 router.get("/:id", validateIdParam(), controller.getPass);
 
 router.post(
@@ -50,6 +82,7 @@ router.post(
     maxVehicles,
     passType: { type: "string", enum: PASS_TYPES },
     holderName: { type: "string", required: true, min: 2, max: 100 },
+    passCompanyId: { type: "objectId" },
     phone: { type: "string", max: 20 },
     email: { type: "string", max: 254 },
     notes: { type: "string", max: 300 },
@@ -87,6 +120,8 @@ router.put(
   validateIdParam(),
   validateBody({
     holderName: { type: "string", min: 2, max: 100 },
+    // "" takes the pass off its company.
+    passCompanyId: { type: "string", max: 40 },
     phone: { type: "string", max: 20 },
     email: { type: "string", max: 254 },
     notes: { type: "string", max: 300 },

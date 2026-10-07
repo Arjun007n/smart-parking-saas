@@ -4,6 +4,9 @@ import AuthLayout from './layouts/AuthLayout'
 import DashboardLayout from './layouts/DashboardLayout'
 import Home from './pages/Home'
 import Login from './pages/auth/Login'
+import GovernmentLogin from './pages/auth/GovernmentLogin'
+import GovernmentLayout from './layouts/GovernmentLayout'
+import GovernmentReports from './pages/government/GovernmentReports'
 import Register from './pages/auth/Register'
 import ForgotPassword from './pages/auth/ForgotPassword'
 import ResetPassword from './pages/auth/ResetPassword'
@@ -79,6 +82,7 @@ function App() {
       <Route element={<AuthLayout />}>
         <Route element={<GuestRoute />}>
           <Route path="/login" element={<Login />} />
+          <Route path="/government/login" element={<GovernmentLogin />} />
           <Route path="/register" element={<Register />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
         </Route>
@@ -123,6 +127,12 @@ function App() {
           <Route element={<ProtectedRoute permission="PLATFORM_MANAGE" />}>
             <Route path="website" element={<Website />} />
             <Route path="shop" element={<Shop />} />
+          </Route>
+        </Route>
+
+        <Route element={<ProtectedRoute permission="GOVERNMENT_REPORT" loginPath="/government/login" />}>
+          <Route path="/government" element={<GovernmentLayout />}>
+            <Route index element={<GovernmentReports />} />
           </Route>
         </Route>
 

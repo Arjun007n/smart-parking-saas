@@ -25,6 +25,8 @@ const NAV = [
   { to: '/operator/exit-list', label: 'Exit List' },
   { to: '/operator/collection', label: 'Collection', permission: 'PAYMENT_COLLECT' },
   { to: '/operator/wallets', label: 'Wallets', permission: 'PAYMENT_COLLECT' },
+  // Supervisors (anyone who is not limited to the gate screens) go on to the reports.
+  { to: '/dashboard/reports', label: 'Reports', permission: 'REPORT_VIEW', dashboard: true },
 ]
 // Less used pages sit under "More".
 const MORE = [
@@ -44,7 +46,9 @@ const pill = (item, isActive, compact) => {
 export default function OperatorLayout() {
   const { user, company, can, logout, permissions } = useAuth()
   const navigate = useNavigate()
-  const links = NAV.filter((item) => !item.permission || can(item.permission))
+  const links = NAV.filter(
+    (item) => (!item.permission || can(item.permission)) && (!item.dashboard || !usesOperatorArea(user, permissions)),
+  )
   const { theme, setTheme, reset } = useTheme()
   const [panel, setPanel] = useState('') // '', 'theme', 'bookings' or 'help'
   const [menu, setMenu] = useState('') // '', 'more' or 'profile'

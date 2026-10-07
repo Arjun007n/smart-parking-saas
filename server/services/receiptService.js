@@ -4,6 +4,7 @@ const Payment = require("../models/Payment");
 const Pass = require("../models/Pass");
 const User = require("../models/User");
 const { resolveReceiptSettings } = require("../utils/receiptSettings");
+const { resolveOperations } = require("../utils/operations");
 
 const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 
@@ -12,7 +13,7 @@ const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 const buildReceipt = async (session) => {
   const [company, location, rows, entryOperator, exitOperator, pass] = await Promise.all([
     Company.findById(session.companyId).select("name legalName gstNumber address logoUrl"),
-    Location.findById(session.locationId).select("name address contact receiptSettings"),
+    Location.findById(session.locationId).select("name address contact receiptSettings operations"),
     Payment.find({ sessionId: session._id, status: { $in: ["SUCCESS", "REFUNDED"] } }).sort({ paidAt: 1 }),
     session.entryOperatorId ? User.findById(session.entryOperatorId).select("name") : null,
     session.exitOperatorId ? User.findById(session.exitOperatorId).select("name") : null,
@@ -28,6 +29,8 @@ const buildReceipt = async (session) => {
   return {
     // How this location wants its receipt to look (header note, footer, what to show).
     settings: resolveReceiptSettings(location.receiptSettings),
+    // The gate switches that change what is shown (ticket number, photo, receipt for pass holders).
+    operations: resolveOperations(location.operations),
     receiptNumber: `R-${session.ticketNumber.slice(2)}`,
     // What a QR code on the receipt should contain.
     reference: session.ticketNumber,

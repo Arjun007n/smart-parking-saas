@@ -131,6 +131,23 @@ test("anpr: a clear, confident plate needs no review", () => {
   assert.deepEqual(d.reviewReasons, []);
 });
 
+test("anpr: the vehicle type the camera reports is mapped to ours, and unknown words are ignored", () => {
+  const type = (vehicleType) => anpr.parseDetection({ plate: "MH12AB1234", confidence: 0.95, vehicleType }).vehicleType;
+  assert.equal(type("Car"), "CAR");
+  assert.equal(type("SUV"), "CAR");
+  assert.equal(type("motorcycle"), "BIKE");
+  assert.equal(type("two-wheeler"), "BIKE");
+  assert.equal(type("TRUCK"), "HEAVY");
+  assert.equal(type("bus"), "HEAVY");
+  assert.equal(type("taxi"), "TAXI");
+  assert.equal(type("pickup"), "TEMPO");
+  assert.equal(type("tempo"), "TEMPO");
+  assert.equal(type("spaceship"), undefined);
+  assert.equal(type(""), undefined);
+  assert.equal(type(42), undefined);
+  assert.equal(anpr.parseDetection({ plate: "MH12AB1234" }).vehicleType, undefined);
+});
+
 test("anpr: low confidence, missing confidence, no plate and odd plates are flagged", () => {
   assert.match(anpr.parseDetection({ plate: "MH12AB1234", confidence: 0.6 }).reviewReasons[0], /Low confidence \(60%, needs 85%\)/);
   assert.match(anpr.parseDetection({ plate: "MH12AB1234" }).reviewReasons[0], /did not give a confidence/);

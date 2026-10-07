@@ -1,5 +1,5 @@
 // Turns what a camera (or its software) posts into the platform's standard
-// format:  { plate, confidence, eventId, capturedAt, imageUrl, direction }.
+// format:  { plate, confidence, eventId, capturedAt, imageUrl, direction, vehicleType }.
 //
 // `generic` understands the usual field names. To support a specific brand
 // add a translator below and select it with  options.vendor  in config.json.
@@ -29,6 +29,11 @@ const generic = (body) => {
     capturedAt: date && !Number.isNaN(date.getTime()) ? date.toISOString() : undefined,
     imageUrl: pick(body, ["imageUrl", "image_url", "picture", "image"]),
     direction: pick(body, ["direction"]),
+    // The kind of vehicle, if the camera works it out (car, bike, truck, bus ...).
+    vehicleType: (() => {
+      const kind = pick(body, ["vehicleType", "vehicle_type", "vehicleClass", "vehicle_class", "vehicleKind", "VehicleType"]);
+      return kind === undefined ? undefined : String(kind).slice(0, 40);
+    })(),
   };
 };
 
