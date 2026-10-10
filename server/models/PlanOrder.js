@@ -10,8 +10,20 @@ const planOrderSchema = new mongoose.Schema(
     companyId: { type: mongoose.Schema.Types.ObjectId, ref: "Company", required: true, index: true },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     planName: { type: String, required: true },
-    users: { type: Number, required: true, min: 1 },
-    months: { type: Number, required: true, min: 1 },
+    users: { type: Number, required: true, min: 0 },
+    months: { type: Number, required: true, min: 0 },
+    // PLAN is the old company-wide plan. The others are for one location's subscription (see services/subscriptionService.js):
+    // PURCHASE makes a subscription, RENEWAL adds months to it, UPDATE adds users or add-ons for the rest of the period.
+    kind: { type: String, enum: ["PLAN", "PURCHASE", "RENEWAL", "UPDATE"], default: "PLAN" },
+    locationId: { type: mongoose.Schema.Types.ObjectId, ref: "Location" },
+    subscriptionId: { type: mongoose.Schema.Types.ObjectId, ref: "Subscription" },
+    orderNumber: String,
+    // What was bought, one row each, and the add-ons the order asks for (the whole set for a purchase, the extra for an update).
+    lines: {
+      type: [{ _id: false, key: String, label: String, qty: Number, rate: Number, months: Number, amount: Number, discount: Number, taxable: Number }],
+      default: undefined,
+    },
+    addons: mongoose.Schema.Types.Mixed,
     // The price in whole rupees, as quoted.
     subtotal: { type: Number, required: true },
     discount: { type: Number, required: true },
@@ -40,5 +52,7 @@ const planOrderSchema = new mongoose.Schema(
 );
 
 planOrderSchema.index({ companyId: 1, createdAt: -1 });
+planOrderSchema.index({ companyId: 1, locationId: 1, createdAt: -1 });
+planOrderSchema.index({ orderNumber: 1 }, { unique: true, partialFilterExpression: { orderNumber: { $type: "string" } } });
 
 module.exports = mongoose.model("PlanOrder", planOrderSchema);

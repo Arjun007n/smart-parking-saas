@@ -5,7 +5,7 @@ const { tenant, requireCompany } = require("../middleware/tenant");
 const { requirePermission } = require("../middleware/permission");
 const { validateBody, validateIdParam } = require("../middleware/validate");
 const { PERMISSIONS } = require("../config/permissions");
-const { VEHICLE_TYPES, VEHICLE_KEYS } = require("../models/constants");
+const { VEHICLE_TYPES, VEHICLE_KEYS, VEHICLE_CLASSES } = require("../models/constants");
 
 const text = (max = 150) => ({ type: "string", max });
 const count = { type: "number", integer: true, min: 0, max: 100000 };
@@ -51,6 +51,16 @@ const fields = (isCreate) => ({
         fastagLaneId: { type: "string", max: 30 },
         // Sent back for lanes that already exist, so a rename is not mistaken for a removal.
         _id: { type: "objectId" },
+        lane: { type: "string", max: 50 },
+        vehicleClass: { type: "string", enum: VEHICLE_CLASSES },
+        doorNo: { type: "string", max: 30 },
+        readerNo: { type: "string", max: 30 },
+        fastag: { type: "boolean" },
+        gateNo: { type: "string", max: 20 },
+        floorNo: { type: "string", max: 20 },
+        direction: { type: "string", max: 20 },
+        fastagLaneType: { type: "string", max: 30 },
+        fastagLaneMode: { type: "string", max: 30 },
         cameraSerial: { type: "string", max: 60 },
         isActive: { type: "boolean" },
         vehicleType: { type: "string", enum: VEHICLE_TYPES },
@@ -122,6 +132,23 @@ router.get("/:id/re-entries", validateIdParam(), requirePermission(PERMISSIONS.L
 router.post("/:id/re-entries/reset", validateIdParam(), requirePermission(PERMISSIONS.LOCATION_MANAGE), controller.resetReEntryCounter);
 // The Lanes tab: every lane with its operators and devices (?q= search, ?page=, ?limit=). The switch turns one lane on or off.
 router.get("/:id/lanes", validateIdParam(), controller.listLanes);
+// The Create / Edit Parking Lane form: one lane = one vehicle and one direction. Name, class and numbers follow from it.
+const laneFields = (isCreate) => ({
+  vehicleType: { type: "string", required: isCreate, enum: VEHICLE_TYPES },
+  type: { type: "string", required: isCreate, enum: ["ENTRY", "EXIT"] },
+  doorNo: { type: "string", max: 30 },
+  readerNo: { type: "string", max: 30 },
+  cameraSerial: { type: "string", max: 60 },
+  fastag: { type: "boolean" },
+  fastagLaneId: { type: "string", max: 30 },
+  gateNo: { type: "string", max: 20 },
+  floorNo: { type: "string", max: 20 },
+  direction: { type: "string", max: 20 },
+  fastagLaneType: { type: "string", max: 30 },
+  fastagLaneMode: { type: "string", max: 30 },
+});
+router.post("/:id/lanes", validateIdParam(), requirePermission(PERMISSIONS.LOCATION_MANAGE), validateBody(laneFields(true)), controller.createLane);
+router.put("/:id/lanes/:laneId", validateIdParam(), validateIdParam("laneId"), requirePermission(PERMISSIONS.LOCATION_MANAGE), validateBody(laneFields(false)), controller.updateLane);
 router.patch(
   "/:id/lanes/:laneId/status",
   validateIdParam(),

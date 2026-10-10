@@ -95,7 +95,7 @@ function RenewBanner({ subscription }) {
             : `Your plan ends on ${dateOnly(subscription.validUpto)} (${subscription.daysLeft} day${subscription.daysLeft === 1 ? '' : 's'} left).`}
         </span>
         {can('COMPANY_MANAGE') && (
-          <Link to="/dashboard/billing" className="rounded-lg bg-white px-3 py-1.5 text-sm font-semibold text-blue-700 ring-1 ring-blue-300 hover:bg-blue-50">
+          <Link to="/dashboard/subscriptions" className="rounded-lg bg-white px-3 py-1.5 text-sm font-semibold text-blue-700 ring-1 ring-blue-300 hover:bg-blue-50">
             Renew now
           </Link>
         )}
@@ -216,7 +216,7 @@ function LocationPlans({ plans, canRenew }) {
                   </td>
                   <td className="text-center">
                     {canRenew ? (
-                      <Link to="/dashboard/billing" className="rounded bg-[#28a745] px-3 py-1 text-xs font-semibold text-white hover:bg-[#218838]">Renew</Link>
+                      <Link to="/dashboard/subscriptions" className="rounded bg-[#28a745] px-3 py-1 text-xs font-semibold text-white hover:bg-[#218838]">Renew</Link>
                     ) : '-'}
                   </td>
                 </tr>
@@ -342,7 +342,7 @@ function Operations({ locations }) {
           label="Locations Near Expiry"
           tag={nearExpiry > 0 ? 'Expiring Soon' : undefined}
           hint={d.subscription?.validUpto ? `Plan valid upto ${dateOnly(d.subscription.validUpto)}` : undefined}
-          to={canRenew ? '/dashboard/billing' : undefined}
+          to={canRenew ? '/dashboard/subscriptions' : undefined}
         />
         <KpiCard icon="card" value={d.passes.total} label="Total Passes" hint={`${d.passes.active} active · ${d.passes.endingSoon} end within a week`} to="/dashboard/passes" />
         <KpiCard icon="wallet" value={money(d.passes.activeRevenue)} label="Current Active Passes Revenue" hint="Paid for passes valid now" to="/dashboard/passes" />

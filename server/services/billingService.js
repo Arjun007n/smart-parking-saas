@@ -112,7 +112,7 @@ const checkout = async ({ company, user, users, months, req }) => {
 
   const price = pricing.planPrice({ users, months });
   const waiting = await PlanOrder.findOne({
-    companyId: company._id, status: "PENDING", users, months, total: price.total, payUrl: { $exists: true }, expiresAt: { $gt: new Date() },
+    companyId: company._id, locationId: { $exists: false }, status: "PENDING", users, months, total: price.total, payUrl: { $exists: true }, expiresAt: { $gt: new Date() },
   });
   if (waiting) return { order: waiting, repeated: true };
 
@@ -149,7 +149,7 @@ const checkout = async ({ company, user, users, months, req }) => {
   await order.save();
 
   // An older link the buyer is no longer using is closed. (If they pay it anyway it still counts.)
-  const older = await PlanOrder.find({ companyId: company._id, status: "PENDING", _id: { $ne: order._id } });
+  const older = await PlanOrder.find({ companyId: company._id, locationId: { $exists: false }, status: "PENDING", _id: { $ne: order._id } });
   for (const old of older) {
     await PlanOrder.updateOne({ _id: old._id, status: "PENDING" }, { $set: { status: "CANCELLED", failureReason: "Replaced by a newer order" } });
     const owner = gateway.PROVIDERS[old.provider];
@@ -237,6 +237,8 @@ const nextInvoice = async (order, company) => {
 
 // Everything that follows a paid order. Safe to repeat.
 const finalize = async (order, req) => {
+  // An order for one location's subscription is applied there (services/subscriptionService.js).
+  if (order.locationId) return require("./subscriptionService").finalize(order, req);
   const company = await Company.findById(order.companyId);
   if (!company) return { company: null };
 
@@ -339,7 +341,7 @@ const settle = async (event, req = SYSTEM_REQ) => {
   }
 
   const company = await Company.findById(existing.companyId).select("subscriptionStatus subscription").lean();
-  const period = company ? periodFor(company, existing.months) : {};
+  const period = !company ? {} : existing.locationId ? await require("./subscriptionService").periodForOrder(existing) : periodFor(company, existing.months);
   const paid = await PlanOrder.findOneAndUpdate(
     { _id: existing._id, status: { $in: OPEN } },
     { $set: { status: "PAID", paidAt: new Date(), ...refs, ...period }, $unset: { failureReason: "" } },
@@ -389,5 +391,5 @@ const sweep = async (now = new Date()) => {
 };
 
 module.exports = {
-  OPEN, sellerDetails, sellerProblems, billingReady, buyerDetails, validateChoice, checkout, periodFor, settle, sweep, finalize, nextInvoice, issueInvoice,
+  OPEN, sellerDetails, sellerProblems, billingReady, buyerDetails, validateChoice, checkout, periodFor, settle, sweep, finalize, nextInvoice, issueInvoice, sendInvoiceEmail,
 };

@@ -100,6 +100,11 @@ it("entry: validations", async () => {
   const duplicate = await enter("RJ14AB1234");
   assert.equal(duplicate.status, 409);
   assert.match(duplicate.body.message, /already inside/);
+  // The answer carries the vehicle's open ticket, so the entry screen can offer Re-Print, Re-Entry or Exit.
+  assert.equal(duplicate.body.data.code, "ALREADY_INSIDE");
+  assert.equal(duplicate.body.data.session.ticketNumber, s.car1.ticketNumber);
+  assert.equal(duplicate.body.data.session.vehicleNumber, "RJ14AB1234");
+  assert.equal(duplicate.body.data.session._id, s.car1._id);
 
   assert.equal((await enter("!!")).status, 400);
   assert.equal((await enter("MH01AA0001", { vehicleType: "HEAVY" })).status, 400); // not accepted here

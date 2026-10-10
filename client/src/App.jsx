@@ -29,6 +29,24 @@ import Passes from './pages/dashboard/Passes'
 import Wallets from './pages/dashboard/Wallets'
 import WalletDetail from './pages/dashboard/WalletDetail'
 import PassDetail from './pages/dashboard/PassDetail'
+import PassUsers from './pages/pass/PassUsers'
+import PassUserPasses from './pages/pass/PassUserPasses'
+import PassUserVehicles from './pages/pass/PassUserVehicles'
+import PassUserEdit from './pages/pass/PassUserEdit'
+import CompanyMaster from './pages/pass/CompanyMaster'
+import PassesList from './pages/pass/PassesList'
+import VehicleList from './pages/pass/VehicleList'
+import PassInvoices from './pages/pass/PassInvoices'
+import PassInvoiceNew from './pages/pass/PassInvoiceNew'
+import PassBulkUpload from './pages/pass/PassBulkUpload'
+import PassCards from './pages/pass/PassCards'
+import Subscriptions from './pages/subscriptions/Subscriptions'
+import SubscriptionLocation from './pages/subscriptions/SubscriptionLocation'
+import SubscriptionBuy from './pages/subscriptions/SubscriptionBuy'
+import SubscriptionRenew from './pages/subscriptions/SubscriptionRenew'
+import SubscriptionUpdate from './pages/subscriptions/SubscriptionUpdate'
+import SubscriptionOrder from './pages/subscriptions/SubscriptionOrder'
+import SubscriptionPrices from './pages/subscriptions/SubscriptionPrices'
 import Website from './pages/dashboard/Website'
 import Account from './pages/Account'
 import PublicLayout from './layouts/PublicLayout'
@@ -105,6 +123,12 @@ function App() {
           <Route element={<ProtectedRoute permission="COMPANY_MANAGE" />}>
             <Route path="company" element={<Company />} />
             <Route path="billing" element={<Billing />} />
+            <Route path="subscriptions" element={<Subscriptions />} />
+            <Route path="subscriptions/location/:locationId" element={<SubscriptionLocation />} />
+            <Route path="subscriptions/new/:locationId" element={<SubscriptionBuy />} />
+            <Route path="subscriptions/renew/:id" element={<SubscriptionRenew />} />
+            <Route path="subscriptions/update/:id" element={<SubscriptionUpdate />} />
+            <Route path="subscriptions/orders/:id" element={<SubscriptionOrder />} />
             <Route path="orders" element={<Orders />} />
             <Route path="orders/:id" element={<OrderDetail />} />
             <Route path="audit" element={<Audit />} />
@@ -112,6 +136,17 @@ function App() {
           <Route element={<ProtectedRoute permission="PASS_MANAGE" />}>
             <Route path="passes" element={<Passes />} />
             <Route path="passes/:id" element={<PassDetail />} />
+            <Route path="pass-management/users" element={<PassUsers />} />
+            <Route path="pass-management/users/:id/passes" element={<PassUserPasses />} />
+            <Route path="pass-management/users/:id/vehicles" element={<PassUserVehicles />} />
+            <Route path="pass-management/users/:id/edit" element={<PassUserEdit />} />
+            <Route path="pass-management/companies" element={<CompanyMaster />} />
+            <Route path="pass-management/passes" element={<PassesList />} />
+            <Route path="pass-management/vehicles" element={<VehicleList />} />
+            <Route path="pass-management/invoices" element={<PassInvoices />} />
+            <Route path="pass-management/invoices/new" element={<PassInvoiceNew />} />
+            <Route path="pass-management/bulk-upload" element={<PassBulkUpload />} />
+            <Route path="pass-management/print-cards" element={<PassCards />} />
           </Route>
           <Route element={<ProtectedRoute permission="WALLET_MANAGE" />}>
             <Route path="wallets" element={<Wallets />} />
@@ -127,6 +162,7 @@ function App() {
           <Route element={<ProtectedRoute permission="PLATFORM_MANAGE" />}>
             <Route path="website" element={<Website />} />
             <Route path="shop" element={<Shop />} />
+            <Route path="subscription-prices" element={<SubscriptionPrices />} />
           </Route>
         </Route>
 

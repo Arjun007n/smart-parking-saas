@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useForm, useWatch } from 'react-hook-form'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { parkingApi, passApi, paymentApi } from '../../services/api'
@@ -12,7 +12,7 @@ import { initialLane, useRememberLane } from '../../hooks/useLane'
 import { useGateCamera } from '../../hooks/useGateCamera'
 import { errorMessage } from '../../utils/errors'
 import { operationSettings } from '../../utils/operations'
-import { PAYMENT_LABELS, VEHICLE_LABELS, amountDue, dateTime, duration, money, timeOnly } from '../../utils/format'
+import { PAYMENT_LABELS, VEHICLE_LABELS, amountDue, dateTime, duration, money } from '../../utils/format'
 import { Alert, Button, Card, Field, PageLoader } from '../../components/ui'
 import LocationPicker from '../../components/operator/LocationPicker'
 import LaneBar from '../../components/operator/LaneBar'
@@ -27,6 +27,7 @@ import OnlinePayment from '../../components/operator/OnlinePayment'
 import WalletPayment from '../../components/operator/WalletPayment'
 import PhotoPanel from '../../components/operator/PhotoPanel'
 import PassBanner from '../../components/pass/PassBanner'
+import QrCode from '../../components/QrCode'
 
 // The last lookup without any amount change (what "Recalculate" and "Use the tariff amount" send).
 const withoutEdit = (body) => {
@@ -42,14 +43,21 @@ const plateKey = (text) => text.toUpperCase().replace(/[\s-]/g, '')
 // The car just looked up (or refused) is ignored by the camera for a minute.
 const RECENT_MS = 60_000
 const MIN_SEARCH = 3
+// Barcode-scanner commands: a QR code printed next to the Exit button reads {OK} and one on the bill reads {PRINT},
+// so a scanner at the gate can confirm the exit or print the bill without touching the screen.
+const CMD_OK = '{OK}'
+const CMD_PRINT = '{PRINT}'
+const isCommand = (text) => [CMD_OK, CMD_PRINT].includes(text.trim().toUpperCase())
+const fire = (name) => window.dispatchEvent(new CustomEvent(name))
 
 function SessionSummary({ session }) {
   const fee = session.fee
   const rows = [
     ['Vehicle', `${session.vehicleNumber} (${VEHICLE_LABELS[session.vehicleType]})`],
     ['Ticket', session.ticketNumber],
-    ['Entered', dateTime(session.entryTime)],
-    ['Duration', duration(session.durationMinutes)],
+    ['In time', dateTime(session.entryTime)],
+    session.exitTime && ['Out time', dateTime(session.exitTime)],
+    ['Total time', duration(session.durationMinutes)],
     ['Parking fee', money(fee.breakdown.base)],
     fee.breakdown.overnight > 0 && ['Overnight charge', money(fee.breakdown.overnight)],
     fee.breakdown.lostTicket > 0 && ['Lost ticket penalty', money(fee.breakdown.lostTicket)],
@@ -111,7 +119,7 @@ function AmountEdit({ session, onApply, onReset, pending, error }) {
   )
 }
 
-function PaymentStep({ session, onPaid, onPaidOnline, onRecalculate, recalculating, startMethod = 'CASH', wallet, detectedTag = '', pendingCharge = null }) {
+function PaymentStep({ session, onPaid, onPaidOnline, onRecalculate, recalculating, startMethod = 'CASH', wallet, detectedTag = '', pendingCharge = null, onLock }) {
   const { can } = useAuth()
   const due = amountDue(session)
   // A wallet linked to the vehicle that can cover the fee is the likely way it is paying.
@@ -159,6 +167,26 @@ function PaymentStep({ session, onPaid, onPaidOnline, onRecalculate, recalculati
     },
   })
 
+  const ready = !short && !(chargeTag && tagId.trim().length < 4)
+  const canSubmit = ready && ['CASH', 'UPI', 'CARD', 'FASTAG'].includes(method)
+  // A scanned {OK} code confirms the exit, like pressing the button.
+  const confirmRef = useRef(null)
+  useEffect(() => {
+    confirmRef.current = () => { if (canSubmit && !pay.isPending && can('PAYMENT_COLLECT')) pay.mutate() }
+  })
+  useEffect(() => {
+    const handler = () => confirmRef.current?.()
+    window.addEventListener('sp:exit-confirm', handler)
+    return () => window.removeEventListener('sp:exit-confirm', handler)
+  }, [])
+  const markOnline = useCallback((active) => onLock?.('online', active), [onLock])
+  // While the FASTag partner has not confirmed a charge, the vehicle cannot be cleared away.
+  const lockedByCharge = Boolean(waiting || pendingCharge)
+  useEffect(() => {
+    onLock?.('charge', lockedByCharge)
+    return () => onLock?.('charge', false)
+  }, [lockedByCharge, onLock])
+
   if (!can('PAYMENT_COLLECT')) {
     return <Alert type="info">Payment is pending. Ask a staff member who collects payments to complete it.</Alert>
   }
@@ -188,6 +216,7 @@ function PaymentStep({ session, onPaid, onPaidOnline, onRecalculate, recalculati
           simulated={Boolean(options.data?.simulated)}
           onPaid={onPaidOnline}
           onBack={() => setMethod('CASH')}
+          onActive={markOnline}
         />
       ) : (
         <>
@@ -198,6 +227,14 @@ function PaymentStep({ session, onPaid, onPaidOnline, onRecalculate, recalculati
                 name="given-amount"
                 inputMode="decimal"
                 autoComplete="off"
+                autoFocus
+                onFocus={(event) => event.target.select()}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    confirmRef.current?.()
+                  }
+                }}
                 value={given}
                 onChange={(event) => setGiven(event.target.value)}
               />
@@ -241,16 +278,22 @@ function PaymentStep({ session, onPaid, onPaidOnline, onRecalculate, recalculati
               onChange={(event) => setReference(event.target.value)}
             />
           )}
-          <Button
-            className="w-full py-3 text-base"
-            loading={pay.isPending}
-            disabled={short || (chargeTag && tagId.trim().length < 4)}
-            onClick={() => pay.mutate()}
-          >
-            {chargeTag
-              ? (waiting ? 'Check FASTag charge again' : `Charge FASTag ${money(due)} and exit`)
-              : `Exit — ${money(due)} received`}
-          </Button>
+          <div className="flex items-center gap-3">
+            <Button
+              className="w-full py-3 text-base"
+              loading={pay.isPending}
+              disabled={!ready}
+              onClick={() => pay.mutate()}
+            >
+              {chargeTag
+                ? (waiting ? 'Check FASTag charge again' : `Charge FASTag ${money(due)} and exit`)
+                : `Exit — ${money(due)} received`}
+            </Button>
+            <span className="hidden shrink-0 text-center sm:block" title="Scan this code with the gate scanner to confirm the exit">
+              <QrCode value={CMD_OK} size={64} label="Scan to confirm the exit" />
+              <span className="block text-[10px] text-slate-500">scan to exit</span>
+            </span>
+          </div>
           <Button variant="secondary" className="w-full" loading={recalculating} disabled={Boolean(waiting || pendingCharge)} onClick={onRecalculate}>
             Recalculate fee
           </Button>
@@ -260,17 +303,28 @@ function PaymentStep({ session, onPaid, onPaidOnline, onRecalculate, recalculati
   )
 }
 
-function Done({ session, paid, advance, change, hardware, onNext, skipReceipt = false }) {
+function Done({ session, paid, method, advance, change, hardware, onNext, skipReceipt = false }) {
   const { user } = useAuth()
   const mayPrint = user?.access?.reprint !== false
   const covered = !paid && session.fee.total > 0 && session.fee.advanceApplied > 0
   const giveBack = session.fee.advanceRefunded || advance?.refund || 0
   const print = useMutation({ mutationFn: () => parkingApi.print(session._id) })
+  // A scanned {PRINT} code prints the bill, like pressing the button.
+  const printRef = useRef(null)
+  const canPrint = !skipReceipt && mayPrint
+  useEffect(() => {
+    printRef.current = () => { if (canPrint && !print.isPending) print.mutate() }
+  })
+  useEffect(() => {
+    const handler = () => printRef.current?.()
+    window.addEventListener('sp:exit-print', handler)
+    return () => window.removeEventListener('sp:exit-print', handler)
+  }, [])
   return (
     <div className="space-y-4" role="status">
       <Alert type="success">
         {paid
-          ? `Exit successful. Payment of ${money(amountDue(session))} recorded. ${session.vehicleNumber} may leave.`
+          ? `${method ? `${PAYMENT_LABELS[method] || method} exit successful.` : 'Exit successful.'} Payment of ${money(amountDue(session))} recorded. ${session.vehicleNumber} may leave.`
           : covered
             ? `Exit successful. The advance covered the fee. ${session.vehicleNumber} may leave.`
             : `Exit successful. Nothing to pay. ${session.vehicleNumber} may leave.`}
@@ -286,7 +340,12 @@ function Done({ session, paid, advance, change, hardware, onNext, skipReceipt = 
       <Alert>{print.error && errorMessage(print.error)}</Alert>
       <Alert type="success">{print.isSuccess && 'Bill sent to the printer.'}</Alert>
       <div className="flex flex-wrap gap-3">
-        {!skipReceipt && mayPrint && <Button variant="secondary" loading={print.isPending} onClick={() => print.mutate()}>Print bill</Button>}
+        {canPrint && <Button variant="secondary" loading={print.isPending} onClick={() => print.mutate()}>Print bill</Button>}
+        {canPrint && (
+          <span className="hidden text-center sm:block" title="Scan this code with the gate scanner to print the bill">
+            <QrCode value={CMD_PRINT} size={48} label="Scan to print the bill" />
+          </span>
+        )}
         {!skipReceipt && (
           <Link
             to={`/operator/receipt/${session._id}`}
@@ -295,7 +354,7 @@ function Done({ session, paid, advance, change, hardware, onNext, skipReceipt = 
             View receipt
           </Link>
         )}
-        <Button onClick={onNext}>Next vehicle</Button>
+        <Button autoFocus onClick={onNext}>Next vehicle</Button>
       </div>
     </div>
   )
@@ -388,7 +447,7 @@ function VehicleSearch({ locationId, text, onText, onPick, onSubmitText, disable
                   }}
                 >
                   <span className="font-bold text-blue-700">{row.vehicleNumber}</span>
-                  <span className="text-sm text-slate-500">{timeOnly(row.entryTime)} · {row.ticketNumber}</span>
+                  <span className="text-sm text-slate-500">{dateTime(row.entryTime)} · {row.ticketNumber}</span>
                   <span className="text-sm font-medium text-red-600">[{VEHICLE_LABELS[row.vehicleType]}]</span>
                   {row.advance?.amount > 0 && <span className="text-xs text-green-700">advance {money(row.advance.amount)}</span>}
                 </button>
@@ -410,6 +469,11 @@ function ExitForm({ locations, defaultId }) {
   const [text, setText] = useState('')
   const [lostTicket, setLostTicket] = useState(false)
   const [scanning, setScanning] = useState(false)
+  // A payment that has started online or at the FASTag partner must be finished or released first:
+  // the vehicle cannot be cleared away or swapped for another one meanwhile.
+  const [locks, setLocks] = useState({})
+  const setLock = useCallback((key, on) => setLocks((current) => (Boolean(current[key]) === on ? current : { ...current, [key]: on })), [])
+  const paymentLocked = Boolean(locks.online || locks.charge)
   // The camera suggestion the operator chose to use, if any.
   const [detection, setDetection] = useState(null)
   // Auto exit: with a gate camera it starts ON and the operator can pause it with the switch. Without one it is off.
@@ -476,6 +540,11 @@ function ExitForm({ locations, defaultId }) {
 
   // Looks a vehicle up. `query` is what was typed, picked or scanned.
   const run = (query, extra = {}) => {
+    // A scanner command typed into the search box is not a vehicle.
+    if (isCommand(query)) {
+      setText('')
+      return
+    }
     setResult(null)
     const ticket = !lostTicket && looksLikeTicket(query)
     const pass = !ticket && looksLikePass(query)
@@ -489,6 +558,42 @@ function ExitForm({ locations, defaultId }) {
       ...extra,
     })
   }
+
+  // Coming from the entry screen's "Vehicle Already Entered" window (Exit button) with ?ticket=: look that ticket up at once.
+  const [params] = useSearchParams()
+  const fromEntry = useRef(false)
+  useEffect(() => {
+    const ticket = params.get('ticket')
+    if (!ticket || fromEntry.current || !locationId) return
+    const timer = setTimeout(() => {
+      fromEntry.current = true
+      setText(ticket)
+      run(ticket)
+    }, 0)
+    return () => clearTimeout(timer)
+  })
+
+  // The gate scanner types like a keyboard: {OK} confirms the exit, {PRINT} prints the bill.
+  useEffect(() => {
+    let buffer = ''
+    let last = 0
+    const onKey = (event) => {
+      if (event.ctrlKey || event.metaKey || event.altKey || event.key.length !== 1) return
+      const now = Date.now()
+      if (now - last > 120) buffer = ''
+      last = now
+      buffer = (buffer + event.key).slice(-8).toUpperCase()
+      if (buffer.endsWith(CMD_OK)) {
+        buffer = ''
+        fire('sp:exit-confirm')
+      } else if (buffer.endsWith(CMD_PRINT)) {
+        buffer = ''
+        fire('sp:exit-print')
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const pick = (row) => {
     setText(row.vehicleNumber)
@@ -531,7 +636,7 @@ function ExitForm({ locations, defaultId }) {
   const session = result?.session
   const finished = result && (!result.paymentRequired || result.paid)
   const done = (data) => {
-    setResult({ session: data.session, paymentRequired: true, paid: true, hardware: data.hardware, pass: result.pass, advance: result.advance, change: data.change })
+    setResult({ session: data.session, paymentRequired: true, paid: true, method: data.payment?.method, hardware: data.hardware, pass: result.pass, advance: result.advance, change: data.change })
     refreshLists()
     markLocalAction()
     toast({ title: 'Payment recorded', message: `${data.session.vehicleNumber} may leave`, tone: 'success' })
@@ -603,6 +708,7 @@ function ExitForm({ locations, defaultId }) {
                   <Done
                     session={session}
                     paid={result.paid}
+                    method={result.method}
                     advance={result.advance}
                     change={result.change}
                     hardware={result.hardware}
@@ -632,12 +738,18 @@ function ExitForm({ locations, defaultId }) {
                       wallet={result.wallet}
                       detectedTag={detection?.tagId || ''}
                       pendingCharge={result.fastagCharge || null}
+                      onLock={setLock}
                       onRecalculate={() => lookup.mutate(lastLookup)}
                       onPaid={done}
                       // Online: the server already released the vehicle; show the finished view.
                       onPaidOnline={done}
                     />
-                    <Button variant="secondary" className="w-full" onClick={next}>Cancel</Button>
+                    <Button variant="secondary" className="w-full" disabled={paymentLocked} onClick={next}>Cancel</Button>
+                    {paymentLocked && (
+                      <p className="text-center text-xs font-medium text-amber-700" role="status">
+                        {session.vehicleNumber} has a payment in progress. Complete or release it before clearing this vehicle.
+                      </p>
+                    )}
                   </>
                 )}
               </div>

@@ -75,7 +75,7 @@ export default function LocationDetail() {
         {current === 'tariffs' && <TariffsPanel location={location} />}
         {current === 'rules' && <OperationsPanel key={location.updatedAt} location={location} />}
         {current === 'autoexit' && <AutoExitPanel key={location.updatedAt} location={location} />}
-        {current === 'lanes' && <LanesPanel location={location} canManage={canManage} onEdit={() => setTab('details')} />}
+        {current === 'lanes' && <LanesPanel location={location} canManage={canManage} />}
         {current === 'receipt' && <ReceiptPanel location={location} company={company} />}
       </Card>
     </div>

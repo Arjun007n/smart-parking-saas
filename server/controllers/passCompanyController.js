@@ -6,6 +6,7 @@ const { round2 } = require("../services/collectionService");
 const PassCompany = require("../models/PassCompany");
 const Pass = require("../models/Pass");
 const PassPayment = require("../models/PassPayment");
+const PassUser = require("../models/PassUser");
 
 const GST_PATTERN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 
@@ -36,7 +37,7 @@ const findInScope = async (req) => {
 const statsFor = async (companyId, ids) => {
   const now = new Date();
   const objectIds = ids.map((id) => new mongoose.Types.ObjectId(String(id)));
-  const [passRows, moneyRows] = await Promise.all([
+  const [passRows, moneyRows, userRows] = await Promise.all([
     Pass.aggregate([
       { $match: { companyId: new mongoose.Types.ObjectId(String(companyId)), passCompanyId: { $in: objectIds }, isCurrent: true } },
       {
@@ -56,12 +57,17 @@ const statsFor = async (companyId, ids) => {
       { $match: { "p.passCompanyId": { $in: objectIds } } },
       { $group: { _id: "$p.passCompanyId", revenue: { $sum: "$amount" } } },
     ]),
+    PassUser.aggregate([
+      { $match: { companyId: new mongoose.Types.ObjectId(String(companyId)), passCompanyId: { $in: objectIds } } },
+      { $group: { _id: "$passCompanyId", users: { $sum: 1 } } },
+    ]),
   ]);
+  const userBy = new Map(userRows.map((r) => [String(r._id), r.users]));
   const passBy = new Map(passRows.map((r) => [String(r._id), r]));
   const moneyBy = new Map(moneyRows.map((r) => [String(r._id), r.revenue]));
   return new Map(ids.map((id) => {
     const p = passBy.get(String(id)) || {};
-    return [String(id), { passes: p.passes || 0, vehicles: p.vehicles || 0, active: p.active || 0, expired: p.expired || 0, revenue: round2(moneyBy.get(String(id)) || 0) }];
+    return [String(id), { users: userBy.get(String(id)) || 0, passes: p.passes || 0, vehicles: p.vehicles || 0, active: p.active || 0, expired: p.expired || 0, revenue: round2(moneyBy.get(String(id)) || 0) }];
   }));
 };
 
@@ -75,8 +81,8 @@ const listPassCompanies = async (req, res) => {
   const stats = await statsFor(req.companyId, companies.map((c) => c._id));
   const data = companies.map((c) => ({ ...c.toJSON(), stats: stats.get(String(c._id)) }));
   const totals = data.reduce(
-    (t, c) => ({ companies: t.companies + 1, passes: t.passes + c.stats.passes, vehicles: t.vehicles + c.stats.vehicles, active: t.active + c.stats.active, revenue: round2(t.revenue + c.stats.revenue) }),
-    { companies: 0, passes: 0, vehicles: 0, active: 0, revenue: 0 }
+    (t, c) => ({ companies: t.companies + 1, users: t.users + c.stats.users, passes: t.passes + c.stats.passes, vehicles: t.vehicles + c.stats.vehicles, active: t.active + c.stats.active, revenue: round2(t.revenue + c.stats.revenue) }),
+    { companies: 0, users: 0, passes: 0, vehicles: 0, active: 0, revenue: 0 }
   );
   res.json({ success: true, data: { companies: data, totals } });
 };
@@ -109,6 +115,22 @@ const updatePassCompany = async (req, res) => {
   res.json({ success: true, data: found });
 };
 
+// DELETE /api/pass-companies/:id
+// A company nobody belongs to can be removed; one with pass users or passes is switched off instead (it keeps its history).
+const removePassCompany = async (req, res) => {
+  const found = await findInScope(req);
+  const [users, passCount] = await Promise.all([
+    PassUser.countDocuments({ companyId: found.companyId, passCompanyId: found._id }),
+    Pass.countDocuments({ companyId: found.companyId, passCompanyId: found._id }),
+  ]);
+  if (users > 0 || passCount > 0) {
+    throw new AppError(`${found.name} has ${users} pass user${users === 1 ? "" : "s"} and ${passCount} pass${passCount === 1 ? "" : "es"}. Switch it off instead of deleting it.`, 409);
+  }
+  await PassCompany.deleteOne({ _id: found._id });
+  await audit.record(req, "PASS_COMPANY_DELETE", { entity: "PassCompany", entityId: found._id, companyId: found.companyId, meta: { name: found.name } });
+  res.json({ success: true, data: { deleted: true } });
+};
+
 // Used when a pass is sold or changed: the company must belong to the same tenant.
 const assertPassCompany = async (companyId, id) => {
   if (!id) return undefined;
@@ -118,4 +140,4 @@ const assertPassCompany = async (companyId, id) => {
   return found._id;
 };
 
-module.exports = { listPassCompanies, createPassCompany, updatePassCompany, assertPassCompany, statsFor };
+module.exports = { listPassCompanies, createPassCompany, updatePassCompany, removePassCompany, assertPassCompany, statsFor };

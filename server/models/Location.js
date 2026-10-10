@@ -1,5 +1,5 @@
 const mongoose = require("mongoose");
-const { VEHICLE_TYPES, VEHICLE_KEYS } = require("./constants");
+const { VEHICLE_TYPES, VEHICLE_KEYS, VEHICLE_CLASSES } = require("./constants");
 
 const countsByVehicle = Object.fromEntries(VEHICLE_KEYS.map((key) => [key, { type: Number, default: 0, min: 0 }]));
 
@@ -42,6 +42,21 @@ const locationSchema = new mongoose.Schema(
         laneCode: { type: String, trim: true, maxlength: 30 },
         plazaId: { type: String, trim: true, maxlength: 30 },
         fastagLaneId: { type: String, trim: true, maxlength: 30 },
+        // Lanes: a gate that is a lane has a vehicle `lane` ("Car") and `vehicleType` ("CAR") and goes one way
+        // (`type` ENTRY or EXIT); its name is "Car-Entry". A gate with no `lane` is an old-style gate (see services/laneService.js).
+        lane: { type: String, trim: true, maxlength: 50 },
+        // The vehicles the lane takes, from its vehicle type: a bike lane takes two-wheelers, every other lane four-wheelers.
+        vehicleClass: { type: String, enum: VEHICLE_CLASSES },
+        // The lane's own numbers, given when it is created and editable: the door ("L1D1") and its reader ("L1R1").
+        doorNo: { type: String, trim: true, maxlength: 30 },
+        readerNo: { type: String, trim: true, maxlength: 30 },
+        // FASTag lane: the lane code from the FASTag provider and the lane's details (see the Edit Parking Lane form).
+        fastag: { type: Boolean },
+        gateNo: { type: String, trim: true, maxlength: 20 },
+        floorNo: { type: String, trim: true, maxlength: 20 },
+        direction: { type: String, trim: true, maxlength: 20 },
+        fastagLaneType: { type: String, trim: true, maxlength: 30 },
+        fastagLaneMode: { type: String, trim: true, maxlength: 30 },
         // Serial number of the camera fitted at this lane (for the lane list; the camera itself is set up on the Hardware page).
         cameraSerial: { type: String, trim: true, maxlength: 60 },
         // A lane that is switched off takes no entries or exits and keeps its set-up and history.

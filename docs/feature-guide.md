@@ -48,7 +48,7 @@ A company admin or location admin gives staff a **Login ID** (Users page) so the
 
 ## The Locations table
 
-**Dashboard > Parking Locations** lists every location in one table: parking type, user licence (seats in use / allowed), valid upto with a Renew link to Billing, six gate switches you can tick right there (photo auto capture, print photo, exit amount edit, allow re-entry, print ticket number, print receipt for pass vehicles), auto exit, tariffs, capacity with an Update window, lanes, and Edit and Close. It has search, a records-per-page choice, **Download Excel** and **Print**. Each link opens that location on the right tab: Tariffs, Auto exit, Lanes. **Auto exit** sets, for each vehicle type, how many days a ticket may stay open before the system closes it and what the vehicle still owes; **Run now** applies it at once. No payment is recorded, so follow the amount up yourself. **Lanes** lists every gate with its lane code, FASTag lane, camera serial number, the operators tied to it and the cameras and readers attached to it; it can be searched and is shown ten to a page. An admin can switch a lane on or off there: a lane that is off (shown as De-Active) takes no entries, exits or manual barrier lifts, and keeps its set-up. Lane names must be different from each other (capital letters do not count). Renaming a lane on the Details tab carries the new name to its operators and devices; a lane that operators or devices still use cannot be removed until they are moved (or switch it off instead).
+**Dashboard > Parking Locations** lists every location in one table: parking type, user licence (seats in use / allowed), valid upto with a Renew link to Billing, six gate switches you can tick right there (photo auto capture, print photo, exit amount edit, allow re-entry, print ticket number, print receipt for pass vehicles), auto exit, tariffs, capacity with an Update window, lanes, and Edit and Close. It has search, a records-per-page choice, **Download Excel** and **Print**. Each link opens that location on the right tab: Tariffs, Auto exit, Lanes. **Auto exit** sets, for each vehicle type, how many days a ticket may stay open before the system closes it and what the vehicle still owes; **Run now** applies it at once. No payment is recorded, so follow the amount up yourself. **Lanes:** the **Lanes** tab works like the Parking Lane page of ismartparking.com. On the left, **Create Parking Lane**: choose the vehicle (Lane Name: Bike, Car, Taxi ...), the Lane Type (Entry or Exit), FASTag (NO or YES; YES adds the FASTag Lane Code, Gate No., Floor No., Direction, Lane Type and Lane Mode) and the camera serial number. Each lane is one vehicle going one way, shown as `Car-Entry` or `Bike-Exit`, and gets its own Door/Lane No. and Reader number (the Edit button lets you change them). The list on the right shows, for every lane: Name/Type, Door/Lane No., FASTag, FASTag Lane Code, Reader, Operator, Camera Serial No. (ANPR), and a green **Active** / red **De-Active** button that switches the lane on or off (a lane that is off takes no entries, exits or manual barrier lifts and keeps its set-up). It can be searched, shown 10, 25, 50 or 100 at a time, and paged. A new location starts with a Bike-Entry, Bike-Exit, Car-Entry and Car-Exit lane; a location always needs an entry and an exit lane for 2-wheelers and for 4-wheelers (the tab tells you when one is missing). A lane takes only its own class of vehicle: a bike lane takes 2-wheelers, every other lane 4-wheelers, and the system refuses the other class at entry and at exit. A gate operator is tied to lanes on the **Users** page (tick the entry lane and the exit lane to work both); a lane has one operator, and a lane with none shows "No operator" and cannot be worked. The operator's entry and exit screens open on their own lane and offer only its vehicles. Editing a lane's vehicle or direction renames it, and its operator and devices follow. Locations set up before lanes existed keep their old gates until a lane is added on the Lanes tab.
 
 On the Users page, after choosing the locations someone works at, you can tick the **lanes** (gates) they may use. Nothing ticked at a location means every lane there. A user with lanes only sees those lanes on the Entry and Exit screens, and the server refuses any other lane (entry, exit, open barrier). A lane that does not suit the direction (an exit lane on the entry screen) does not count.
 
@@ -113,13 +113,16 @@ The header has **Bookings (n)** (every customer who booked ahead and has not arr
 
 **Home.** The plan and its valid-till date, the day's money (advances taken, exits, cash, online, UPI, card, FASTag, total) and counts of entries, exits, available and parked, for all vehicles and per vehicle type. Staff who cannot handle money see counts only.
 
-**Vehicle Entry.** One screen in three panels: in the middle the camera, the plate box, the vehicle-type buttons and **Create ticket**; on the left the camera suggestions, the ticket that was just made and customer bookings; on the right **Entry History** with search, Print and Re-Entry. The lane strip on top shows LN, location, plaza, FASTag lane, the parking type, **Open barrier** and the **AUTO ENTRY** switch (hover it for what it does). The location and gate pickers appear only when the operator has a choice. The camera panel says "Connecting to the camera… Attempt n of 5" and tries again by itself before offering **Try again**. The vehicle type chooses itself when the vehicle arrives: from the plate's earlier visits, else from the camera, else from the vehicle type set for that lane (Locations > Details > gates > "Vehicle type of this lane"). The line above the type buttons says where it came from, or asks the operator to check when the camera could not tell. After every ticket the buttons go back to the lane's type, so one vehicle's type never carries over to the next. On the screen:
+**Vehicle Entry.** One screen in three panels: in the middle the camera, the plate box and the vehicle-type buttons (tapping a type creates the ticket); on the left the camera suggestions, the ticket that was just made and customer bookings; on the right **Entry History** with search, Print and Re-Entry. The lane strip on top shows LN, location, plaza, FASTag lane, the parking type, **Open barrier** and the **AUTO ENTRY** switch (hover it for what it does). The location and gate pickers appear only when the operator has a choice. The camera panel says "Connecting to the camera… Attempt n of 5" and tries again by itself before offering **Try again**. The vehicle type chooses itself when the vehicle arrives: from the plate's earlier visits, else from the camera, else from the vehicle type set for that lane (Locations > Details > gates > "Vehicle type of this lane"). The line above the type buttons says where it came from, or asks the operator to check when the camera could not tell. After every ticket the buttons go back to the lane's type, so one vehicle's type never carries over to the next. On the screen:
 * a live camera panel (start it once; it is remembered) and a plate box;
-* large vehicle-type buttons that show how many spaces are free (Car, Bike, Taxi, Coach / Bus / Truck, Tempo / SUV / Mini bus);
+* large vehicle-type buttons that show how many spaces are free (Car, Bike, Taxi, Coach / Bus / Truck, Tempo / SUV / Mini bus). **Tapping a type creates the ticket** for the number in the box, as on ismartparking.com; the Enter key uses the highlighted type (the one the camera, the plate's history or the lane chose);
 * *Capture & read plate* or *Auto-read* fill in the plate for you (the operator always checks it);
 * *Auto entry* (off every time the page opens) creates the ticket by itself when a plate is read at 85% certainty or more with nothing to double-check;
 * *Read from photo* for a picture from a phone;
-* **Create ticket** prints a ticket with a QR code;
+* the ticket (with a QR code) appears beside the form, ready to print;
+* a plate that already has an open ticket opens **Vehicle Already Entered**: Re-Print (the ticket opens again), Re-Entry (cancel it and issue a new one, with the usual re-entry rules), Exit (the Exit screen opens with that ticket looked up) and Close;
+* a plate that holds a monthly pass shows the pass banner as soon as it is typed (not only after the ticket);
+* the AUTO ENTRY and AUTO EXIT switches ask "Sure to enable / disable ...?" first;
 * no payment at entry: the fee is worked out and paid at the exit (a customer's online booking fee paid in advance is still set against it);
 * **customer bookings**: a booked plate shows who booked; *Use for entry* fills the form and marks the booking arrived;
 * a pass banner when the vehicle holds a valid pass;
@@ -129,10 +132,13 @@ The header has **Bookings (n)** (every customer who booked ahead and has not arr
 
 **Vehicle Exit.** The search box is on the left ("Type min 3 characters to search…"; clicking it lists the vehicles inside) and the camera panel sits above **Today's Exit** on the right. (If the location allows it, an *Edit amount* box lets the person change what is collected, with a reason; the change is recorded.)
 * type any part of a vehicle number (3 characters or more) or a ticket or pass code, or scan the QR with the camera or a USB scanner, or tick *Ticket is lost*;
-* the bill shows the fee, any advance already paid and what is still due;
+* the bill shows the vehicle, in time, out time, total time, the fee, any advance already paid and what is still due. For cash the *Amount received* box is selected at once: type what the customer handed over, see "Return ₹n" and press **Enter** to exit;
 * payment by cash (with change to give back), UPI, card, FASTag (recorded, or really charged when a FASTag partner is set up: `docs/fastag.md`), or **online** (a QR payment link that confirms by itself);
 * a pass closes the visit free; a grace period closes it free; an advance that covers the fee releases the vehicle and shows the change to return;
 * *Auto exit* only looks the vehicle up, never takes money;
+* while an online QR or a FASTag charge is waiting for the customer or the partner, **Cancel** is switched off: finish or release that payment first (the vehicle cannot be swapped for another one meanwhile);
+* gate scanner commands: the QR beside **Exit** reads `{OK}` (confirms the exit when the amount is right) and the QR beside **Print bill** reads `{PRINT}`. A USB scanner types them like a keyboard, so no mouse is needed;
+* after the exit the message names the payment mode (for example "Cash exit successful") and **Next vehicle** is already selected, so Enter moves to the next one;
 * after payment: **Print bill** to the gate printer, and the barrier lifts through the gate agent;
 * *Today's exits* table below.
 
@@ -186,6 +192,18 @@ A pass lets a vehicle in and out free for whole calendar days at chosen location
 * Several passes can be extended, re-dated, suspended, resumed or cancelled together (up to 200). No money is taken that way: use Renew for a paid extension.
 * "Receipts" are worked out from the pass payments (taxable value and tax split out; number `passNumber/n`). They are not a separate GST invoice series.
 
+### Pass Management (the ismartparking-style desk)
+
+Pass Management in the menu has five screens, all for people with the pass permission (admins and location admins; a location admin only sees users and passes of their own locations).
+
+* **Pass Users**: number tiles, then the **Create Pass** form (new user with name, mobile, address, email, GST and company, or an existing user; one or more vehicle rows with type, location, valid from/to and charges; cash, UPI or card). Each vehicle becomes its own pass. The list has Vehicles, Passes, Edit and Delete buttons; Delete works only for a user with no passes. A user's **Passes** page re-dates a vehicle's pass (Create / Renew) and **Vehicles** adds or edits plates.
+* **Company Master**: add, edit, switch off and delete companies (delete only when empty), with user and pass counts.
+* **Passes List**: filters (location, company, user, vehicle, type, status), tick boxes, **Update Pass** (new last day and charge; it does not take money), **Print Pass** (cards with QR codes), **Bulk upload** (CSV), Delete, and the **Approved / Pending** button on each row.
+* **Vehicle List**: every vehicle of every pass user with its user, company and mobile.
+* **Manage Invoice**: pick location, company (or no company and a user) and tick passes; a preview with an editable GST % and **Save Invoice**. Pass charges include GST, so the invoice splits the tax out of the total. Numbers start at 100001. An invoice can be printed.
+
+Rules to know: a **Pending** pass gets no free exit (the vehicle pays like anyone else) and cannot be invoiced. **Delete** works only on an unused pass: never used at a gate, no money taken, not on an invoice; otherwise cancel it. Old passes are linked to pass users by their 10-digit mobile number (or name) the first time the screens open. Not built: a pass-user login/password (needs the mobile app), Excel (.xlsx) upload (CSV only), and partner/reseller views.
+
 ## 9. Hardware
 
 Every device has its own key (`hwk_...`, shown once). A gate agent at the site connects outward over HTTPS; no router ports are opened.
@@ -211,6 +229,8 @@ Devices that go quiet are marked Offline with one alert per outage. A failing de
 * **Shifts:** each cashier opens and closes a shift; counted cash is compared with expected cash.
 * **Refunds:** online refunds go through the gateway (location admins); an advance's extra is given back at exit.
 * **Collection by type and mode** and the reports always agree with each other.
+* **Manage Subscriptions:** each location has its own subscription (users, length, add-ons) bought online with GST invoices, renewed, added to part-way, or cancelled. Add-ons (Pass, Photo, ANPR, FASTag, Payment Gateway, backups) unlock the matching features at that location; the Super Admin sets add-on prices. Gates keep working when a subscription lapses. See `docs/billing.md`.
+* **My Orders:** one list of every order of the company (subscriptions, hardware shop, earlier plan orders) with filters, Excel and Print; each order opens its invoice or delivery page. See `docs/billing.md`.
 
 ## 11. Background work
 

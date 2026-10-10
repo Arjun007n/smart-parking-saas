@@ -46,6 +46,21 @@ const rememberVehicle = async (companyId, plateNumber, type, locationId) => {
   }
 };
 
+// The 409 for a vehicle that already has an open ticket. It carries that ticket so the entry screen can offer
+// Re-Print, Re-Entry or Exit ("Vehicle Already Entered"), like ismartparking.com.
+const alreadyInside = (vehicleNumber, session) => {
+  const error = new AppError(`Vehicle ${vehicleNumber} is already inside (ticket ${session.ticketNumber})`, 409);
+  error.data = {
+    code: "ALREADY_INSIDE",
+    session: {
+      _id: session._id, ticketNumber: session.ticketNumber, vehicleNumber: session.vehicleNumber, vehicleType: session.vehicleType,
+      entryTime: session.entryTime, entryGate: session.entryGate, locationId: session.locationId, status: session.status,
+      advance: session.advance && session.advance.amount ? { amount: session.advance.amount, method: session.advance.method } : undefined,
+    },
+  };
+  return error;
+};
+
 // POST /api/parking/entry
 // (see also reEntry below, which cancels a ticket and issues a new one in one step)
 const createEntry = async (req, res) => {
@@ -71,6 +86,7 @@ const createEntry = async (req, res) => {
     if (!known || known.type === "EXIT") throw new AppError("That is not an entry gate of this location", 400);
   }
   lanes.assertLaneActive(location, gate);
+  lanes.assertVehicleFits(location, gate, vehicleType);
 
   if (advance) await advances.assertReferenceFree(advance.transactionId);
 
@@ -84,7 +100,10 @@ const createEntry = async (req, res) => {
 
   const inside = await ParkingSession.findOne({ companyId, vehicleNumber, isOpen: true });
   if (inside) {
-    throw new AppError(`Vehicle ${vehicleNumber} is already inside (ticket ${inside.ticketNumber})`, 409);
+    // The same request arriving again while the first one is being finished (a retry that raced it): the
+    // ticket the first one made is the answer, not an "already inside" refusal.
+    if (idempotencyKey && inside.idempotencyKey === idempotencyKey) return res.json({ success: true, data: { session: inside, repeated: true } });
+    throw alreadyInside(vehicleNumber, inside);
   }
 
   // A pass holder still gets a ticket (the barrier and the records work the
@@ -118,7 +137,8 @@ const createEntry = async (req, res) => {
     if (error.code === 11000) {
       const again = await findRepeat();
       if (again) return res.json({ success: true, data: { session: again, repeated: true } });
-      throw new AppError(`Vehicle ${vehicleNumber} is already inside`, 409);
+      const now = await ParkingSession.findOne({ companyId, vehicleNumber, isOpen: true });
+      throw now ? alreadyInside(vehicleNumber, now) : new AppError(`Vehicle ${vehicleNumber} is already inside`, 409);
     }
     throw error;
   }
@@ -277,6 +297,7 @@ const startExit = async (req, res) => {
     if (!known || known.type === "ENTRY") throw new AppError("That is not an exit gate of this location", 400);
   }
   lanes.assertLaneActive(location, gate);
+  lanes.assertVehicleFits(location, gate, session.vehicleType);
 
   // A FASTag charge that is waiting to be confirmed (or was taken and not yet turned into a payment) fixes
   // the fee: working it out again could leave the customer charged one amount against another fee.

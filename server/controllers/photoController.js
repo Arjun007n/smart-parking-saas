@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const AppError = require("../utils/AppError");
 const audit = require("../services/auditService");
+const subscriptions = require("../services/subscriptionService");
 const storage = require("../services/photoStorage");
 const { MAX_PHOTOS } = require("../services/photoService");
 const { locationScopedFilter } = require("../utils/scope");
@@ -17,6 +18,7 @@ const findSession = async (req) => {
 // The body is the picture itself (Content-Type image/jpeg, image/png or image/webp).
 const addPhoto = async (req, res) => {
   const session = await findSession(req);
+  await subscriptions.assertAddon(session.companyId, session.locationId, "photo");
   const kind = req.query.kind === undefined ? "OTHER" : req.query.kind;
   if (!PHOTO_KINDS.includes(kind)) throw new AppError(`kind must be one of: ${PHOTO_KINDS.join(", ")}`, 400);
 

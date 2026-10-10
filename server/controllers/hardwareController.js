@@ -1,4 +1,5 @@
 // Admin and operator endpoints for devices (called by logged-in users).
+const subscriptions = require("../services/subscriptionService");
 const AppError = require("../utils/AppError");
 const audit = require("../services/auditService");
 const agentPackage = require("../services/agentPackage");
@@ -62,6 +63,11 @@ const createDevice = async (req, res) => {
     throw new AppError("That gate does not exist at this location", 400);
   }
   assertGateFits(location, gate, fields.direction);
+  const counted = { ANPR_CAMERA: "anpr", FASTAG_READER: "fastag" }[fields.type];
+  if (counted) {
+    const already = await Hardware.countDocuments({ locationId: location._id, type: fields.type, isActive: { $ne: false } });
+    await subscriptions.assertAddon(location.companyId, location._id, counted, already + 1);
+  }
 
   const key = hardware.generateDeviceKey();
   let device;

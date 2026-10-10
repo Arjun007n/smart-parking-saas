@@ -1,4 +1,4 @@
-import { useFieldArray, useForm, useWatch } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import LocationPicker from '../maps/LocationPicker'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -6,7 +6,7 @@ import { locationApi } from '../../services/api'
 import { locationDetailsSchema } from '../../validators/schemas'
 import { errorMessage } from '../../utils/errors'
 import { Alert, Button, Checkbox, Field, Select } from '../ui'
-import { CAPACITY_FIELDS, VEHICLE_KEYS, VEHICLE_LABELS } from '../../utils/format'
+import { CAPACITY_FIELDS, VEHICLE_KEYS } from '../../utils/format'
 
 const toForm = (l) => ({
   name: l.name,
@@ -33,9 +33,6 @@ const toForm = (l) => ({
   waitingMinutes: l.onlineBooking?.waitingMinutes || 0,
   cancelBeforeMinutes: l.onlineBooking?.cancelBeforeMinutes || 0,
   fee: Object.fromEntries(VEHICLE_KEYS.map((key) => [key, l.onlineBooking?.fees?.[key] || 0])),
-  gates: l.gates.map((g) => ({
-    _id: g._id, isActive: g.isActive !== false, name: g.name, type: g.type, laneCode: g.laneCode || '', plazaId: g.plazaId || '', fastagLaneId: g.fastagLaneId || '', cameraSerial: g.cameraSerial || '', vehicleType: g.vehicleType || '',
-  })),
 })
 
 const toBody = (v) => {
@@ -54,8 +51,6 @@ const toBody = (v) => {
     // A vehicle type is accepted when it has capacity.
     vehicleTypes: VEHICLE_KEYS.filter((k) => capacity[k] > 0).map((k) => k.toUpperCase()),
     zones: (v.zones || '').split(',').map((z) => z.trim()).filter(Boolean),
-    // A lane with no vehicle type chosen is sent without one, which also clears one saved before.
-    gates: v.gates.map(({ vehicleType, ...gate }) => (vehicleType ? { ...gate, vehicleType } : gate)),
     onlineBooking: {
       enabled: v.onlineEnabled, note: v.onlineNote || '', fees: v.fee,
       waitingMinutes: v.waitingMinutes, cancelBeforeMinutes: v.cancelBeforeMinutes,
@@ -72,7 +67,6 @@ export default function DetailsForm({ location }) {
     setValue,
     formState: { errors },
   } = useForm({ resolver: zodResolver(locationDetailsSchema), defaultValues: toForm(location) })
-  const gates = useFieldArray({ control, name: 'gates' })
   const is24x7 = useWatch({ control, name: 'is24x7' })
   const onlineEnabled = useWatch({ control, name: 'onlineEnabled' })
   const [lat, lng, line1, city, state, pincode] = useWatch({ control, name: ['lat', 'lng', 'line1', 'city', 'state', 'pincode'] })
@@ -145,7 +139,7 @@ export default function DetailsForm({ location }) {
       </fieldset>
 
       <fieldset>
-        <legend className="mb-3 text-sm font-semibold text-slate-900">Zones and gates</legend>
+        <legend className="mb-3 text-sm font-semibold text-slate-900">Zones</legend>
         <Field
           label="Zones / floors"
           placeholder="Basement 1, Basement 2, Open area"
@@ -153,41 +147,6 @@ export default function DetailsForm({ location }) {
           error={errors.zones?.message}
           {...register('zones')}
         />
-        <div className="mt-4 space-y-3">
-          {gates.fields.map((gate, i) => (
-            <div key={gate.id} className="flex flex-wrap items-end gap-3">
-              <Field
-                className="min-w-40 flex-1"
-                label={`Gate ${i + 1} name`}
-                error={errors.gates?.[i]?.name?.message}
-                {...register(`gates.${i}.name`)}
-              />
-              <Select label="Used for" {...register(`gates.${i}.type`)}>
-                <option value="BOTH">Entry and exit</option>
-                <option value="ENTRY">Entry only</option>
-                <option value="EXIT">Exit only</option>
-              </Select>
-              <Button type="button" variant="danger" onClick={() => gates.remove(i)}>
-                Remove
-              </Button>
-              <div className="grid w-full gap-3 sm:grid-cols-5">
-                <Select label="Vehicle type of this lane" {...register(`gates.${i}.vehicleType`)}>
-                  <option value="">Any (camera decides)</option>
-                  {Object.entries(VEHICLE_LABELS).map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </Select>
-                <Field label="Lane code" hint="Optional, e.g. L1" error={errors.gates?.[i]?.laneCode?.message} {...register(`gates.${i}.laneCode`)} />
-                <Field label="Plaza ID" hint="Optional" error={errors.gates?.[i]?.plazaId?.message} {...register(`gates.${i}.plazaId`)} />
-                <Field label="FASTag lane ID" hint="Optional, from your FASTag provider" error={errors.gates?.[i]?.fastagLaneId?.message} {...register(`gates.${i}.fastagLaneId`)} />
-                <Field label="Camera serial no." hint="Optional" error={errors.gates?.[i]?.cameraSerial?.message} {...register(`gates.${i}.cameraSerial`)} />
-              </div>
-            </div>
-          ))}
-          <Button type="button" variant="secondary" onClick={() => gates.append({ name: '', type: 'BOTH', laneCode: '', plazaId: '', fastagLaneId: '', cameraSerial: '', vehicleType: '', isActive: true })}>
-            Add gate
-          </Button>
-        </div>
       </fieldset>
 
       <fieldset>

@@ -41,6 +41,8 @@ const errorHandler = (err, req, res, next) => {
     message: error.isOperational ? error.message : "Something went wrong",
   };
   if (error.errors) body.errors = error.errors;
+  // Extra facts a screen can act on (for example the ticket a vehicle already has).
+  if (error.isOperational && error.data) body.data = error.data;
   // Internal error details are shown only in development and test.
   if (!error.isOperational && env.isDevLike) body.debug = err.message;
 

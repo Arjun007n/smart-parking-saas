@@ -159,31 +159,6 @@ export const locationDetailsSchema = z.object({
   waitingMinutes: z.number({ error: 'Enter minutes (0 for the standard time)' }).int().min(0).max(4320, 'At most 3 days (4320 minutes)').refine((v) => v === 0 || v >= 5, 'At least 5 minutes, or 0 for the standard time'),
   cancelBeforeMinutes: z.number({ error: 'Enter minutes (0 if customers cannot cancel)' }).int().min(0).max(10080, 'At most 7 days'),
   fee: z.object(Object.fromEntries(['car', 'bike', 'heavy', 'taxi', 'tempo'].map((key) => [key, z.number({ error: 'Enter an amount' }).min(0, 'Cannot be negative').max(100000, 'Too large')]))),
-  gates: z
-    .array(
-      z.object({
-        // Set for lanes that already exist, so the server can tell a rename from a removal.
-        _id: z.string().optional(),
-        isActive: z.boolean().optional(),
-        name: z.string().trim().min(1, 'Gate name is required').max(50),
-        type: z.enum(['ENTRY', 'EXIT', 'BOTH']),
-        laneCode: z.string().trim().max(30).optional(),
-        plazaId: z.string().trim().max(30).optional(),
-        fastagLaneId: z.string().trim().max(30).optional(),
-        cameraSerial: z.string().trim().max(60).optional(),
-        // The kind of vehicle this lane is for; '' = any.
-        vehicleType: z.enum(['', 'CAR', 'BIKE', 'HEAVY', 'TAXI', 'TEMPO']).optional(),
-      }),
-    )
-    // Two lanes cannot share a name (capital letters do not make a name different).
-    .superRefine((lanes, ctx) => {
-      const seen = new Set()
-      lanes.forEach((lane, i) => {
-        const key = lane.name.trim().toLowerCase()
-        if (key && seen.has(key)) ctx.addIssue({ code: 'custom', path: [i, 'name'], message: 'Another lane already has this name' })
-        seen.add(key)
-      })
-    }),
 })
 
 export const slotBulkSchema = z.object({

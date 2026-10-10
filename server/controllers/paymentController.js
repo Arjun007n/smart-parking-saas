@@ -1,3 +1,4 @@
+const subscriptions = require("../services/subscriptionService");
 const mongoose = require("mongoose");
 const AppError = require("../utils/AppError");
 const audit = require("../services/auditService");
@@ -69,6 +70,9 @@ const createPayment = async (req, res) => {
 
   const session = await ParkingSession.findOne({ $and: [{ _id: sessionId }, locationScopedFilter(req)] });
   if (!session) throw new AppError("Parking session not found", 404);
+  if (session.isOpen && (method === "GATEWAY" || method === "FASTAG")) {
+    await subscriptions.assertAddon(session.companyId, session.locationId, method === "GATEWAY" ? "gateway" : "fastag");
+  }
   if (!session.isOpen) {
     // The same operator sending the same payment again (for example a retry
     // after a lost connection) gets the original result, not an error, and

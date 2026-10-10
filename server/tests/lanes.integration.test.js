@@ -27,7 +27,7 @@ it("setup: a company, a location with two lanes, a car tariff", async () => {
 it("two lanes cannot share a name, capital letters included", async () => {
   const same = await put({ gates: [{ name: "In 1" }, { name: "in 1" }] });
   assert.equal(same.status, 400);
-  assert.match(same.body.message, /In 1/);
+  assert.match(same.body.message, /in 1/i, "the message names the repeated lane");
   const created = await api("POST", "/api/locations", {
     token: s.a.token, body: { name: "Dup", address: { line1: "x" }, gates: [{ name: "A" }, { name: "a" }] },
   });

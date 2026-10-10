@@ -12,6 +12,7 @@ import { Alert, Badge, Button, Card, Field, PageLoader } from '../../components/
 import { dateOnly } from '../../utils/format'
 import printTable from '../../utils/printTable'
 import { OPERATION_DEFAULTS } from '../../utils/operations'
+import { defaultGates, laneCount } from '../../utils/lanes'
 import { CAPACITY_FIELDS } from '../../utils/format'
 
 const DEFAULTS = { name: '', line1: '', city: '', state: '', pincode: '', car: 0, bike: 0, heavy: 0, taxi: 0, tempo: 0 }
@@ -31,6 +32,8 @@ function CreateLocationForm({ onDone }) {
         name,
         address: { line1, city, state, pincode },
         capacity: { car, bike, heavy, taxi, tempo },
+        // Every location starts with an entry lane and an exit lane for 2-wheelers (Bike) and for 4-wheelers (Car).
+        gates: defaultGates(),
       }),
     onSuccess: (location) => {
       queryClient.invalidateQueries({ queryKey: ['locations'] })
@@ -178,7 +181,7 @@ function LocationRow({ location, index, licence, validUpto, editable, canClose, 
           <>
             <span className={expired ? 'font-semibold text-red-600' : 'font-semibold text-green-700'}>{dateOnly(validUpto)}</span>
             <br />
-            <Link to="/dashboard/billing" className={linkClass}>Renew</Link>
+            <Link to="/dashboard/subscriptions" className={linkClass}>Renew</Link>
           </>
         ) : '—'}
       </td>
@@ -195,7 +198,7 @@ function LocationRow({ location, index, licence, validUpto, editable, canClose, 
         {total(location.capacity)}
         {editable && <> <button type="button" className={linkClass} onClick={() => onCapacity(location)}>Update</button></>}
       </td>
-      <td className="px-2 py-2 text-center"><Link to={detail('lanes')} className={linkClass}>{(location.gates || []).length} lane{(location.gates || []).length === 1 ? '' : 's'}</Link></td>
+      <td className="px-2 py-2 text-center"><Link to={detail('lanes')} className={linkClass}>{laneCount(location)} lane{laneCount(location) === 1 ? '' : 's'}</Link></td>
       <td className="whitespace-nowrap px-2 py-2 print:hidden">
         <Link to={`/dashboard/locations/${location._id}`} className={linkClass}>Edit</Link>
         {canClose && location.isActive && (

@@ -34,11 +34,16 @@ const MENU = [
   {
     label: 'Pass Management', icon: 'card',
     children: [
+      { to: '/dashboard/pass-management/users', label: 'Pass Users', permission: 'PASS_MANAGE' },
+      { to: '/dashboard/pass-management/companies', label: 'Company Master', permission: 'PASS_MANAGE' },
+      { to: '/dashboard/pass-management/passes', label: 'Passes List', permission: 'PASS_MANAGE' },
+      { to: '/dashboard/pass-management/vehicles', label: 'Vehicle List', permission: 'PASS_MANAGE' },
+      { to: '/dashboard/pass-management/invoices', label: 'Manage Invoice', permission: 'PASS_MANAGE' },
       { to: '/dashboard/passes', label: 'Monthly Passes', permission: 'PASS_MANAGE' },
       { to: '/dashboard/wallets', label: 'Wallets', permission: 'WALLET_MANAGE' },
     ],
   },
-  { label: 'Manage Subscriptions', icon: 'calendar', to: '/dashboard/billing', permission: 'COMPANY_MANAGE', needsCompany: true },
+  { label: 'Manage Subscriptions', icon: 'calendar', to: '/dashboard/subscriptions', permission: 'COMPANY_MANAGE', needsCompany: true },
   { label: 'My Orders', icon: 'cart', to: '/dashboard/orders', permission: 'COMPANY_MANAGE', needsCompany: true },
   {
     label: 'Setting', icon: 'gear',
@@ -52,6 +57,7 @@ const MENU = [
     children: [
       { to: '/dashboard/website', label: 'Website', permission: 'PLATFORM_MANAGE' },
       { to: '/dashboard/shop', label: 'Hardware Shop', permission: 'PLATFORM_MANAGE' },
+      { to: '/dashboard/subscription-prices', label: 'Subscription Prices', permission: 'PLATFORM_MANAGE' },
     ],
   },
 ]

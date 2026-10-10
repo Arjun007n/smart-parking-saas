@@ -161,7 +161,7 @@ export default function Company() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-slate-900">Company</h1>
 
-      <Card title="Plan and subscription" action={<Link to="/dashboard/billing" className="text-sm font-semibold text-blue-700 hover:underline">Buy or renew a plan</Link>}>
+      <Card title="Plan and subscription" action={<Link to="/dashboard/subscriptions" className="text-sm font-semibold text-blue-700 hover:underline">Buy or renew a plan</Link>}>
         <dl className="grid gap-4 text-sm sm:grid-cols-4">
           <div>
             <dt className="text-slate-500">Status</dt>

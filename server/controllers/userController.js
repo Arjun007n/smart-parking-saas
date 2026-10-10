@@ -54,11 +54,15 @@ const cleanLoginId = (value) => {
   return loginId;
 };
 
-// Checks the lanes chosen for a user against the locations they work at.
-const checkLanes = async (companyId, lanes, locationIds) => {
-  if (!lanes.length) return [];
+// Checks the lanes chosen for a user against the locations they work at. At a location set up with lanes,
+// gate staff get exactly one lane (both its gates), a lane has one operator, and staff must have a lane.
+const checkLanes = async (companyId, lanes, locationIds, { role, userId, active = true } = {}) => {
+  if (!lanes.length && !locationIds.length) return [];
   const locations = await Location.find({ companyId, _id: { $in: locationIds } }).select("name gates").lean();
-  return lanesService.checkAssignment(lanes, locations, locationIds);
+  const clean = lanes.length ? lanesService.checkAssignment(lanes, locations, locationIds) : [];
+  const ruled = await lanesService.applyLaneRules({ role, userId, clean, locations });
+  if (active) lanesService.requireLaneForStaff({ role, lanes: ruled, locations });
+  return ruled;
 };
 
 const findManageable = async (req) => {
@@ -160,7 +164,7 @@ const createUser = async (req, res) => {
   const locationIds = await checkLocations(req.user, req.companyId, req.body.locationIds || []);
   if (officer && !locationIds.length) throw new AppError("Choose the locations this officer may see", 400);
   if (!officer) await licences.assertRoom(req.companyId, locationIds);
-  const lanes = await checkLanes(req.companyId, req.body.lanes || [], locationIds);
+  const lanes = await checkLanes(req.companyId, req.body.lanes || [], locationIds, { role });
 
   const user = await User.create({
     companyId: req.companyId, name, email, loginId, phone, password, role, locationIds, lanes,
@@ -274,10 +278,10 @@ const updateUser = async (req, res) => {
     changed.push("isActive");
   }
   // Lanes: what was sent, or what is left of the old ones after the locations changed.
-  if (req.body.lanes !== undefined || locationIds !== undefined) {
+  if (req.body.lanes !== undefined || locationIds !== undefined || changed.includes("role")) {
     const wanted = req.body.lanes !== undefined ? req.body.lanes : user.lanes.map((l) => ({ locationId: String(l.locationId), gate: l.gate }));
     const stillThere = wanted.filter((l) => user.locationIds.map(String).includes(String(l.locationId)));
-    user.lanes = await checkLanes(user.companyId, stillThere, user.locationIds);
+    user.lanes = await checkLanes(user.companyId, stillThere, user.locationIds, { role: user.role, userId: user._id, active: user.isActive });
     changed.push("lanes");
   }
   // Seats: adding someone to a location, or switching them back on, must fit the location's licence.

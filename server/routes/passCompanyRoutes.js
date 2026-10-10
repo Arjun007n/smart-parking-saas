@@ -20,5 +20,6 @@ router.use(protect, tenant, requirePermission(P.PASS_MANAGE));
 router.get("/", controller.listPassCompanies);
 router.post("/", requireCompany, validateBody(fields(true)), controller.createPassCompany);
 router.put("/:id", validateIdParam(), validateBody(fields(false)), controller.updatePassCompany);
+router.delete("/:id", validateIdParam(), controller.removePassCompany);
 
 module.exports = router;

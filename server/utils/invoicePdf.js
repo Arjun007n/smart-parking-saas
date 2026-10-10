@@ -131,6 +131,18 @@ const buildInvoicePdf = (invoice, { offsetMinutes = 330 } = {}) => {
     y -= Math.max(1, descLines.length) * 12;
     text(cols.desc, y, `Service period: ${dateText(invoice.periodStart, offsetMinutes)} to ${dateText(invoice.periodEnd, offsetMinutes)}`, { size: 8, gray: 0.4 });
     y -= 18;
+    // A location subscription lists what it is made of (users and add-ons) with the taxable value of each.
+    if (invoice.kind === "PLAN" && Array.isArray(invoice.lines) && invoice.lines.length > 0) {
+      text(cols.desc, y, "Items (taxable value, after discount)", { size: 8, bold: true });
+      y -= 13;
+      for (const line of invoice.lines.slice(0, 14)) {
+        text(cols.desc + 8, y, wrap(line.description || "", 250, 8)[0] || "", { size: 8 });
+        text(cols.qty, y, `${line.qty} x ${money(line.rate)}`, { size: 8 });
+        text(cols.amount, y, money(line.taxable), { size: 8, right: true });
+        y -= 12;
+      }
+      y -= 6;
+    }
     rule(y + 8);
   }
 

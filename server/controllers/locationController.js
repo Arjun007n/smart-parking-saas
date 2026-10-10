@@ -57,7 +57,7 @@ const createLocation = async (req, res) => {
     );
   }
 
-  if (req.body.gates) req.body.gates = (await lanes.planGateChange({ gates: [] }, req.body.gates)).gates;
+  if (req.body.gates) req.body.gates = (await lanes.planGateChange({ gates: [] }, req.body.gates, { companyId: req.companyId })).gates;
 
   // companyId always comes from the logged-in user, never from the request body.
   const location = await Location.create({ ...req.body, companyId: req.companyId });
@@ -74,7 +74,7 @@ const updateLocation = async (req, res) => {
   // Lane names must be unique, and a lane that operators or devices use cannot be dropped.
   let renames = [];
   if (simple.gates) {
-    const plan = await lanes.planGateChange(location, simple.gates);
+    const plan = await lanes.planGateChange(location, simple.gates, { companyId: location.companyId });
     simple.gates = plan.gates;
     ({ renames } = plan);
   }
@@ -136,6 +136,30 @@ const listLanes = async (req, res) => {
     limit: typeof limit === "string" ? limit : 10,
   });
   res.json({ success: true, data });
+};
+
+// POST /api/locations/:id/lanes: the Create Parking Lane form.
+const createLane = async (req, res) => {
+  const location = await findInScope(req);
+  const lane = await lanes.addLane(location, req.body);
+  await location.save();
+  await audit.record(req, "LOCATION_LANE_ADD", {
+    entity: "Location", entityId: location._id, companyId: location.companyId, meta: { lane: lane.name, doorNo: lane.doorNo },
+  });
+  res.status(201).json({ success: true, data: lane });
+};
+
+// PUT /api/locations/:id/lanes/:laneId: the Edit Parking Lane form.
+const updateLane = async (req, res) => {
+  const location = await findInScope(req);
+  const renames = await lanes.editLane(location, req.params.laneId, req.body);
+  await location.save();
+  await lanes.applyRenames(location, renames);
+  const lane = location.gates.id(req.params.laneId);
+  await audit.record(req, "LOCATION_LANE_EDIT", {
+    entity: "Location", entityId: location._id, companyId: location.companyId, meta: { lane: lane.name, changed: Object.keys(req.body) },
+  });
+  res.json({ success: true, data: lane });
 };
 
 // PATCH /api/locations/:id/lanes/:laneId/status {isActive}: switches one lane on or off.
@@ -245,4 +269,4 @@ const resetReEntryCounter = async (req, res) => {
   res.json({ success: true, data: await reEntries.overview(location) });
 };
 
-module.exports = { listLanes, setLaneStatus, reEntryCounter, resetReEntryCounter, exportLocations, runAutoExit, listLocations, getLocation, createLocation, updateLocation, deactivateLocation };
+module.exports = { listLanes, createLane, updateLane, setLaneStatus, reEntryCounter, resetReEntryCounter, exportLocations, runAutoExit, listLocations, getLocation, createLocation, updateLocation, deactivateLocation };

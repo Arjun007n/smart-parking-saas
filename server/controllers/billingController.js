@@ -45,7 +45,7 @@ const summary = async (req, res) => {
   const company = await companyOf(req);
   const [activeUsers, orders, invoices] = await Promise.all([
     User.countDocuments({ companyId: company._id, isActive: true }),
-    PlanOrder.find({ companyId: company._id }).sort({ createdAt: -1 }).limit(10),
+    PlanOrder.find({ companyId: company._id, locationId: { $exists: false } }).sort({ createdAt: -1 }).limit(10),
     Invoice.find({ companyId: company._id, kind: { $ne: "SHOP" } }).sort({ issuedAt: -1 }).limit(50).select("number issuedAt description total periodStart periodEnd taxType"),
   ]);
   const provider = gateway.provider();

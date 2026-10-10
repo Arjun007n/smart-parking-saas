@@ -19,6 +19,62 @@
   (only `SUSPENDED` and `CANCELLED` block). Trial expiry is still not enforced.
 * Adding users mid-period is not pro-rated: buy again; the new user count applies immediately.
 
+## Manage Subscriptions (Dashboard > Manage Subscriptions)
+
+A subscription belongs to one **location**: users, a length (1 to 60 months) and add-ons. The screens follow
+ismartparking.com: a list of locations, a location page (Renew Now with a countdown, Running Subscriptions,
+Order History), the new-subscription builder, Renew, "View & Add More Addons", the order page with the
+receipt / GST invoice, and Cancel.
+
+* **Prices:** users Rs 499 per month (`config/pricing.js`). Add-ons are in `server/config/addons.js`: Vehicle
+  Pass Management 250, Vehicle Photo Capture 500, ANPR Camera Service 500 per camera, Fastag Parking Service
+  500 per lane, Payment Gateway Service 300, Parking Data Backup 200 per month kept beyond the free first month,
+  Vehicle Photo Backup 800 per month kept; all per month, before 18% GST. The Super Admin can change an add-on
+  price under Platform > Subscription Prices (`AddonPrice` rows); an order keeps the price it was made at.
+  There is no AI add-on.
+* **A new subscription** is (users x user price + add-ons) x months, less the plan-length discount (the same
+  table as above, taken off every item), plus GST. It starts when the location's running subscription ends,
+  or now. The location's user licence is set to the users bought.
+* **Renew** repeats the subscription for 1 to 60 months, from its end date (or from today once it has ended).
+* **View & Add More Addons** adds users, turns on pass, photo or gateway, adds cameras or lanes, or keeps
+  backups longer, for the rest of the period: new part x days left / 30, no plan-length discount. Nothing can be
+  taken away in the middle of a period; a subscription that has ended or not started cannot be added to.
+* **Cancel** needs a reason and does not refund. The trial or earlier company plan appears as a subscription
+  with every add-on (`legacy`); it cannot be renewed, added to or cancelled. A subscription that was bought
+  replaces the trial at its location.
+* **Payment and invoice** use the same gateway, webhook, "money is truth" rules and GST invoice as above; the
+  invoice lists the items with their taxable values. A paid subscription order sets the company `ACTIVE`.
+* **What each add-on unlocks** (checked on the server, `subscriptionService.assertAddon`): selling, renewing
+  passes (Pass); vehicle photos (Photo); adding ANPR camera or FASTag reader devices up to the number bought
+  (ANPR, Fastag); taking a gateway payment and online booking fees (Gateway), and FASTag payments (Fastag).
+  Backup months are recorded and priced; nothing deletes data on that basis yet.
+* **When it lapses:** a location with no running subscription loses those features (a clear message points
+  to Manage Subscriptions), including after the free trial ends. Gates keep working: entry, exit, cash, UPI and
+  card payments are never blocked.
+* Locations with no subscription of their own follow the company (trial or earlier plan) until the company buys
+  its first subscription; after that a location added later needs its own.
+
+Not built: partner code, Add to Cart, choosing the gateway, the Valet plan, an AI camera add-on. The backup
+prices and the day-count for part-month charges are our own choices (ismartparking does not publish them).
+The old Dashboard > Billing page and company-wide checkout remain for the website's "Buy this plan" flow.
+
+## My Orders (Dashboard > My Orders)
+
+"Orders History List", like ismartparking.com: one table of every order of the company, newest first, with Show N
+entries, search by order number, a Payment Status filter (we add a Type filter), Download Excel (a CSV that opens
+in Excel; it holds every matching row) and Print (the rows on the page). Columns: SN, Date, Order Number, Type,
+Invoice, Details, Items, Quantity, Amount, Payment Status. A paid order shows a **View** button (it opens the
+order with the invoice); an order that is waiting for payment shows **Pending**.
+
+* It lists subscription orders of all locations, hardware shop orders and the earlier company-wide plan orders
+  (those open the old Billing page). Orders that were never paid are listed too (ismartparking hides them), so the
+  Pending, Failed and Cancelled filters have something to show. There is no Refunded filter or credit note because
+  there is no refund flow for subscription orders yet.
+* The order page (`/dashboard/subscriptions/orders/:id`) follows theirs: order number, status, payment, date and
+  source, invoice number and date, the subscription detail table (order id, item, quantity, months, price, discount,
+  taxable amount, taxes, tax amount, total), the payment transaction and order ids, the Receipt / Invoice window
+  (print or PDF), and the customer, billing and shipping blocks. Back returns to My Orders when you came from it.
+
 ## GST invoices
 
 * One `Invoice` per paid order, numbered `SP/26-27/00001` (financial year April to March).

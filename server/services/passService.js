@@ -43,9 +43,12 @@ const passState = (pass, now = new Date()) => {
 const coversLocation = (pass, locationId) =>
   !pass.locationIds || pass.locationIds.length === 0 || pass.locationIds.some((id) => String(id) === String(locationId));
 
+// A pass waits for approval when an admin has set it to PENDING (old passes have no such field: approved).
+const isApproved = (pass) => !pass || pass.approval !== "PENDING";
+
 // True when this pass lets its vehicle through at this location right now.
 const isValidAt = (pass, locationId, now = new Date()) =>
-  Boolean(pass) && passState(pass, now) === "ACTIVE" && coversLocation(pass, locationId);
+  Boolean(pass) && isApproved(pass) && passState(pass, now) === "ACTIVE" && coversLocation(pass, locationId);
 
 // The vehicles of a pass, also for old passes that only have vehicleNumber.
 const passVehicles = (pass) =>
@@ -63,6 +66,7 @@ const summarize = (pass, locationId, now = new Date()) => {
     passType: pass.passType || "REGULAR",
     holderName: pass.holderName,
     state,
+    approval: isApproved(pass) ? "APPROVED" : "PENDING",
     validHere: isValidAt(pass, locationId, now),
     coversHere: coversLocation(pass, locationId),
     startDate: pass.startDate,
@@ -100,6 +104,19 @@ const newPeriod = ({ startText, months, unit, count, now = new Date() }) => {
   const term = resolveTerm({ months, unit, count });
   const start = startText ? dayRange(startText).start : startOfLocalDay(now);
   return { start, end: endOfTerm(start, term), ...term };
+};
+
+// A period given as two calendar days, first and last both included ("Valid From" and "Valid To").
+// Counts as days: a pass from 1 to 30 September is 30 days.
+const MAX_SPAN_DAYS = 1100;
+const datedPeriod = ({ from, to, now = new Date() }) => {
+  if (!to) throw new AppError("Enter the date the pass is valid up to", 400);
+  const start = from ? dayRange(from).start : startOfLocalDay(now);
+  const end = dayRange(to).end; // the pass runs through the whole last day
+  if (end <= start) throw new AppError("The last day must not be before the first day", 400);
+  const count = Math.round((end - start) / DAY);
+  if (count > MAX_SPAN_DAYS) throw new AppError(`A pass can last at most ${MAX_SPAN_DAYS} days`, 400);
+  return { start, end, unit: "DAY", count };
 };
 
 // The period a renewal buys. A pass that is still running is extended from its
@@ -192,6 +209,7 @@ const scopeFilter = (req) => {
 
 module.exports = {
   scopeFilter,
+  isApproved, datedPeriod, MAX_SPAN_DAYS,
   PASS_PATTERN, MAX_MONTHS, UNIT_LIMITS, resolveTerm, endOfTerm, passVehicles, backfillVehicles, generatePassNumber, passState, coversLocation, isValidAt, summarize,
   newPeriod, renewalPeriod, taxIncluded, findCurrentPass, createPassWithNumber, checkPassExpiry,
 };

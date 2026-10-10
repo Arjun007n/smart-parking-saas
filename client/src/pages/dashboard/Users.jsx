@@ -14,6 +14,8 @@ import { Alert, Badge, Button, Card, Checkbox, Field, PageLoader, Select } from 
 
 // The role of a government officer (reports only).
 const OFFICER = 'GOVERNMENT_OFFICER'
+// Gate staff work one lane at a location that has lanes.
+const GATE_STAFF = ['GATE_OPERATOR', 'ENTRY_OPERATOR', 'EXIT_OPERATOR']
 
 const DEFAULTS = {
   name: '', email: '', loginId: '', phone: '', password: '', role: '', locationIds: [], lanes: [],
@@ -76,18 +78,22 @@ function useRefreshUsers() {
 const laneKey = (locationId, gate) => `${locationId}|${gate}`
 const asList = (value) => [].concat(value || []).filter(Boolean)
 
-// Lanes: tie the user to particular lanes of the locations they work at. Nothing ticked at a
-// location means every lane of it.
-function LanePicker({ locations, selected, lanes, onChange }) {
+// Lanes: tie the user to particular lanes (Car-Entry, Bike-Exit ...) of the locations they work at. A gate
+// operator at a location with lanes needs at least one lane (tick both the entry and the exit lane to work
+// both), and a lane has one operator. For anyone else, nothing ticked at a location means every lane of it.
+function LanePicker({ locations, selected, lanes, onChange, role }) {
   const chosen = asList(selected)
   const withLanes = locations.filter((l) => chosen.includes(l._id) && (l.gates || []).length > 0)
   if (!withLanes.length) return null
   const toggle = (key) => onChange(lanes.includes(key) ? lanes.filter((k) => k !== key) : [...lanes, key])
+  const staff = GATE_STAFF.includes(role)
   return (
     <fieldset>
-      <legend className="mb-1 text-sm font-medium text-slate-700">Lanes (optional)</legend>
+      <legend className="mb-1 text-sm font-medium text-slate-700">Lanes{staff ? '' : ' (optional)'}</legend>
       <p className="mb-2 text-xs text-slate-500">
-        Tick the lanes this person works. If nothing is ticked at a location, they can use all of its lanes.
+        {staff
+          ? 'A gate operator works the lanes ticked here: tick the entry lane and the exit lane to handle both. A lane has one operator.'
+          : 'Tick the lanes this person works. If nothing is ticked at a location, they can use all of its lanes.'}
       </p>
       <div className="space-y-2">
         {withLanes.map((location) => (
@@ -99,7 +105,7 @@ function LanePicker({ locations, selected, lanes, onChange }) {
                 <label key={key} className="flex items-center gap-2 text-sm text-slate-700">
                   <input type="checkbox" className="h-4 w-4" checked={lanes.includes(key)} onChange={() => toggle(key)} />
                   {gate.name}
-                  <span className="text-xs text-slate-500">{gate.type === 'BOTH' ? 'entry + exit' : gate.type.toLowerCase()}</span>
+                  <span className="text-xs text-slate-500">{gate.doorNo || (gate.type === 'BOTH' ? 'entry + exit' : gate.type.toLowerCase())}</span>
                 </label>
               )
             })}
@@ -176,6 +182,7 @@ function AssignmentFields({ register, errors, watch, setValue, roles, customRole
             selected={watch('locationIds')}
             lanes={asList(watch('lanes'))}
             onChange={(next) => setValue('lanes', next, { shouldDirty: true })}
+            role={role}
           />
 
           <fieldset className="grid gap-4 sm:grid-cols-3">
@@ -394,7 +401,7 @@ const GATE_USE = { ENTRY: 'Entry', EXIT: 'Exit', BOTH: 'Entry + Exit' }
 const laneLines = (user, locations) =>
   (user.lanes || []).map((lane, i) => {
     const gate = (locations.find((l) => l._id === lane.locationId)?.gates || []).find((g) => g.name === lane.gate)
-    return `${i + 1}. ${lane.gate}${gate ? ` (${GATE_USE[gate.type] || gate.type})` : ''}`
+    return `${i + 1}. ${lane.gate}${gate ? ` (${gate.doorNo || GATE_USE[gate.type] || gate.type})` : ''}`
   })
 
 function UserRow({ user, index, locationNames, locations, onEdit }) {
@@ -515,7 +522,7 @@ function Licences({ editable }) {
       title="User licences"
       action={
         editable && (
-          <Link to="/dashboard/billing" className="text-sm font-semibold text-blue-700 hover:underline">
+          <Link to="/dashboard/subscriptions" className="text-sm font-semibold text-blue-700 hover:underline">
             Buy or renew users
           </Link>
         )

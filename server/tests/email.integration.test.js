@@ -204,9 +204,10 @@ it("pass holder: an address on a pass gets a confirmation, a renewal notice and 
   await emailService.flush();
   assert.match(email.outbox[0].subject, /renewed/);
 
-  // No address: nothing for the holder.
+  // No address: nothing for the holder. (A different person: a second pass for the same holder
+  // would be sent to the address already on that pass user.)
   reset();
-  const quiet = await sell({ vehicleNumber: "RJ14EM0002" });
+  const quiet = await sell({ vehicleNumber: "RJ14EM0002", holderName: "Ben Thomas" });
   assert.equal(quiet.status, 201);
   await emailService.flush();
   assert.equal(email.outbox.filter((m) => m.to[0].endsWith("asha@example.com")).length, 0);

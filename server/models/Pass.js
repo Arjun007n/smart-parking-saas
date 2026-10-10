@@ -2,6 +2,8 @@ const mongoose = require("mongoose");
 const { VEHICLE_TYPES } = require("./constants");
 
 const PASS_STATUSES = ["ACTIVE", "SUSPENDED", "CANCELLED"];
+// APPROVED passes work at the gate; a PENDING pass is on the list but the vehicle still pays the tariff.
+const PASS_APPROVALS = ["APPROVED", "PENDING"];
 // What kind of customer the pass is for. Only a label for filtering and
 // reports; the rules (validity, locations, free parking) are the same.
 const PASS_TYPES = ["REGULAR", "EMPLOYEE", "RESIDENT", "VIP", "CORPORATE"];
@@ -46,6 +48,13 @@ const passSchema = new mongoose.Schema(
     locationIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "Location" }],
     passNumber: { type: String, required: true, unique: true },
     passType: { type: String, enum: PASS_TYPES, default: "REGULAR" },
+    // Who holds the pass (models/PassUser.js). Passes made before pass users existed get one on first use.
+    passUserId: { type: mongoose.Schema.Types.ObjectId, ref: "PassUser" },
+    approval: { type: String, enum: PASS_APPROVALS, default: "APPROVED" },
+    // What the pass cost for its current period (set when sold, renewed or re-dated).
+    amount: { type: Number, min: 0 },
+    // The GST invoice this pass is billed on; cleared when the pass is renewed so the new period can be billed.
+    passInvoiceId: { type: mongoose.Schema.Types.ObjectId, ref: "PassInvoice" },
     // The firm or society this pass was bought for (see models/PassCompany.js). Optional.
     passCompanyId: { type: mongoose.Schema.Types.ObjectId, ref: "PassCompany" },
     // The vehicles that may use this pass (at most `maxVehicles`). The first
@@ -112,9 +121,11 @@ passSchema.index({ companyId: 1, endDate: 1 });
 passSchema.index({ companyId: 1, locationIds: 1 });
 passSchema.index({ companyId: 1, holderName: 1 });
 passSchema.index({ companyId: 1, passCompanyId: 1 }, { sparse: true });
+passSchema.index({ companyId: 1, passUserId: 1 }, { sparse: true });
 
 module.exports = mongoose.model("Pass", passSchema);
 module.exports.PASS_STATUSES = PASS_STATUSES;
+module.exports.PASS_APPROVALS = PASS_APPROVALS;
 module.exports.PASS_TYPES = PASS_TYPES;
 module.exports.PASS_UNITS = PASS_UNITS;
 module.exports.MAX_PASS_VEHICLES = MAX_PASS_VEHICLES;

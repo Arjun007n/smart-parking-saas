@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { parkingApi } from '../../services/api'
+import { useNavigate } from 'react-router-dom'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { parkingApi, passApi } from '../../services/api'
 import { useAuth } from '../../hooks/useAuth'
 import { useToast } from '../../hooks/useToast'
 import { playCue } from '../../utils/sound'
 import { markLocalAction } from '../../utils/localAction'
 import { rememberLocation, useMyLocations } from '../../hooks/useMyLocations'
 import { initialLane, useRememberLane } from '../../hooks/useLane'
+import { gateTakes } from '../../utils/lanes'
 import { useGateCamera } from '../../hooks/useGateCamera'
 import { entrySchema } from '../../validators/schemas'
 import { errorMessage } from '../../utils/errors'
@@ -24,6 +26,7 @@ import PlateSuggestions from '../../components/operator/PlateSuggestions'
 import EntryCamera from '../../components/operator/EntryCamera'
 import EntryHistory from '../../components/operator/EntryHistory'
 import BookingsPanel from '../../components/operator/BookingsPanel'
+import DuplicateEntryModal from '../../components/operator/DuplicateEntryModal'
 import { useBookings } from '../../hooks/useBookings'
 import PassBanner from '../../components/pass/PassBanner'
 import PhotoPanel from '../../components/operator/PhotoPanel'
@@ -99,13 +102,18 @@ function ReprintBar({ session }) {
 }
 
 // The vehicle type a suggestion carries, if this location takes that type.
-const knownType = (suggestion, location) =>
-  suggestion.vehicleType && (!location || location.vehicleTypes.includes(suggestion.vehicleType)) ? suggestion.vehicleType : ''
+// A lane takes only its own class of vehicle, so a type the lane refuses is not suggested.
+const laneOf = (location, gate) => (location?.gates || []).find((g) => g.name === gate)
+const knownType = (suggestion, location, gate) =>
+  suggestion.vehicleType && (!location || location.vehicleTypes.includes(suggestion.vehicleType)) && gateTakes(laneOf(location, gate), suggestion.vehicleType)
+    ? suggestion.vehicleType
+    : ''
 
 // What the type buttons go back to for the next vehicle: the lane's own vehicle type, else a car.
 const defaultTypeFor = (location, gate) => {
-  const types = location ? location.vehicleTypes : []
-  const laneType = (location?.gates || []).find((g) => g.name === gate)?.vehicleType
+  const lane = laneOf(location, gate)
+  const types = (location ? location.vehicleTypes : []).filter((t) => gateTakes(lane, t))
+  const laneType = lane?.vehicleType
   if (laneType && types.includes(laneType)) return laneType
   return types.includes('CAR') ? 'CAR' : types[0] || 'CAR'
 }
@@ -119,6 +127,7 @@ const TYPE_SOURCE = {
 
 function EntryForm({ locations, defaultId }) {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   // No money is taken at entry: the fee is worked out and paid at the exit.
   const { can, company } = useAuth()
   // One key per entry attempt; kept across retries, renewed after success.
@@ -130,6 +139,8 @@ function EntryForm({ locations, defaultId }) {
   const [photo, setPhoto] = useState(null)
   const [photoError, setPhotoError] = useState('')
   const [showBookings, setShowBookings] = useState(false)
+  // "Vehicle Already Entered": the open ticket of the plate that was tried again.
+  const [duplicate, setDuplicate] = useState(null)
   // Automatic entry: with a gate camera it starts ON (the gate works by itself, like a real ANPR gate) and the
   // operator can pause it with the switch. Without a gate camera it is off.
   const [autoEntryChoice, setAutoEntry] = useState(null)
@@ -155,9 +166,11 @@ function EntryForm({ locations, defaultId }) {
   const locationId = useWatch({ control, name: 'locationId' })
   const gate = useWatch({ control, name: 'gate' })
   const typedPlate = useWatch({ control, name: 'vehicleNumber' })
+  const chosenType = useWatch({ control, name: 'vehicleType' })
   const location = locations.find((l) => l._id === locationId)
   const ops = operationSettings(location?.operations)
-  const types = location ? location.vehicleTypes : Object.keys(VEHICLE_LABELS)
+  // Only the vehicle types this lane takes (a 2-wheeler lane shows bikes, a 4-wheeler lane the rest).
+  const types = (location ? location.vehicleTypes : Object.keys(VEHICLE_LABELS)).filter((t) => gateTakes(laneOf(location, gate), t))
   // This computer keeps its lane (location and gate) between visits.
   useRememberLane('ENTRY', locationId, gate)
   // With a camera registered for this gate, that one camera reads the plates (and fills the vehicle
@@ -173,6 +186,19 @@ function EntryForm({ locations, defaultId }) {
   const { bookings } = useBookings(locationId)
   // Is the plate being typed one that booked ahead?
   const booked = bookings.find((b) => b.vehicleNumber === cleanPlate(typedPlate))
+  // Does the plate being typed hold a monthly pass? Looked up a moment after the typing stops (the PASS tag of ismartparking.com).
+  const [passPlate, setPassPlate] = useState('')
+  useEffect(() => {
+    const timer = setTimeout(() => setPassPlate(cleanPlate(typedPlate)), 400)
+    return () => clearTimeout(timer)
+  }, [typedPlate])
+  const passLookup = useQuery({
+    queryKey: ['pass-lookup', locationId, passPlate],
+    queryFn: () => passApi.lookup({ vehicleNumber: passPlate, locationId }),
+    enabled: passPlate.length >= 6 && Boolean(locationId),
+    staleTime: 30_000,
+  })
+  const typedPass = passPlate && passPlate === cleanPlate(typedPlate) ? passLookup.data?.pass : null
 
   const toast = useToast()
   const create = useMutation({
@@ -189,9 +215,13 @@ function EntryForm({ locations, defaultId }) {
       })
     },
     onError: (error, values) => {
+      const data = error?.response?.data?.data
       // A car the camera keeps seeing must not be tried again every few seconds.
       if (values.auto) recent.current = { plate: cleanPlate(values.vehicleNumber), until: Date.now() + RECENT_MS }
-      else {
+      else if (data && data.code === 'ALREADY_INSIDE') {
+        setDuplicate(data.session)
+        playCue('error')
+      } else {
         toast({ title: 'Ticket not created', message: errorMessage(error), tone: 'error' })
         playCue('error')
       }
@@ -232,6 +262,12 @@ function EntryForm({ locations, defaultId }) {
   // How many entry lanes this location has: with one (or none) there is nothing to choose.
   const gateChoices = location ? location.gates.filter((g) => ['ENTRY', 'BOTH'].includes(g.type)).length : 0
 
+  // Tapping a vehicle type makes the ticket for the number in the box (no separate button, like ismartparking.com).
+  const chooseType = (type) => {
+    setValue('vehicleType', type)
+    handleSubmit(submitEntry)()
+  }
+
   // "Take the entry photo automatically": with this computer's camera on, the picture is taken as the
   // ticket is made, unless one was already kept.
   const submitEntry = async (values) => {
@@ -249,13 +285,13 @@ function EntryForm({ locations, defaultId }) {
   const autoCreate = (suggestion, frame) => {
     const values = getValues()
     // The vehicle type the camera (or our memory of this plate) gave wins over the one chosen below.
-    const vehicleType = knownType(suggestion, location) || values.vehicleType
+    const vehicleType = knownType(suggestion, location, values.gate) || values.vehicleType
     const key = CAPACITY_KEY[vehicleType]
     const free = location && key ? location.capacity[key] - location.occupied[key] : 1
     if (create.isPending || !suggestion.plate || values.vehicleNumber.trim() || free <= 0) return false
     setValue('vehicleNumber', suggestion.plate)
     setValue('vehicleType', vehicleType)
-    setTypeNote({ from: knownType(suggestion, location) ? suggestion.vehicleTypeFrom || 'CAMERA' : null })
+    setTypeNote({ from: knownType(suggestion, location, values.gate) ? suggestion.vehicleTypeFrom || 'CAMERA' : null })
     create.mutate({
       locationId: values.locationId,
       vehicleNumber: suggestion.plate,
@@ -270,7 +306,7 @@ function EntryForm({ locations, defaultId }) {
     setDetection(suggestion)
     if (suggestion.plate) setValue('vehicleNumber', suggestion.plate, { shouldValidate: true })
     // The vehicle type fills in by itself when the camera or the plate's history says what it is.
-    const type = knownType(suggestion, location)
+    const type = knownType(suggestion, location, getValues('gate'))
     // No type known for this vehicle: go back to the lane's type rather than keep whatever was chosen before.
     setValue('vehicleType', type || defaultTypeFor(location, getValues('gate')), { shouldValidate: true })
     setTypeNote({ from: type ? suggestion.vehicleTypeFrom || 'CAMERA' : null })
@@ -329,6 +365,7 @@ function EntryForm({ locations, defaultId }) {
                   {booked.phone ? ` (${booked.phone})` : ''}. Expected {dateTime(booked.expectedAt)}.
                 </p>
               )}
+              {typedPass && <PassBanner pass={typedPass} at="entry" />}
               {detection && (
                 <p className="-mt-3 flex flex-wrap items-center gap-2 text-xs text-blue-800">
                   Using the {detection.source === 'PHOTO' ? 'photo' : 'camera'} reading {detection.plate || '(not read)'}. Check the plate and correct it if needed.
@@ -352,30 +389,32 @@ function EntryForm({ locations, defaultId }) {
                     <span className="ml-2 text-xs font-semibold text-amber-700">The camera could not tell the type. Check it.</span>
                   )}
                 </legend>
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <input type="hidden" {...register('vehicleType')} />
+                <div className="grid gap-2">
                   {types.map((type) => {
                     const key = CAPACITY_KEY[type]
                     const free = location && key ? location.capacity[key] - location.occupied[key] : null
                     const full = free !== null && free <= 0
+                    const highlighted = chosenType === type && Boolean(typedPlate?.trim())
                     return (
-                      <label
+                      <button
                         key={type}
-                        className={`flex cursor-pointer flex-col items-center rounded-xl border-2 border-slate-300 px-4 py-4 text-center transition has-[:checked]:border-[#07417f] has-[:checked]:bg-[#07417f] has-[:checked]:text-white has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-blue-500 ${
-                          full ? 'opacity-50' : 'hover:border-blue-400'
+                        type="button"
+                        disabled={create.isPending || full}
+                        onClick={() => chooseType(type)}
+                        className={`sp-press flex w-full flex-col items-center rounded-xl bg-[#07417f] px-4 py-4 text-center text-white shadow transition hover:bg-[#0a559f] focus:outline-none focus-visible:ring-4 focus-visible:ring-blue-300 disabled:cursor-not-allowed disabled:opacity-50 ${
+                          highlighted ? 'ring-4 ring-blue-300' : ''
                         }`}
                       >
-                        <input type="radio" value={type} className="sr-only" {...register('vehicleType')} />
                         <span className="text-lg font-bold">{VEHICLE_LABELS[type]}</span>
-                        <span className="text-xs">{full ? 'Full' : free !== null ? `${free} free` : ''}</span>
-                      </label>
+                        <span className="text-xs opacity-90">{create.isPending ? 'Please wait…' : full ? 'Full' : free !== null ? `${free} free` : ''}</span>
+                      </button>
                     )
                   })}
                 </div>
                 {errors.vehicleType && <p className="mt-1 text-sm text-red-600">{errors.vehicleType.message}</p>}
+                <p className="mt-2 text-xs text-slate-500">Type the number, then tap the vehicle type to create the ticket. The Enter key uses the highlighted type.</p>
               </fieldset>
-              <Button type="submit" loading={create.isPending} className="gate-btn-entry w-full py-4 text-lg font-bold">
-                Create ticket
-              </Button>
             </form>
           </Card>
         </div>
@@ -427,7 +466,7 @@ function EntryForm({ locations, defaultId }) {
               </div>
             ) : (
               <Card className="no-print">
-                <p className="text-sm text-slate-500">The ticket appears here after you press Create ticket.</p>
+                <p className="text-sm text-slate-500">The ticket appears here after you tap a vehicle type.</p>
               </Card>
             )}
           </div>
@@ -462,6 +501,15 @@ function EntryForm({ locations, defaultId }) {
           />
         </div>
       </div>
+      {duplicate && (
+        <DuplicateEntryModal
+          session={duplicate}
+          onClose={() => { setDuplicate(null); setFocus('vehicleNumber') }}
+          onReprint={(session) => { reprint(session); setDuplicate(null); resetField('vehicleNumber') }}
+          onReEntry={can('ENTRY_CREATE') ? (data) => { setTicket({ ...data, locationName: location?.name }); setDuplicate(null); resetField('vehicleNumber') } : undefined}
+          onExit={can('EXIT_CREATE') ? (session) => navigate(`/operator/exit?ticket=${encodeURIComponent(session.ticketNumber)}`) : undefined}
+        />
+      )}
     </div>
   )
 }

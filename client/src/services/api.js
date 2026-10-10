@@ -64,6 +64,25 @@ export const companyApi = {
   testReportEmail: (id) => unwrap(api.post(`/companies/${id}/report-email/test`)),
 }
 
+// Manage Subscriptions: one subscription per location, bought, renewed and extended with add-ons.
+export const subscriptionApi = {
+  catalog: () => unwrap(api.get('/subscriptions/catalog')),
+  setPrices: (prices) => unwrap(api.put('/subscriptions/prices', { prices })),
+  list: () => unwrap(api.get('/subscriptions')),
+  location: (locationId) => unwrap(api.get(`/subscriptions/locations/${locationId}`)),
+  get: (id) => unwrap(api.get(`/subscriptions/${id}`)),
+  quote: (body) => unwrap(api.post('/subscriptions/quote', body)),
+  createOrder: (body) => unwrap(api.post('/subscriptions/orders', body)),
+  order: (id) => unwrap(api.get(`/subscriptions/orders/${id}`)),
+  cancel: (id, reason) => unwrap(api.post(`/subscriptions/${id}/cancel`, { reason })),
+}
+
+// Dashboard > My Orders: subscription, earlier plan and hardware orders in one list.
+export const myOrdersApi = {
+  list: (params) => unwrap(api.get('/my-orders', { params })),
+  all: (params) => unwrap(api.get('/my-orders/all', { params })),
+}
+
 // Buying a plan, and the invoices.
 export const billingApi = {
   summary: () => unwrap(api.get('/billing')),
@@ -131,6 +150,9 @@ export const locationApi = {
   resetReEntries: (id) => unwrap(api.post(`/locations/${id}/re-entries/reset`)),
   // The Lanes tab: lanes with their operators and devices; params { q, page, limit }.
   lanes: (id, params) => unwrap(api.get(`/locations/${id}/lanes`, { params })),
+  // The Create / Edit Parking Lane form: one lane is one vehicle going one way.
+  createLane: (id, body) => unwrap(api.post(`/locations/${id}/lanes`, body)),
+  updateLane: (id, laneId, body) => unwrap(api.put(`/locations/${id}/lanes/${laneId}`, body)),
   // Switches one lane on or off.
   setLaneStatus: (id, laneId, isActive) => unwrap(api.patch(`/locations/${id}/lanes/${laneId}/status`, { isActive })),
 }
@@ -242,6 +264,40 @@ export const passApi = {
   users: (params) => unwrap(api.get('/passes/users', { params })),
   downloadUsers: (params, format) => downloadFile('/passes/users', params, `pass-users.${format}`, format),
   bulkUpload: (body) => unwrap(api.post('/passes/bulk-upload', body)),
+  // The pass list as a file, the Approved / Pending switch, and deleting passes made by mistake.
+  downloadList: (params, format) => downloadFile('/passes', params, `passes.${format}`, format),
+  setApproval: (id, approval) => unwrap(api.patch(`/passes/${id}/approval`, { approval })),
+  remove: (id) => unwrap(api.delete(`/passes/${id}`)),
+  removeMany: (ids) => unwrap(api.post('/passes/delete', { ids })),
+}
+
+// Pass Management > Pass Users: the people who hold passes, their vehicles, and the Create Pass form.
+export const passUserApi = {
+  stats: () => unwrap(api.get('/pass-users/stats')),
+  list: (params) => unwrap(api.get('/pass-users', { params })),
+  download: (params, format) => downloadFile('/pass-users', params, `pass-users.${format}`, format),
+  options: () => unwrap(api.get('/pass-users/options')),
+  create: (body) => unwrap(api.post('/pass-users', body)),
+  get: (id) => unwrap(api.get(`/pass-users/${id}`)),
+  update: (id, body) => unwrap(api.put(`/pass-users/${id}`, body)),
+  remove: (id) => unwrap(api.delete(`/pass-users/${id}`)),
+  addVehicle: (id, body) => unwrap(api.post(`/pass-users/${id}/vehicles`, body)),
+  updateVehicle: (id, vehicleId, body) => unwrap(api.put(`/pass-users/${id}/vehicles/${vehicleId}`, body)),
+  // Create / Renew Pass for one of the user's vehicles.
+  savePass: (id, body) => unwrap(api.post(`/pass-users/${id}/passes`, body)),
+  // The Vehicle List page.
+  vehicles: (params) => unwrap(api.get('/pass-users/vehicles', { params })),
+  downloadVehicles: (params, format) => downloadFile('/pass-users/vehicles', params, `pass-vehicle-list.${format}`, format),
+}
+
+// Pass Management > Manage Invoice: GST invoices made from approved passes.
+export const passInvoiceApi = {
+  list: (params) => unwrap(api.get('/pass-invoices', { params })),
+  download: (params, format) => downloadFile('/pass-invoices', params, `pass-invoices.${format}`, format),
+  eligible: (params) => unwrap(api.get('/pass-invoices/eligible', { params })),
+  preview: (body) => unwrap(api.post('/pass-invoices/preview', body)),
+  generate: (body) => unwrap(api.post('/pass-invoices', body)),
+  get: (id) => unwrap(api.get(`/pass-invoices/${id}`)),
 }
 
 // Firms, societies and schools that buy passes for their people.
@@ -249,6 +305,7 @@ export const passCompanyApi = {
   list: (params) => unwrap(api.get('/pass-companies', { params })),
   create: (body) => unwrap(api.post('/pass-companies', body)),
   update: (id, body) => unwrap(api.put(`/pass-companies/${id}`, body)),
+  remove: (id) => unwrap(api.delete(`/pass-companies/${id}`)),
 }
 
 export const walletApi = {

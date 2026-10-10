@@ -10,7 +10,7 @@ import { useFallbackInterval } from '../../hooks/useLive'
 // Online payment at the exit: shows a QR code the customer scans with any UPI
 // app, then waits for the gateway to confirm. The vehicle is released by the
 // server the moment the payment is confirmed; this screen only follows along.
-export default function OnlinePayment({ session, simulated, onPaid, onBack }) {
+export default function OnlinePayment({ session, simulated, onPaid, onBack, onActive }) {
   const [payment, setPayment] = useState(null)
 
   const start = useMutation({
@@ -35,6 +35,13 @@ export default function OnlinePayment({ session, simulated, onPaid, onBack }) {
     onSuccess: onBack,
   })
   const play = useMutation({ mutationFn: (outcome) => paymentApi.simulate(payment._id, outcome) })
+
+  // Tell the exit screen while a QR is out, so the vehicle cannot be cleared away until it is paid or cancelled.
+  const waiting = Boolean(payment) && latest?.status === 'PENDING'
+  useEffect(() => {
+    onActive?.(waiting)
+    return () => onActive?.(false)
+  }, [waiting, onActive])
 
   // Paid and the vehicle released: hand over to the normal "exit complete" view.
   useEffect(() => {

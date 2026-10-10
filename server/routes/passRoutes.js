@@ -7,7 +7,7 @@ const { validateBody, validateIdParam } = require("../middleware/validate");
 const { PERMISSIONS: P } = require("../config/permissions");
 const { VEHICLE_TYPES } = require("../models/constants");
 const { PASS_PAYMENT_METHODS } = require("../models/PassPayment");
-const { PASS_TYPES, PASS_UNITS, MAX_PASS_VEHICLES } = require("../models/Pass");
+const { PASS_TYPES, PASS_UNITS, PASS_APPROVALS, MAX_PASS_VEHICLES } = require("../models/Pass");
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const money = {
@@ -57,15 +57,28 @@ router.post(
   "/bulk",
   validateBody({
     ids: { type: "array", required: true, max: 200, of: { type: "objectId" } },
-    action: { type: "string", required: true, enum: ["EXTEND", "SET_DATES", "SUSPEND", "RESUME", "CANCEL"] },
+    action: { type: "string", required: true, enum: ["EXTEND", "SET_DATES", "UPDATE_TERM", "SUSPEND", "RESUME", "CANCEL"] },
     days: { type: "number", integer: true, min: 1, max: 366 },
+    amount: { type: "number", min: 0, max: 10000000 },
     startDate: { type: "string", pattern: DATE, message: "must look like 2026-03-02" },
     endDate: { type: "string", pattern: DATE, message: "must look like 2026-03-02" },
     reason: { type: "string", max: 300 },
   }),
   controller.bulkUpdate
 );
+router.post(
+  "/delete",
+  validateBody({ ids: { type: "array", required: true, max: 200, of: { type: "objectId" } } }),
+  controller.deletePasses
+);
 router.get("/:id", validateIdParam(), controller.getPass);
+router.delete("/:id", validateIdParam(), controller.deletePass);
+router.patch(
+  "/:id/approval",
+  validateIdParam(),
+  validateBody({ approval: { type: "string", required: true, enum: PASS_APPROVALS } }),
+  controller.setApproval
+);
 
 router.post(
   "/",
@@ -87,6 +100,12 @@ router.post(
     email: { type: "string", max: 254 },
     notes: { type: "string", max: 300 },
     startDate: { type: "string", pattern: DATE, message: "must look like 2026-03-02" },
+    // With a last day the pass runs from startDate (default today) to this day, both included.
+    endDate: { type: "string", pattern: DATE, message: "must look like 2026-03-02" },
+    passUserId: { type: "objectId" },
+    approval: { type: "string", enum: PASS_APPROVALS },
+    address: { type: "string", max: 255 },
+    gstNumber: { type: "string", max: 15 },
     locationIds: { type: "array", of: { type: "objectId" }, max: 50 },
   }),
   controller.createPass

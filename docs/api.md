@@ -50,6 +50,37 @@ All need `COMPANY_MANAGE`. See `docs/billing.md`.
 | GET | `/billing/invoices/:id` | | Invoice data |
 | GET | `/billing/invoices/:id/pdf` | | GST invoice PDF |
 
+## Subscriptions (Manage Subscriptions, one per location)
+
+`/catalog` needs `COMPANY_MANAGE` or `PLATFORM_MANAGE`; `PUT /prices` needs `PLATFORM_MANAGE` (Super Admin);
+everything else needs a company and `COMPANY_MANAGE`. See `docs/billing.md`.
+
+| Method | Path | Body | Notes |
+|---|---|---|---|
+| GET | `/subscriptions/catalog` | | The seven add-ons with their current and standard prices, user price, GST, plan lengths, and whether payment is ready |
+| PUT | `/subscriptions/prices` | prices: { pass: 300, ... } | Super Admin. A price equal to the standard price removes the override |
+| GET | `/subscriptions?q=` | | One row per location with the subscription that counts now (`state`: ACTIVE, UPCOMING, EXPIRED, CANCELLED, NONE) |
+| GET | `/subscriptions/locations/:locationId` | | Location page: current subscription, running ones, order history |
+| POST | `/subscriptions/quote` | kind (PURCHASE, RENEWAL, UPDATE), locationId or subscriptionId, users, months, addons or change | Price breakup; nothing is saved |
+| POST | `/subscriptions/orders` | same as the quote | Creates the order and its payment link (30 per 15 minutes). The same open quote returns the same order (`repeated`) |
+| GET | `/subscriptions/orders/:id` | | Order, invoice summary, seller and buyer (the order page polls it) |
+| GET | `/subscriptions/:id` | | One subscription (the renew and update pages) |
+| POST | `/subscriptions/:id/cancel` | reason (5 to 300 letters) | Cancels a bought subscription |
+
+Paying a test order: `POST /billing/orders/:id/simulate` works for subscription orders too. Invoices:
+`GET /billing/invoices/:id` and `/pdf`.
+
+## My Orders (all of a company's orders in one list)
+
+Need a company and `COMPANY_MANAGE`.
+
+| Method | Path | Query | Notes |
+|---|---|---|---|
+| GET | `/my-orders` | q (part of the order number), status (PAID, PENDING, FAILED, CANCELLED), type (SUBSCRIPTION, HARDWARE, PLAN), limit (10, 25, 50, 100, 200), page | Subscription orders (all locations), hardware shop orders and the earlier company-wide plan orders (`PLAN`, which have no order number, so they are left out when an order number is typed), newest first. Each row: type, number, date, status, amount, invoice number, details, items, quantity, link |
+| GET | `/my-orders/all` | same filters | Every matching row, for the Excel and Print buttons |
+
+`GET /subscriptions/orders/:id` also returns `taxLines` (each line with its GST and total; the GST adds up to the order's GST) and, once paid, `paymentId` and `gatewayOrderId`.
+
 ## Hardware shop
 
 Public catalog and cart, company checkout, and the platform's product and order management.
@@ -62,9 +93,11 @@ See `docs/shop.md` for the full table.
 | GET | `/locations`, `/locations/:id` | Any signed-in user, limited to their company and assigned locations |
 | POST | `/locations` | Company Admin (plan limit applies) |
 | PUT | `/locations/:id` | `LOCATION_MANAGE`; Location Admin only for assigned locations. `receiptSettings` `{ headerNote?, ticketFooter?, receiptFooter?, showAddress?, showGst?, showQr? (DEVICE\|ON\|OFF) }` changes how tickets and receipts look (an empty footer means the standard wording). `onlineBooking` also takes `waitingMinutes` (how long a booking waits after its arrival time: 5 to 4320; 0 or empty = the standard `BOOKING_GRACE_HOURS`, 12 hours) and `cancelBeforeMinutes` (0 to 10080; 0 = customers cannot cancel online). `operations` `{ allowReEntry?, exitAmountEdit?, autoExitHours? (0-720; 0 = never), printTicketNumber?, printPhoto?, photoAutoCapture?, printPassReceipt? }` are the gate switches (unset ones keep the defaults, so old locations behave as before). `reportRecipients` is up to 10 email addresses that get this location's end-of-day report |
-| GET | `/locations/:id/lanes` | `?q=` (name, lane code, plaza, FASTag lane, camera serial, operator or device name) `&page=&limit=` (default 10, at most 100). `{ rows: [{ _id, sn, name, type, vehicleType, laneCode, plazaId, fastagLaneId, cameraSerial, isActive, operators, devices }], total, page, limit, pages }` |
-| PATCH | `/locations/:id/lanes/:laneId/status` | `LOCATION_MANAGE`. `{ isActive }` switches a lane on or off. A lane that is off refuses entries, exits and manual barrier lifts with 409. Audited as `LOCATION_LANE_ON` / `LOCATION_LANE_OFF` |
-| PUT | `/locations/:id` (more fields) | `parkingType` (`NORMAL` or `AIRPORT`); `gates[]` `{ _id (send it back for an existing lane), name, type, laneCode, plazaId, fastagLaneId, cameraSerial, vehicleType, isActive }`: names must be unique (case does not matter, 400); a rename follows the lane's operators and devices; a lane missing from the list is removed, refused with 409 while operators or devices are tied to it; `operations.autoExitRules` `[{ vehicleType, active, days (1-365), amount }]` closes a ticket of that vehicle type that is still open after `days` days (no payment is recorded; `amount` is written on the ticket and in the alert). A type without an active rule follows `autoExitHours` |
+| GET | `/locations/:id/lanes` | Each row is one lane `{ _id, sn, name, type, vehicleType, vehicleClass, doorNo, readerNo, fastag, fastagLaneId, gateNo, floorNo, direction, fastagLaneType, fastagLaneMode, cameraSerial, isActive, operators, devices }`; `setup.missing` lists the lanes a location still needs. `?q=` (name, lane code, plaza, FASTag lane, camera serial, operator or device name) `&page=&limit=` (default 10, at most 100). `{ rows: [{ _id, sn, name, type, vehicleType, laneCode, plazaId, fastagLaneId, cameraSerial, isActive, operators, devices }], total, page, limit, pages }` |
+| POST | `/locations/:id/lanes` | `LOCATION_MANAGE`. The Create Parking Lane form: `{ vehicleType (a type the location takes), type (ENTRY or EXIT), cameraSerial?, fastag?, fastagLaneId?, gateNo?, floorNo?, direction?, fastagLaneType?, fastagLaneMode?, doorNo?, readerNo? }`. The name is `<Vehicle>-<Entry or Exit>` (a second one is `Car-Entry 2`) and the Door/Lane No. and Reader are given when not sent. Audited as `LOCATION_LANE_ADD` |
+| PUT | `/locations/:id/lanes/:laneId` | `LOCATION_MANAGE`. The Edit Parking Lane form: the same fields, all optional. A new vehicle or direction renames the lane (its operators and devices follow); Door/Lane No. and Reader must be unique (409); FASTag details are cleared when `fastag` is false; the last entry or exit lane of a class cannot be changed away (400). Audited as `LOCATION_LANE_EDIT` |
+| PATCH | `/locations/:id/lanes/:laneId/status` | `LOCATION_MANAGE`. `{ isActive }` switches a lane on or off. A lane that is off refuses entries, exits and manual barrier lifts with 409; the switch turns one lane on or off. Audited as `LOCATION_LANE_ON` / `LOCATION_LANE_OFF` |
+| PUT | `/locations/:id` (more fields) | `parkingType` (`NORMAL` or `AIRPORT`); `gates[]` `{ _id (send it back for an existing gate), name, type, lane, vehicleType, vehicleClass, doorNo, readerNo, fastag, fastagLaneId, cameraSerial, laneCode, plazaId, isActive }`. **Lanes:** a lane is one gate for one vehicle and one direction (`type` `ENTRY` or `EXIT`, never `BOTH`), named `Car-Entry`, `Bike-Exit` ...; send `lane` (the vehicle's short name) and `vehicleType` and the server sets `vehicleClass` (`TWO_WHEELER` for `BIKE`, `FOUR_WHEELER` for every other type) and gives each lane its Door/Lane No. (`L1D1`) and Reader (`L1R1`). When any gate has a `lane`, every gate must, and the location needs an entry lane and an exit lane for two-wheelers and for four-wheelers (400 otherwise; a location that works with lanes cannot go back to none). Gates with no `lane` are old-style gates and behave as before. A lane refuses the other class of vehicle at entry and at exit (400). Normally lanes are added one at a time with `POST /locations/:id/lanes`. Gate names must be unique (case does not matter, 400); a rename follows the lane's operators and devices; a lane missing from the list is removed, refused with 409 while operators or devices are tied to it; `operations.autoExitRules` `[{ vehicleType, active, days (1-365), amount }]` closes a ticket of that vehicle type that is still open after `days` days (no payment is recorded; `amount` is written on the ticket and in the alert). A type without an active rule follows `autoExitHours` |
 | GET | `/locations/export?format=xlsx\|csv\|pdf` | The Locations table as a file (default xlsx): parking type, seats and valid upto, the gate switches, auto exit on or off, capacity, lanes |
 | GET | `/locations/:id/re-entries` | `LOCATION_MANAGE`. The re-entry counter: `{ limit, since, total, operators: [{ userId, name, loginId, count, last, atLimit }] }` for today (or since the last reset) |
 | POST | `/locations/:id/re-entries/reset` | `LOCATION_MANAGE`. Starts the count again from now; returns the same shape. Audited as `LOCATION_REENTRY_COUNTER_RESET` |
@@ -88,7 +121,7 @@ than your own; a Location Admin only users of their own locations.
 
 `access` is `{ reprint, showEntryCollection, showExitCollection, showTotalCollection }`, each a boolean; a flag that was never set counts as allowed. `reprint: false` makes `POST /parking/sessions/:id/reprint` and `.../print` answer 403 for that person. The three `show…` flags remove figures from `GET /operator/collection` and `GET /operator/summary` for that person: entry amount; exit amount; and cash, online, UPI, card, FASTag, wallet, total, refunded, net (the money columns are dropped from exports too).
 
-`loginId`: 3 to 30 letters, digits, `.`, `-`, `_`; stored in lower case; unique inside the company. `lanes`: `[{ locationId, gate }]` (gate = a lane name of that location, at a location the user works at); a location with no lane listed is open to all its lanes. Roles `SUPERVISOR` (rank 40) and `VIEWER` (rank 10) can be handed out by a Company Admin or Location Admin. The permission `SESSION_OVERRIDE` (cancel, release without payment, re-entry beyond the grace window) is held by admins and supervisors; `LOCATION_MANAGE` still works for these routes.
+`loginId`: 3 to 30 letters, digits, `.`, `-`, `_`; stored in lower case; unique inside the company. `lanes`: `[{ locationId, gate }]` (gate = a lane name of that location, at a location the user works at); a location with no lane listed is open to all its gates. **At a location with lanes**, a gate operator (`GATE_OPERATOR`, `ENTRY_OPERATOR`, `EXIT_OPERATOR`) must be given at least one lane (400 otherwise; name both the entry lane and the exit lane to work both), and a lane has one active operator (409). Gate operators with no lane there get 403 at entry and exit. Supervisors and admins are not tied to a lane. Roles `SUPERVISOR` (rank 40) and `VIEWER` (rank 10) can be handed out by a Company Admin or Location Admin. The permission `SESSION_OVERRIDE` (cancel, release without payment, re-entry beyond the grace window) is held by admins and supervisors; `LOCATION_MANAGE` still works for these routes.
 
 `operator` (optional on create and update): `{ employeeCode, shift: { name, start, end } }`.
 
@@ -140,7 +173,7 @@ All need `TARIFF_MANAGE`. A Location Admin only sees tariffs of assigned locatio
 
 | Method | Path | Who | Notes |
 |---|---|---|---|
-| POST | `/parking/entry` | `ENTRY_CREATE` | locationId, vehicleNumber, vehicleType, gate?, idempotencyKey?. Returns the session with its ticket number |
+| POST | `/parking/entry` | `ENTRY_CREATE` | locationId, vehicleNumber, vehicleType, gate?, idempotencyKey?. Returns the session with its ticket number. A vehicle that already has an open ticket gets `409` with `data: { code: "ALREADY_INSIDE", session }` (that ticket), so the entry screen can offer Re-Print, Re-Entry or Exit |
 | GET | `/parking/entries?locationId=&q=&date=&page=&match=` | Gate staff, admins | Vehicles inside now. `q` = ticket, or start of a vehicle number; `match=contains` finds the text anywhere in the number (exit search box) |
 | POST | `/parking/exit` | `EXIT_CREATE` | locationId, ticketNumber or vehicleNumber, lostTicket?, gate?, editedAmount?, editReason?. Calculates the fee. Returns `paymentRequired`. `editedAmount` (with a reason of at least 5 letters) is accepted only when the location's `exitAmountEdit` switch is on; tax is worked out again, the original fee is kept on the ticket and the change is audited as `PARKING_FEE_EDITED`. Entry is refused for a vehicle already inside when `allowReEntry` is off |
 | GET | `/parking/exits?locationId=&q=&date=&page=` | Gate staff, admins | Closed sessions of one day (default today) |
@@ -235,7 +268,20 @@ With method `GATEWAY`, `POST /payments` starts an online payment and answers wit
 | GET | `/passes/summary` | `PASS_MANAGE` | Counts for the tiles: users, active, ending soon, expired, suspended, sold this month |
 | GET | `/passes/vehicles?locationId=&q=&passCompanyId=&page=&format=` | `PASS_MANAGE` | One row per vehicle on a pass (vehicle, type, pass, holder, company, validity, inside now). `format` = csv, xlsx or pdf |
 | GET | `/passes/invoices?from=&to=&locationId=&passCompanyId=&q=&page=&format=` | `PASS_MANAGE` | Pass receipts, one per payment (sale or renewal): receipt number `passNumber/n`, taxable value, tax, total, method |
-| POST | `/passes/bulk` | `PASS_MANAGE` | `{ ids (max 200), action: EXTEND\|SET_DATES\|SUSPEND\|RESUME\|CANCEL, days?, startDate?, endDate?, reason? }`. Changes many passes at once without taking money (use Renew for a paid extension). Answers with what changed and what was skipped, with the reason |
+| POST | `/passes/bulk` | `PASS_MANAGE` | `{ ids (max 200), action: EXTEND\|SET_DATES\|UPDATE_TERM\|SUSPEND\|RESUME\|CANCEL, days?, startDate?, endDate?, amount?, reason? }`; UPDATE_TERM (the Update Pass window) needs `endDate` and `amount`, startDate is optional. Changes many passes at once without taking money (use Renew for a paid extension). Answers with what changed and what was skipped, with the reason |
+| GET | `/passes?approval=APPROVED\|PENDING&vehicleNumber=&vehicleType=&passUserId=&passCompanyId=&locationId=&ids=a,b&q=&limit=&page=&format=` | `PASS_MANAGE` | The Passes List: every pass with `approval`, `amount`, `company` and `locationNames`. `ids` (max 200) is what Print Pass uses. `format` = csv, xlsx or pdf |
+| PATCH | `/passes/:id/approval` | `PASS_MANAGE` | `{ approval: APPROVED\|PENDING }`. A pending pass is on the list but gets no free exit and cannot be invoiced |
+| POST | `/passes/delete` and DELETE `/passes/:id` | `PASS_MANAGE` | `{ ids }`. Only an unused pass goes: never used at a gate, no money taken (amount over 0), not on an invoice. Others are skipped with the reason (409 for the single form) |
+| GET | `/pass-users/stats`, `/pass-users/options` | `PASS_MANAGE` | Tiles for the Pass Users page (companies, users, vehicles, passes, active, expired, revenue of active passes); the user picker |
+| GET, POST | `/pass-users` | `PASS_MANAGE` | List (`?q=&passCompanyId=&limit=&page=&format=`); POST is **Create Pass**: a new user (`name, mobile (10 digits), address`, email?, gstNumber?, passCompanyId?) or `passUserId`, plus `rows[]` (`vehicleNumber, vehicleType, locationId, startDate?, endDate, amount`), `method` CASH\|UPI\|CARD, `transactionId` (one row only). A row with amount 0 is complimentary. 409 for a duplicate mobile, a vehicle that already has a pass, or a vehicle that belongs to another user |
+| GET, PUT, DELETE | `/pass-users/:id` | `PASS_MANAGE` | One user with vehicles; edit (the user's passes show the new name, mobile, email, company); delete only when the user has no passes |
+| POST, PUT | `/pass-users/:id/vehicles`, `/pass-users/:id/vehicles/:vehicleId` | `PASS_MANAGE` | Add or edit a vehicle record. A plate is unique in the company; a vehicle on a current pass cannot be renamed here |
+| POST | `/pass-users/:id/passes` | `PASS_MANAGE` | **Create / Renew** for one of the user's vehicles: `vehicleId, locationId, startDate?, endDate, amount, method?, transactionId?`. A vehicle with a pass has that pass re-dated (one payment recorded); one without gets a new pass |
+| GET | `/pass-users/vehicles?q=&vehicleNumber=&vehicleType=&passUserId=&passCompanyId=&format=` | `PASS_MANAGE` | The Vehicle List |
+| GET | `/pass-invoices/eligible?locationId=&passCompanyId=(id\|none)&passUserId=` | `PASS_MANAGE` | Passes that can go on a GST invoice: approved, not cancelled, not already invoiced, with charges |
+| POST | `/pass-invoices/preview`, `/pass-invoices` | `PASS_MANAGE` | `{ locationId, passCompanyId (id or "none"), passUserId?, passIds, taxPercent? }`. Preview shows the figures; the second saves the invoice (numbers count up from 100001 in a company) and marks the passes. 409 if a pass was invoiced meanwhile |
+| GET | `/pass-invoices`, `/pass-invoices/:id` | `PASS_MANAGE` | List (`?locationId=&passCompanyId=&passUserId=&q=&format=`) and one invoice with the seller details |
+| DELETE | `/pass-companies/:id` | `PASS_MANAGE` | Only a company with no users and no passes (otherwise 409: switch it off) |
 | GET, POST | `/pass-companies` | `PASS_MANAGE` | List (`?q=&active=true`, with pass counts) or add a company master: name, contactName, phone, email, gstin, address, notes |
 | PUT | `/pass-companies/:id` | `PASS_MANAGE` | Edit, or switch off with `isActive: false` |
 | POST | `/passes` | `PASS_MANAGE` | locationId, passCompanyId?, vehicleNumber, vehicleType, holderName, `unit`+`count` (or `months`; default 1 month), amount, method, startDate?, locationIds?, phone?, email? (pass details and an ending-soon reminder are emailed there), notes?, passType?, maxVehicles?, extraVehicles? (`[{vehicleNumber, vehicleType}]`) |

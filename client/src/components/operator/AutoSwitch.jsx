@@ -1,12 +1,15 @@
 // The AUTO ENTRY / AUTO EXIT switch: a pill with a status light on the left and a knob on the right.
-// Off every time the page opens.
+// Off every time the page opens. Switching asks "Sure to enable / disable ...?" first, like ismartparking.com, so a
+// stray tap cannot start or stop the gate's automatic mode.
 export default function AutoSwitch({ label, on, onChange, hint }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={on}
-      onClick={() => onChange(!on)}
+      onClick={() => {
+        if (window.confirm(`Sure to ${on ? 'disable' : 'enable'} ${label.toLowerCase()}?`)) onChange(!on)
+      }}
       title={hint ? `${hint} Click to switch automatic mode on or off.` : 'Click to switch automatic mode on or off'}
       className={`sp-press flex items-center gap-3 rounded-xl border px-2.5 py-1.5 text-left shadow-sm transition-colors ${
         on ? 'border-green-300 bg-green-50' : 'border-red-200 bg-red-50'

@@ -14,6 +14,7 @@
 // It is kept apart from services/paymentService.js on purpose: a booking has no ticket yet, so it
 // cannot use the session-based settle, and a mistake here must never affect an exit payment.
 
+const subscriptions = require("./subscriptionService");
 const crypto = require("crypto");
 const env = require("../config/env");
 const AppError = require("../utils/AppError");
@@ -111,6 +112,10 @@ const createOnline = async ({ location, vehicleNumber, vehicleType, customerName
   }
   const amount = feeFor(location, vehicleType);
   if (amount > 0 && !canTakePayments()) throw new AppError("Paying a booking fee online is not available right now", 503);
+  if (amount > 0) {
+    // The location needs the Payment Gateway add-on. A customer is only told it is not available.
+    try { await subscriptions.assertAddon(location.companyId, location._id, "gateway"); } catch { throw new AppError("Paying a booking fee online is not available right now", 503); }
+  }
 
   const companyId = location.companyId;
   if (await ParkingSession.exists({ companyId, vehicleNumber, isOpen: true })) {

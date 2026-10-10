@@ -162,7 +162,7 @@ test("updating a user: custom role, built-in role and clearing, and who may do i
   const reportsRole = { _id: "r-reports", companyId: COMPANY, name: "Reports", baseRole: ROLES.EXIT_OPERATOR, permissions: [P.REPORT_VIEW] };
   const makeUser = (extra = {}) => {
     const user = {
-      _id: "u1", companyId: COMPANY, role: ROLES.ENTRY_OPERATOR, locationIds: [], tokenVersion: 0, isActive: true,
+      _id: "u1", companyId: COMPANY, role: ROLES.ENTRY_OPERATOR, locationIds: [], lanes: [], tokenVersion: 0, isActive: true,
       saves: 0, async save() { this.saves += 1; },
       toJSON() { return { _id: this._id, role: this.role, customRoleId: this.customRoleId }; },
       ...extra,
