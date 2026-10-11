@@ -9,14 +9,13 @@ import { useToast } from '../../hooks/useToast'
 import { playCue } from '../../utils/sound'
 import { markLocalAction } from '../../utils/localAction'
 import { rememberLocation, useMyLocations } from '../../hooks/useMyLocations'
-import { initialLane, useRememberLane } from '../../hooks/useLane'
+import { assignedLane } from '../../hooks/useLane'
 import { gateTakes } from '../../utils/lanes'
 import { useGateCamera } from '../../hooks/useGateCamera'
 import { entrySchema } from '../../validators/schemas'
 import { errorMessage } from '../../utils/errors'
 import { PAYMENT_LABELS, VEHICLE_LABELS, dateTime, money, newRequestKey } from '../../utils/format'
 import { Alert, Button, Card, Field, PageLoader } from '../../components/ui'
-import LocationPicker from '../../components/operator/LocationPicker'
 import LaneBar from '../../components/operator/LaneBar'
 import LivePreview from '../../components/operator/LivePreview'
 import GateCameraNote from '../../components/operator/GateCameraNote'
@@ -129,7 +128,7 @@ function EntryForm({ locations, defaultId }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   // No money is taken at entry: the fee is worked out and paid at the exit.
-  const { can, company } = useAuth()
+  const { can, company, user } = useAuth()
   // One key per entry attempt; kept across retries, renewed after success.
   const [requestKey, setRequestKey] = useState(newRequestKey)
   const [ticket, setTicket] = useState(null)
@@ -159,7 +158,7 @@ function EntryForm({ locations, defaultId }) {
   } = useForm({
     resolver: zodResolver(entrySchema),
     defaultValues: (() => {
-      const lane = initialLane(locations, defaultId, 'ENTRY')
+      const lane = assignedLane(locations, user?.lanes, 'ENTRY', defaultId)
       return { ...lane, vehicleNumber: '', vehicleType: defaultTypeFor(locations.find((l) => l._id === lane.locationId), lane.gate) }
     })(),
   })
@@ -171,8 +170,6 @@ function EntryForm({ locations, defaultId }) {
   const ops = operationSettings(location?.operations)
   // Only the vehicle types this lane takes (a 2-wheeler lane shows bikes, a 4-wheeler lane the rest).
   const types = (location ? location.vehicleTypes : Object.keys(VEHICLE_LABELS)).filter((t) => gateTakes(laneOf(location, gate), t))
-  // This computer keeps its lane (location and gate) between visits.
-  useRememberLane('ENTRY', locationId, gate)
   // With a camera registered for this gate, that one camera reads the plates (and fills the vehicle
   // number box). This computer's own camera is only shown when the operator asks for it.
   const gateCamera = useGateCamera(locationId, 'ENTRY', gate)
@@ -259,8 +256,6 @@ function EntryForm({ locations, defaultId }) {
     },
   })
 
-  // How many entry lanes this location has: with one (or none) there is nothing to choose.
-  const gateChoices = location ? location.gates.filter((g) => ['ENTRY', 'BOTH'].includes(g.type)).length : 0
 
   // Tapping a vehicle type makes the ticket for the number in the box (no separate button, like ismartparking.com).
   const chooseType = (type) => {
@@ -330,10 +325,9 @@ function EntryForm({ locations, defaultId }) {
           hint="When the gate camera reads a number plate clearly, the ticket is made, printed and the barrier opens by itself, with the vehicle type chosen below. No money is taken at entry. A wrong reading must be cancelled by an admin."
         />
       </LaneBar>
-      {/* The lane is fixed by the admin for most operators, so the pickers only show when there is a choice. */}
-      <div className={`no-print rounded-lg border border-slate-200 bg-white p-3 ${locations.length > 1 || gateChoices > 1 ? '' : 'hidden'}`}>
-        <LocationPicker locations={locations} selectedId={locationId} register={register} errors={errors} gateTypes={['ENTRY', 'BOTH']} />
-      </div>
+      {/* The location and gate are the lane the admin assigned: the operator does not choose them. */}
+      <input type="hidden" {...register('locationId')} />
+      <input type="hidden" {...register('gate')} />
 
       <div className="grid items-start gap-4 lg:grid-cols-12">
         {/* Middle: the camera, the number, the vehicle type and the button (first on a phone). */}

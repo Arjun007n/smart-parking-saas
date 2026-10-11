@@ -8,13 +8,12 @@ import { useToast } from '../../hooks/useToast'
 import { playCue } from '../../utils/sound'
 import { markLocalAction } from '../../utils/localAction'
 import { rememberLocation, useMyLocations } from '../../hooks/useMyLocations'
-import { initialLane, useRememberLane } from '../../hooks/useLane'
+import { assignedLane } from '../../hooks/useLane'
 import { useGateCamera } from '../../hooks/useGateCamera'
 import { errorMessage } from '../../utils/errors'
 import { operationSettings } from '../../utils/operations'
 import { PAYMENT_LABELS, VEHICLE_LABELS, amountDue, dateTime, duration, money } from '../../utils/format'
 import { Alert, Button, Card, Field, PageLoader } from '../../components/ui'
-import LocationPicker from '../../components/operator/LocationPicker'
 import LaneBar from '../../components/operator/LaneBar'
 import LivePreview from '../../components/operator/LivePreview'
 import GateCameraNote from '../../components/operator/GateCameraNote'
@@ -462,7 +461,7 @@ function VehicleSearch({ locationId, text, onText, onPick, onSubmitText, disable
 
 function ExitForm({ locations, defaultId }) {
   const queryClient = useQueryClient()
-  const { company, can } = useAuth()
+  const { company, can, user } = useAuth()
   // { session, paymentRequired } after a lookup; `paid` once payment is recorded.
   const [result, setResult] = useState(null)
   const [lastLookup, setLastLookup] = useState(null)
@@ -479,15 +478,12 @@ function ExitForm({ locations, defaultId }) {
   // Auto exit: with a gate camera it starts ON and the operator can pause it with the switch. Without one it is off.
   const [autoExitChoice, setAutoExit] = useState(null)
   const recent = useRef({ plate: '', until: 0 })
-  const { register, control, formState: { errors } } = useForm({ defaultValues: initialLane(locations, defaultId, 'EXIT') })
+  // The location and gate are the lane the admin assigned: the operator does not choose them.
+  const { control } = useForm({ defaultValues: assignedLane(locations, user?.lanes, 'EXIT', defaultId) })
   const locationId = useWatch({ control, name: 'locationId' })
   const gate = useWatch({ control, name: 'gate' })
   const location = locations.find((l) => l._id === locationId)
   const ops = operationSettings(location?.operations)
-  // How many exit lanes this location has: with one (or none) there is nothing to choose.
-  const gateChoices = location ? location.gates.filter((g) => ['EXIT', 'BOTH'].includes(g.type)).length : 0
-  // This computer keeps its lane (location and gate) between visits.
-  useRememberLane('EXIT', locationId, gate)
   // With an ANPR camera registered for this gate, its readings appear as suggestions and fill the search box.
   // Without one, the operator types the number.
   const gateCamera = useGateCamera(locationId, 'EXIT', gate)
@@ -657,11 +653,6 @@ function ExitForm({ locations, defaultId }) {
 
       <div className="grid items-start gap-4 lg:grid-cols-5">
         <div className="space-y-4 lg:col-span-3">
-          {/* The lane is fixed by the admin for most operators, so the pickers only show when there is a choice. */}
-          <div className={`no-print rounded-lg border border-slate-200 bg-white p-3 ${locations.length > 1 || gateChoices > 1 ? '' : 'hidden'}`}>
-            <LocationPicker locations={locations} selectedId={locationId} register={register} errors={errors} gateTypes={['EXIT', 'BOTH']} />
-          </div>
-
           <div className="no-print space-y-3">
             <Alert>{lookup.error && errorMessage(lookup.error)}</Alert>
             <VehicleSearch

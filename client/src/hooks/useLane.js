@@ -1,36 +1,16 @@
-import { useEffect } from 'react'
-
-// This computer's lane: the location and gate it works at, remembered in the browser.
-// Entry and exit screens are remembered separately (a gate is for entry, exit or both).
-const key = (direction) => `sp_lane_${direction}`
-
-const read = (direction) => {
-  try {
-    return JSON.parse(localStorage.getItem(key(direction))) || {}
-  } catch {
-    return {}
-  }
-}
-
-// The location and gate to start with: the remembered ones when they still exist and still fit.
-export function initialLane(locations, defaultId, direction) {
-  const saved = read(direction)
+// The lane an operator works at: the location and gate the company admin assigned to them (Users > lanes).
+// The operator never chooses a location or a gate on the entry and exit screens.
+//
+// `locations` come from useMyLocations (already narrowed to the user's lanes), `lanes` are the user's
+// assigned lanes ({ locationId, gate }), `direction` is 'ENTRY' or 'EXIT'. A person with no assigned lane
+// (an older account) starts on the preferred location, or the first one, and on its only gate for the direction.
+export function assignedLane(locations, lanes, direction, preferredId = '') {
   const fitting = (location) => (location?.gates || []).filter((g) => g.type === 'BOTH' || g.type === direction)
-  // A location with only one lane for this direction (always so for someone tied to one lane) starts on it.
-  const onlyLane = (location) => (fitting(location).length === 1 ? fitting(location)[0].name : '')
-  const location = locations.find((l) => l._id === saved.locationId)
-  if (!location) return { locationId: defaultId, gate: onlyLane(locations.find((l) => l._id === defaultId)) }
-  const fits = fitting(location).some((g) => g.name === saved.gate)
-  return { locationId: location._id, gate: fits ? saved.gate : onlyLane(location) }
-}
-
-export function useRememberLane(direction, locationId, gate) {
-  useEffect(() => {
-    if (!locationId) return
-    try {
-      localStorage.setItem(key(direction), JSON.stringify({ locationId, gate: gate || '' }))
-    } catch {
-      // private window or blocked storage: the choice is just not remembered
-    }
-  }, [direction, locationId, gate])
+  const mine = (lanes || []).find((lane) => locations.some((l) => l._id === lane.locationId))
+  const location = (mine && locations.find((l) => l._id === mine.locationId))
+    || locations.find((l) => l._id === preferredId)
+    || locations[0]
+  if (!location) return { locationId: '', gate: '' }
+  const gates = fitting(location)
+  return { locationId: location._id, gate: gates.length === 1 ? gates[0].name : '' }
 }
