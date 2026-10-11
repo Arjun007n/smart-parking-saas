@@ -35,7 +35,9 @@ it("enquiry: bad input is refused, spam is dropped quietly, floods are limited",
   assert.equal((await api("POST", "/api/leads", { body: { name: "R", email: "nope" } })).status, 400);
   assert.equal((await api("POST", "/api/leads", { body: lead({ phone: "call me" }) })).status, 400);
   assert.equal((await api("POST", "/api/leads", { body: lead({ type: "HACK" }) })).status, 400);
+  // A database operator is refused before it reaches the enquiry route, so it does not use up this route's limit.
   assert.equal((await api("POST", "/api/leads", { body: lead({ email: { $gt: "" } }) })).status, 400);
+  assert.equal((await api("POST", "/api/leads", { body: lead({ email: "nope-again" }) })).status, 400);
 
   // The hidden "website" field is filled only by bots: looks successful, stores nothing.
   const spam = await api("POST", "/api/leads", { body: lead({ email: "bot@example.com", website: "http://spam.example" }) });

@@ -37,8 +37,6 @@ app.use(
   })
 );
 app.use(express.urlencoded({ extended: true, limit: "100kb" }));
-// Defence in depth against database-operator injection: no `$operator` keys in anything a client sends.
-app.use(require("./middleware/noOperators"));
 
 if (env.nodeEnv !== "test") app.use(morgan(env.isProduction ? "combined" : "dev"));
 
@@ -57,6 +55,9 @@ const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: () => env.apiRateLimitM
 // they have their own, much higher ceiling and do not use up the people's.
 const deviceLimiter = rateLimit({ windowMs: 60 * 1000, max: () => env.apiRateLimitMax * 5 });
 app.use("/api", (req, res, next) => (req.path.startsWith("/device") ? deviceLimiter : apiLimiter)(req, res, next));
+// Defence in depth against database-operator injection: no `$operator` keys in anything a client sends.
+// After the request ceiling above, so refused requests still count against it.
+app.use("/api", require("./middleware/noOperators"));
 
 app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/users", require("./routes/userRoutes"));
