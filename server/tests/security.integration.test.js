@@ -112,6 +112,27 @@ it("database-operator injection is refused in bodies and ignored in the address"
   }
 });
 
+it("nobody can change their own role, permissions or password through the user screens", async () => {
+  const mine = String(s.a.user._id);
+  // The company admin is not among the people they may manage, so their own record is "not found".
+  for (const body of [{ role: "COMPANY_ADMIN" }, { role: "SUPER_ADMIN" }, { isActive: false }, { password: "AnotherPass123" }]) {
+    const res = await api("PUT", `/api/users/${mine}`, { token: s.a.token, body });
+    // 404 (not among the people they manage) or 400 (a role that cannot be given at all): never a change.
+    assert.ok([400, 404].includes(res.status), `${JSON.stringify(body)} -> ${res.status}`);
+  }
+  // A location admin cannot lift themselves, or the company admin above them, either.
+  const own = await User.findOne({ email: "sec-locadmin@example.com" });
+  const self = await api("PUT", `/api/users/${own._id}`, { token: s.locAdmin, body: { role: "COMPANY_ADMIN" } });
+  assert.equal(self.status, 404);
+  const up = await api("PUT", `/api/users/${mine}`, { token: s.locAdmin, body: { password: "AnotherPass123" } });
+  assert.equal(up.status, 404);
+  assert.equal((await User.findById(own._id)).role, "LOCATION_ADMIN");
+  assert.equal((await User.findById(mine)).role, "COMPANY_ADMIN");
+  // Nobody can create a platform administrator.
+  const root = await api("POST", "/api/users", { token: s.a.token, body: { name: "Root", email: "sec-root@example.com", password: "Password123", role: "SUPER_ADMIN" } });
+  assert.ok([400, 403].includes(root.status), String(root.status));
+});
+
 it("tokens: forged, altered, expired or orphaned tokens are refused", async () => {
   const me = (token) => api("GET", "/api/auth/me", { token });
   const payload = { sub: s.a.user._id, tv: 0 };

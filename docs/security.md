@@ -16,6 +16,8 @@ where the system is hosted and must be done on Day 30.
 | Input validation | Tested | Each route lists the fields it accepts; anything else is dropped; wrong types are refused (blocks database-operator injection) |
 | Rate limiting | Tested | 600 requests/min per IP for the whole API; 20 per 15 min on register and password routes; 100 per 15 min on login; 5 per 15 min on the contact form |
 | CSRF protection | Not needed | Login uses an `Authorization` header, not cookies, so a foreign site cannot send it |
+| CORS | Tested | Only the addresses in `CLIENT_URL` (one or several, comma separated) may call the API from a browser. In production `CLIENT_URL` is required and must be https, or the server will not start |
+| Operators in requests | Tested | Any `$operator` key in a body, query or route parameter is refused with 400 (`middleware/noOperators.js`), on top of each route's field list |
 | Security headers | Tested | helmet: no-sniff, frame options, HSTS, content security policy; `X-Powered-By` removed |
 | Payment webhook verification | Tested | HMAC-SHA256 over the exact body, constant-time comparison; refused when no secret is set |
 | Audit logs | Tested | Append-only in the model, no API to change them |
@@ -99,3 +101,25 @@ Found while reviewing the code, and fixed:
 2. `npm run lint` and `npm run build` in `client`.
 3. `npm audit` in both folders.
 4. `npm run backup`, then restore it into a `_restore` database once.
+
+
+## Your security checklist, item by item (checked against the code, October 2026)
+
+**Done and tested in code**
+* Passwords: bcrypt, cost 12. Tokens: HS256 only, 7-day expiry (`JWT_EXPIRES_IN`), checked on every protected route, ended by logout, password change, deactivation or role change.
+* Rate limits: login, register, password routes, OTP, contact form, checkout, and the whole API per IP. Request bodies are limited to 100 KB.
+* Errors: production answers say "Something went wrong"; stack traces and details show only when `NODE_ENV` is `development` or `test`.
+* Every route except the public booking and gate-device routes sits behind `protect`, then the tenant filter, then a permission check. The gate-device routes use a device key.
+* Another company's data cannot be reached by changing an id (the isolation sweep). Roles: nobody can manage a role equal to or above their own, so nobody can promote or edit themselves through the user screens (test added).
+* IDs, types and allowed fields are validated per route; unknown fields are dropped.
+* Bookings and entries: parallel tests prove one ticket, one space and no overfilling. Money, shifts, refunds and sensitive changes are written to the append-only audit log.
+* `.env` and device keys are in `.gitignore`. Secrets are read from environment variables, and `JWT_SECRET` must be 32+ characters in production.
+
+**Needs you (cannot be done from code)**
+* MongoDB Atlas: Network Access must not be `0.0.0.0/0` in production (allow only the host's addresses), and the app's database user should have only readWrite on its own database, not Atlas admin. Rotate the database password that was shared in chat.
+* HTTPS: the host (Render) provides the certificate. Set `FORCE_HTTPS=true` if it does not redirect http itself.
+* Production settings: set `NODE_ENV=production`, `JWT_SECRET`, `MONGO_URI`, `CLIENT_URL` (https) and the provider keys in the host's settings, never in files.
+* `npm audit` in `server` and `client` (this environment has no internet access to run it), and apply fixes that do not need `--force`.
+* Backups: run `npm run backup`, then `npm run restore -- <folder>` once into the `_restore` database, and keep scheduled Atlas backups on.
+* Monitoring: connect an error-monitoring service in `server/utils/monitor.js` and watch the host's logs.
+* Run `npm test` in `server` (all tests) and `npm run build` in `client`.

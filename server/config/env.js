@@ -2,6 +2,14 @@
 // value is missing so the server never starts half-configured.
 const required = ["MONGO_URI", "JWT_SECRET"];
 
+// CLIENT_URL may list several approved web addresses separated by commas (for example the site and the admin
+// site). The first one is used in the links of emails and payment returns.
+const parseOrigins = (value) =>
+  String(value || "")
+    .split(",")
+    .map((origin) => origin.trim().replace(/\/+$/, ""))
+    .filter(Boolean);
+
 const validateEnv = () => {
   const missing = required.filter((key) => !process.env[key]);
   if (missing.length) {
@@ -55,6 +63,15 @@ const validateEnv = () => {
   }
   const fastagProblems = fastag.provider().problems();
   if (fastagProblems.length) throw new Error(`FASTAG_PROVIDER=${fastag.providerName()}: ${fastagProblems.join("; ")}`);
+  // Browsers: only the approved web addresses may call the API. In production they must be set (not the
+  // localhost default) and must be https.
+  if (process.env.NODE_ENV === "production") {
+    if (!String(process.env.CLIENT_URL || "").trim()) {
+      throw new Error("CLIENT_URL is required in production: the address(es) of the web app, separated by commas");
+    }
+    const insecure = parseOrigins(process.env.CLIENT_URL).filter((origin) => !origin.startsWith("https://"));
+    if (insecure.length) throw new Error(`CLIENT_URL must use https in production: ${insecure.join(", ")}`);
+  }
 };
 
 module.exports = {
@@ -81,7 +98,12 @@ module.exports = {
     return process.env.JWT_EXPIRES_IN || "7d";
   },
   get clientUrl() {
-    return process.env.CLIENT_URL || "http://localhost:5173";
+    return this.corsOrigins[0];
+  },
+  // Every web address the browser may call the API from.
+  get corsOrigins() {
+    const list = parseOrigins(process.env.CLIENT_URL);
+    return list.length ? list : ["http://localhost:5173"];
   },
   get authRateLimitMax() {
     return Number(process.env.AUTH_RATE_LIMIT_MAX) || 20;

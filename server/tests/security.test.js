@@ -157,3 +157,43 @@ test("database name is read from a connection string", () => {
   assert.equal(databaseName("mongodb://127.0.0.1:27017/smart_parking"), "smart_parking");
   assert.equal(databaseName("mongodb+srv://u:p@cluster.example.net/?appName=x"), "");
 });
+
+test("requests carrying database operators are refused", () => {
+  const noOperators = require("../middleware/noOperators");
+  const run = (req) => {
+    let outcome = "passed";
+    noOperators({ originalUrl: "/api/vehicles", body: {}, query: {}, params: {}, ...req }, {}, (error) => { if (error) outcome = error.statusCode; });
+    return outcome;
+  };
+  assert.equal(run({}), "passed");
+  assert.equal(run({ body: { name: "Asha", vehicles: [{ number: "RJ14" }] } }), "passed");
+  assert.equal(run({ body: { email: { $ne: "" } } }), 400);
+  assert.equal(run({ query: { q: { $regex: ".*" } } }), 400);
+  assert.equal(run({ body: { list: [{ deep: { $where: "1" } }] } }), 400);
+  assert.equal(run({ params: { id: { $gt: "" } } }), 400);
+  // The payment webhook has its own signature check and payload shape.
+  assert.equal(run({ originalUrl: "/api/payments/webhook", body: { $odd: 1 } }), "passed");
+});
+
+test("CORS: only the approved web addresses, https and required in production", () => {
+  const saved = { url: process.env.CLIENT_URL, node: process.env.NODE_ENV };
+  const withUrl = (url, nodeEnv, fn) => {
+    if (url === undefined) delete process.env.CLIENT_URL; else process.env.CLIENT_URL = url;
+    process.env.NODE_ENV = nodeEnv;
+    try { return fn(); } finally {
+      if (saved.url === undefined) delete process.env.CLIENT_URL; else process.env.CLIENT_URL = saved.url;
+      process.env.NODE_ENV = saved.node;
+    }
+  };
+  // One or several addresses; a trailing slash is ignored; the first one is used in email links.
+  withUrl("https://app.example.com/, https://admin.example.com", "test", () => {
+    assert.deepEqual(env.corsOrigins, ["https://app.example.com", "https://admin.example.com"]);
+    assert.equal(env.clientUrl, "https://app.example.com");
+  });
+  withUrl(undefined, "test", () => assert.deepEqual(env.corsOrigins, ["http://localhost:5173"]));
+  // Production: must be set, and must be https.
+  const check = () => { process.env.MONGO_URI = "mongodb://x"; env.validateEnv(); };
+  withUrl(undefined, "production", () => assert.throws(check, /CLIENT_URL is required/));
+  withUrl("http://app.example.com", "production", () => assert.throws(check, /must use https/));
+  withUrl("https://app.example.com", "production", () => assert.doesNotThrow(check));
+});

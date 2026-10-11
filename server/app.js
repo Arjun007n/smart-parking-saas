@@ -26,7 +26,7 @@ if (env.isProduction && env.forceHttps) {
 }
 
 app.use(helmet());
-app.use(cors({ origin: env.clientUrl, credentials: true }));
+app.use(cors({ origin: env.corsOrigins, credentials: true }));
 app.use(
   express.json({
     limit: "100kb",
@@ -37,6 +37,8 @@ app.use(
   })
 );
 app.use(express.urlencoded({ extended: true, limit: "100kb" }));
+// Defence in depth against database-operator injection: no `$operator` keys in anything a client sends.
+app.use(require("./middleware/noOperators"));
 
 if (env.nodeEnv !== "test") app.use(morgan(env.isProduction ? "combined" : "dev"));
 
