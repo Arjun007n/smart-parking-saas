@@ -52,6 +52,9 @@ export default function OperatorLayout() {
   const { theme, setTheme, reset } = useTheme()
   const [panel, setPanel] = useState('') // '', 'theme', 'bookings' or 'help'
   const [menu, setMenu] = useState('') // '', 'more' or 'profile'
+  // Where the More list opens (under its button). The bar scrolls sideways and would clip a list placed inside it,
+  // so the list is placed on the page itself.
+  const [morePlace, setMorePlace] = useState({ left: 0, top: 0 })
   const { bookings } = useBookings('all')
   const toast = useToast()
   const [sound, setSound] = useState(soundEnabled)
@@ -130,7 +133,11 @@ export default function OperatorLayout() {
               <button
                 type="button"
                 aria-expanded={menu === 'more'}
-                onClick={() => setMenu(menu === 'more' ? '' : 'more')}
+                onClick={(event) => {
+                  const box = event.currentTarget.getBoundingClientRect()
+                  setMorePlace({ left: Math.max(8, Math.min(box.left, window.innerWidth - 200)), top: box.bottom + 4 })
+                  setMenu(menu === 'more' ? '' : 'more')
+                }}
                 className={`flex items-center gap-1 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-bold hover:bg-slate-100/20 ${ink}`}
               >
                 More <span aria-hidden="true">▾</span>
@@ -138,7 +145,7 @@ export default function OperatorLayout() {
               {menu === 'more' && (
                 <>
                   <button type="button" aria-label="Close menu" className="fixed inset-0 z-20 cursor-default" onClick={closeMenu} />
-                  <div className="absolute left-0 top-full z-30 mt-1 w-48 overflow-hidden rounded-xl bg-white py-1 shadow-lg ring-1 ring-slate-200">
+                  <div style={{ left: morePlace.left, top: morePlace.top }} className="fixed z-30 w-48 overflow-hidden rounded-xl bg-white py-1 shadow-lg ring-1 ring-slate-200">
                     {MORE.map((item) => (
                       <NavLink key={item.to} to={item.to} onClick={closeMenu} className={menuItem}>{item.label}</NavLink>
                     ))}
