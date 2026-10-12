@@ -31,6 +31,12 @@ export default function Receipt() {
   const { user } = useAuth()
   const thermal = useMutation({ mutationFn: () => parkingApi.print(id) })
 
+  // A receipt printed from the browser is counted as a reprint for the person who printed it.
+  const printHere = (action) => {
+    parkingApi.reprint(id).catch(() => {})
+    action()
+  }
+
   if (isLoading) return <PageLoader />
   if (error) return <Alert>{errorMessage(error)}</Alert>
 
@@ -52,8 +58,8 @@ export default function Receipt() {
               Print on gate printer
             </Button>
           )}
-          <Button variant="secondary" onClick={() => printThermal(80)}>Print 80 mm slip</Button>
-          <Button onClick={() => window.print()}>Print / save as PDF</Button>
+          <Button variant="secondary" onClick={() => printHere(() => printThermal(80))}>Print 80 mm slip</Button>
+          <Button onClick={() => printHere(() => window.print())}>Print / save as PDF</Button>
         </div>
       </div>
       <div className="no-print space-y-2">

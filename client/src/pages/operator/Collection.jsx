@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { operatorApi, parkingApi, paymentApi, shiftApi } from '../../services/api'
-import { useAuth } from '../../hooks/useAuth'
 import { useMyLocations } from '../../hooks/useMyLocations'
 import { errorMessage } from '../../utils/errors'
 import { PAYMENT_LABELS, SESSION_STATUS, duration, money, timeOnly, todayInput } from '../../utils/format'
@@ -10,37 +9,6 @@ import { Alert, Badge, Button, Card, Field, PageLoader, Select } from '../../com
 import ShiftPanel from '../../components/operator/ShiftPanel'
 import CollectionByType from '../../components/operator/CollectionByType'
 import MoneyTiles from '../../components/operator/MoneyTiles'
-
-// Lets an admin give the money of a paid exit back.
-function RefundButton({ session }) {
-  const queryClient = useQueryClient()
-  const refund = useMutation({
-    mutationFn: (reason) => paymentApi.refund(session.paymentId, reason),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['collection'] })
-      queryClient.invalidateQueries({ queryKey: ['shift'] })
-      queryClient.invalidateQueries({ queryKey: ['shifts'] })
-    },
-  })
-
-  const ask = () => {
-    const reason = window.prompt(`Refund ${money(session.fee?.total)} for ${session.vehicleNumber}? This is recorded in the audit log. Reason:`)
-    if (reason === null) return
-    if (reason.trim().length < 5) {
-      window.alert('Please give a reason of at least 5 characters.')
-      return
-    }
-    refund.mutate(reason.trim().slice(0, 300))
-  }
-
-  if (refund.isSuccess) return <Badge>Refunded</Badge>
-  return (
-    <>
-      <Button variant="danger" loading={refund.isPending} onClick={ask}>Refund</Button>
-      {refund.error && <span className="mt-1 block text-xs text-red-600">{errorMessage(refund.error)}</span>}
-    </>
-  )
-}
 
 function ShiftsOfDay({ params }) {
   const { data = [], isLoading, error } = useQuery({ queryKey: ['shifts', params], queryFn: () => shiftApi.list(params) })
@@ -83,8 +51,6 @@ function ShiftsOfDay({ params }) {
 }
 
 export default function Collection() {
-  const { can } = useAuth()
-  const canRefund = can('LOCATION_MANAGE')
   const { locations, defaultId, isLoading: locationsLoading } = useMyLocations()
   const [filters, setFilters] = useState({ date: todayInput(), locationId: '' })
   const params = { date: filters.date, ...(filters.locationId ? { locationId: filters.locationId } : {}) }
@@ -159,11 +125,8 @@ export default function Collection() {
                 )}
               </div>
               <div className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
-                <p className="text-sm text-slate-500">Net after refunds</p>
-                <p className="mt-1 text-2xl font-bold text-slate-900">{money(c.net)}</p>
-                <p className="mt-1 text-xs text-slate-500">
-                  {c.refunded.count} refund{c.refunded.count === 1 ? '' : 's'}: {money(c.refunded.amount)} · tax in total {money(c.total.tax)}
-                </p>
+                <p className="text-sm text-slate-500">Tax in total</p>
+                <p className="mt-1 text-2xl font-bold text-slate-900">{money(c.total.tax)}</p>
               </div>
             </div>
 
@@ -276,9 +239,6 @@ export default function Collection() {
                       <Link to={`/operator/receipt/${session._id}`} className="text-blue-700 hover:underline">
                         Receipt
                       </Link>
-                      {canRefund && session.paymentId && (
-                        <span className="ml-3 inline-block align-middle"><RefundButton session={session} /></span>
-                      )}
                     </td>
                   </tr>
                 ))}

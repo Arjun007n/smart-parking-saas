@@ -367,9 +367,10 @@ const afterEntry = async ({ session, requestedBy }) => {
   return outcome;
 };
 
-// After a vehicle was cleared to leave (paid, free or overridden): raise the
-// exit barrier and print the receipt (built only if there is a printer).
-const afterExit = async ({ session, requestedBy, print = true }) => {
+// After a vehicle was cleared to leave (paid, free or overridden): raise the exit barrier.
+// The receipt is NOT printed by itself: the operator prints it with the "Print bill" button
+// (pass `print: true` to print it automatically).
+const afterExit = async ({ session, requestedBy, print = false }) => {
   const { buildReceipt } = require("./receiptService");
   const snapshot = safely("Exit snapshot", () => requestSnapshot({ session, direction: "EXIT", gate: session.exitGate }));
   const outcome = settle(await Promise.all([

@@ -80,8 +80,8 @@ it("exit amount edit: needs the switch, a reason, and is recorded", async () => 
   assert.equal(edited.body.data.session.feeEdit.calculated, original);
   assert.equal(edited.body.data.session.feeEdit.reason, "Regular customer");
   // The payment must match the changed amount.
-  const wrong = await api("POST", "/api/payments", { token: s.exit, body: { sessionId: edited.body.data.session._id, method: "CASH", amount: original } });
-  assert.equal(wrong.status, 409, "paying the old amount is refused");
+  const wrong = await api("POST", "/api/payments", { token: s.exit, body: { sessionId: edited.body.data.session._id, method: "CASH", amount: 10 } });
+  assert.equal(wrong.status, 409, "paying less than the changed amount is refused");
   const paid = await api("POST", "/api/payments", { token: s.exit, body: { sessionId: edited.body.data.session._id, method: "CASH", amount: 20 } });
   assert.equal(paid.status, 201, JSON.stringify(paid.body));
   s.paidCash = 20;
@@ -123,47 +123,49 @@ it("reprints are counted on the ticket and in the audit log", async () => {
   assert.equal((await api("POST", `/api/parking/sessions/${id}/reprint`, {})).status, 401);
 });
 
-it("re-entry counter: the admin sets a daily limit per operator, sees the count and resets it; operators see neither", async () => {
+it("re-entry and reprint have no limit; the admin sees the count per operator on the dashboard and in the reports", async () => {
   const reenter = () => api("POST", `/api/parking/sessions/${s.reentered._id}/re-entry`, { token: s.entry, body: {} });
-  assert.equal((await rules({ reEntryLimit: -1 })).status, 400);
-  assert.equal((await rules({ reEntryLimit: 2000 })).status, 400);
-  assert.equal((await rules({ reEntryLimit: 1 })).status, 200);
-  // Only an admin can change the limit.
-  assert.equal((await api("PUT", `/api/locations/${s.loc._id}`, { token: s.entry, body: { operations: { reEntryLimit: 99 } } })).status, 403);
+  // No daily limit, no age window: nothing stops the operator.
+  for (let i = 0; i < 3; i += 1) {
+    const ok = await reenter();
+    assert.equal(ok.status, 201, JSON.stringify(ok.body));
+    s.reentered = ok.body.data.session;
+  }
 
-  // The earlier re-entry by this operator already used the one allowed today.
-  const refused = await reenter();
-  assert.equal(refused.status, 403, JSON.stringify(refused.body));
-  assert.match(refused.body.message, /ask an admin/i);
-  assert.doesNotMatch(refused.body.message, /\d+ of|limit/i, "the count is not shown to the operator");
+  // The admin dashboard carries the count as a tile; gate staff cannot open the dashboard at all.
+  const dash = await api("GET", "/api/dashboard", { token: s.a.token });
+  assert.equal(dash.status, 200, JSON.stringify(dash.body));
+  assert.equal(dash.body.data.reEntries.total, 4);
+  assert.equal(dash.body.data.reEntries.operators[0].name, "Gate In");
+  assert.equal(dash.body.data.reEntries.operators[0].count, 4);
+  assert.equal((await api("GET", "/api/dashboard", { token: s.entry })).status, 403);
+  // The tile opens the Re-entries report: who, when, which vehicle, and the old and new ticket.
+  const detail = await api("GET", "/api/reports/re-entries", { token: s.a.token });
+  assert.equal(detail.status, 200, JSON.stringify(detail.body));
+  assert.equal(detail.body.data.total, 4);
+  assert.equal(detail.body.data.byOperator[0].operator, "Gate In");
+  assert.equal(detail.body.data.byOperator[0].count, 4);
+  const line = detail.body.data.rows[0];
+  assert.equal(line.operator, "Gate In");
+  assert.ok(line.oldTicket && line.ticket && line.oldTicket !== line.ticket, JSON.stringify(line));
+  assert.equal((await api("GET", "/api/reports/re-entries", { token: s.entry })).status, 403);
 
-  const counter = await api("GET", `/api/locations/${s.loc._id}/re-entries`, { token: s.a.token });
-  assert.equal(counter.status, 200, JSON.stringify(counter.body));
-  assert.equal(counter.body.data.limit, 1);
-  assert.equal(counter.body.data.total, 1);
-  assert.equal(counter.body.data.operators[0].name, "Gate In");
-  assert.equal(counter.body.data.operators[0].count, 1);
-  assert.equal(counter.body.data.operators[0].atLimit, true);
-  // Gate staff cannot see or reset the counter.
-  assert.equal((await api("GET", `/api/locations/${s.loc._id}/re-entries`, { token: s.entry })).status, 403);
-  assert.equal((await api("POST", `/api/locations/${s.loc._id}/re-entries/reset`, { token: s.entry })).status, 403);
-
-  // After a reset the operator can go on, and the new one is counted from zero.
-  const reset = await api("POST", `/api/locations/${s.loc._id}/re-entries/reset`, { token: s.a.token });
-  assert.equal(reset.status, 200, JSON.stringify(reset.body));
-  assert.equal(reset.body.data.total, 0);
-  const ok = await reenter();
-  assert.equal(ok.status, 201, JSON.stringify(ok.body));
-  s.reentered = ok.body.data.session;
-  const after = await api("GET", `/api/locations/${s.loc._id}/re-entries`, { token: s.a.token });
-  assert.equal(after.body.data.total, 1);
-  assert.equal((await reenter()).status, 403, "the limit applies again");
-
-  // No limit: back to normal.
-  await rules({ reEntryLimit: 0 });
-  const free = await reenter();
-  assert.equal(free.status, 201, JSON.stringify(free.body));
-  s.reentered = free.body.data.session;
+  // Reprints: as many as asked for, each recorded against the person who made it. Admin only.
+  const before = (await api("GET", "/api/reports/reprints", { token: s.a.token })).body.data.total;
+  for (let i = 0; i < 3; i += 1) {
+    assert.equal((await api("POST", `/api/parking/sessions/${s.reentered._id}/reprint`, { token: s.entry })).status, 200);
+  }
+  const prints = await api("GET", "/api/reports/reprints", { token: s.a.token });
+  assert.equal(prints.status, 200, JSON.stringify(prints.body));
+  assert.equal(prints.body.data.total, before + 3);
+  const mine = prints.body.data.byOperator.find((r) => r.operator === "Gate In");
+  assert.ok(mine && mine.count >= 3, JSON.stringify(prints.body.data.byOperator));
+  assert.equal(prints.body.data.rows[0].operator, "Gate In");
+  assert.equal(prints.body.data.rows[0].ticket, s.reentered.ticketNumber);
+  assert.equal((await api("GET", "/api/reports/reprints", { token: s.entry })).status, 403);
+  const dash2 = await api("GET", "/api/dashboard", { token: s.a.token });
+  assert.equal(dash2.body.data.reprints.total, before + 3);
+  assert.equal(dash2.body.data.reprints.operators[0].name, "Gate In");
 });
 
 it("collection by operator: counts, money by way of payment, actual against system", async () => {
@@ -181,7 +183,7 @@ it("collection by operator: counts, money by way of payment, actual against syst
   const entryRow = byName["Gate In"];
   const exitRow = byName["Gate Out"];
   assert.ok(entryRow.entries >= 4, "entries counted for the person who made them");
-  assert.equal(entryRow.reprints, 2);
+  assert.equal(entryRow.reprints, 5, "2 on the first ticket, 3 on the last");
   assert.equal(exitRow.cash, 20);
   assert.equal(exitRow.paidExits, 1);
   assert.equal(exitRow.exitAmount, 20);
@@ -320,7 +322,7 @@ it("dashboard: by vehicle type, month, momentum, passes and the plan end", async
   assert.ok(d.momentum.every((m) => m.inside >= 0));
   assert.equal(d.momentum[d.momentum.length - 1].inside, d.traffic.currentVehicles, "the last hour ends at the number inside now");
   assert.equal(typeof d.reprintsToday, "number");
-  assert.equal(d.reprintsToday, 2);
+  assert.equal(d.reprintsToday, 5);
   assert.deepEqual(Object.keys(d.passes).sort(), ["active", "activeRevenue", "endingSoon", "total"]);
   assert.equal(typeof d.passes.activeRevenue, "number");
   assert.equal(d.subscription.status, "TRIAL");

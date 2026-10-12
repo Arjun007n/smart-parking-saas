@@ -3,7 +3,6 @@ export const OPERATION_DEFAULTS = {
   allowReEntry: true,
   exitAmountEdit: false,
   autoExitHours: 0,
-  reEntryLimit: 0,
   printTicketNumber: true,
   printPhoto: false,
   photoAutoCapture: false,
@@ -11,7 +10,7 @@ export const OPERATION_DEFAULTS = {
 }
 
 export const OPERATION_SWITCHES = [
-  { key: 'allowReEntry', label: 'Allow re-entry', hint: 'Gate staff can cancel a ticket made in the last few minutes and issue a new one (a misread plate, a wrong vehicle type).' },
+  { key: 'allowReEntry', label: 'Allow re-entry', hint: 'Gate staff can cancel a ticket and issue a new one for the same vehicle (a misread plate, a wrong vehicle type). There is no limit on how often; every re-entry is counted per operator in the admin reports.' },
   { key: 'exitAmountEdit', label: 'Allow changing the amount at exit', hint: 'The person at the exit can collect a different amount than the tariff. A reason is always asked for and everything is recorded.' },
   { key: 'printTicketNumber', label: 'Print the ticket number', hint: 'Show the ticket number in words on the ticket. The QR code is not affected.' },
   { key: 'printPhoto', label: 'Show the entry photo on the ticket', hint: 'The photo taken at entry appears on the ticket and receipt shown on screen.' },
@@ -25,7 +24,5 @@ export function operationSettings(raw) {
   for (const { key } of OPERATION_SWITCHES) out[key] = typeof source[key] === 'boolean' ? source[key] : OPERATION_DEFAULTS[key]
   const hours = Number(source.autoExitHours)
   out.autoExitHours = Number.isFinite(hours) && hours > 0 ? Math.min(720, Math.floor(hours)) : 0
-  const limit = Number(source.reEntryLimit)
-  out.reEntryLimit = Number.isFinite(limit) && limit > 0 ? Math.min(1000, Math.floor(limit)) : 0
   return out
 }

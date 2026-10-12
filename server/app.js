@@ -76,6 +76,7 @@ app.use("/api/operator", require("./routes/operatorRoutes"));
 app.use("/api/government", require("./routes/governmentRoutes"));
 app.use("/api/bookings", require("./routes/bookingRoutes"));
 app.use("/api/passes", require("./routes/passRoutes"));
+app.use("/api/pass-charges", require("./routes/passChargeRoutes"));
 app.use("/api/pass-companies", require("./routes/passCompanyRoutes"));
 app.use("/api/pass-users", require("./routes/passUserRoutes"));
 app.use("/api/pass-invoices", require("./routes/passInvoiceRoutes"));

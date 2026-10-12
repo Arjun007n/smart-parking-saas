@@ -25,7 +25,6 @@ const Vehicle = require("../models/Vehicle");
 const messageService = require("../services/messageService");
 const { resolveOperations, editedFee } = require("../utils/operations");
 const Location = require("../models/Location");
-const reEntryCounter = require("../services/reEntryService");
 
 const PAGE_SIZE = 50;
 const pageFrom = (req) => Math.min(1000, Math.max(1, Number.parseInt(req.query.page, 10) || 1));
@@ -453,14 +452,12 @@ const cancelSession = async (req, res) => {
 // POST /api/parking/sessions/:id/re-entry   { gate?, vehicleType? }
 // "Re-entry": the vehicle is on the books as inside but is entering again (a misread plate that was
 // corrected, a wrong vehicle type, a car that was turned back at the gate). The old ticket is
-// cancelled and a new one issued in one step. Operators may do this for a ticket made in the last
-// RE_ENTRY_WINDOW_MINUTES (default 15); older ones need an admin, because cancelling an old ticket
-// can hide a fee that was owed. A ticket with an advance must be cancelled by an admin first
-// (which gives the advance back). Both tickets stay in the audit log.
-const reEntryWindowMinutes = () => Math.max(1, Number(process.env.RE_ENTRY_WINDOW_MINUTES) || 15);
-
+// cancelled and a new one issued in one step. There is no daily limit, no age window and no advance rule
+// (only the location's on/off switch). Every one is recorded against the operator (entryOperatorId, reEntry: true) and shows in the
+// admin's Re-entries report. An advance taken on the old ticket is given back, as for any cancelled entry.
 const reEntry = async (req, res) => {
   const session = await findInScope(req);
+  // The location's "Allow re-entry" switch is the one rule that stays: an admin can switch it off.
   const reEntryLocation = await getAccessibleLocation(req, session.locationId);
   if (!resolveOperations(reEntryLocation.operations).allowReEntry) {
     throw new AppError("Re-entry is switched off for this location. Ask an admin to cancel the ticket and make a new entry.", 403);
@@ -471,21 +468,6 @@ const reEntry = async (req, res) => {
   if (repeat) return res.json({ success: true, data: { session: repeat, repeated: true } });
 
   if (!session.isOpen || session.status !== "ACTIVE") throw new AppError("Only a vehicle that is still inside can be entered again", 409);
-  if (session.advance && session.advance.amount > 0) {
-    throw new AppError("This ticket carries an advance payment. Ask an admin to cancel it (the advance is given back), then make a new entry.", 409);
-  }
-  const admin = can(req, P.LOCATION_MANAGE) || can(req, P.SESSION_OVERRIDE);
-  // The admin's daily limit per operator. The operator is only told to ask an admin: the count is not shown.
-  if (!admin && (await reEntryCounter.limitReached(reEntryLocation, req.user._id))) {
-    await audit.record(req, "PARKING_RE_ENTRY_LIMIT", {
-      entity: "ParkingSession", entityId: session._id, companyId: session.companyId, meta: { ticketNumber: session.ticketNumber },
-    });
-    throw new AppError("Re-entry is not available for you right now. Ask an admin to cancel the ticket and make a new entry.", 403);
-  }
-  const ageMinutes = (Date.now() - new Date(session.entryTime).getTime()) / 60000;
-  if (!admin && ageMinutes > reEntryWindowMinutes()) {
-    throw new AppError(`This ticket is more than ${reEntryWindowMinutes()} minutes old. Ask an admin to cancel it.`, 403);
-  }
 
   const location = await getAccessibleLocation(req, session.locationId, { mustBeActive: true });
   const vehicleType = req.body.vehicleType || session.vehicleType;
@@ -503,6 +485,8 @@ const reEntry = async (req, res) => {
     entity: "ParkingSession", entityId: closed._id, companyId: closed.companyId,
     meta: { ticketNumber: closed.ticketNumber, reason: "Re-entry", reEntry: true },
   });
+  // An advance taken on the old ticket goes back to the customer; the new ticket starts clean.
+  await advances.giveBack(req, session, { reason: "Re-entry: a new ticket was issued" });
 
   req.reEntry = true;
   req.laneSoft = true; // the old ticket's lane may not be the re-entering user's lane
@@ -646,7 +630,15 @@ const openBarrierByHand = async (req, res) => {
 // POST /api/parking/sessions/:id/reprint
 // The ticket (or receipt) was printed again from the browser: counts it, so the collection
 // report can show how many reprints each operator made.
-// A person the admin switched "Reprint" off for cannot print a ticket or receipt again.
+// The only rule left: a person the admin switched "Reprint" off for cannot print a ticket or receipt again.
+// There is no limit on how many times. Each one is counted on the ticket and recorded against the person who
+// made it (audit PARKING_REPRINT), which is what the admin's Reprints report adds up.
+const recordReprint = (req, session, kind) =>
+  audit.record(req, "PARKING_REPRINT", {
+    entity: "ParkingSession", entityId: session._id, companyId: session.companyId,
+    meta: { ticketNumber: session.ticketNumber, vehicleNumber: session.vehicleNumber, locationId: session.locationId, kind },
+  });
+
 const assertMayReprint = (req) => {
   if (req.user.access && req.user.access.reprint === false) {
     throw new AppError("You are not allowed to print a ticket or receipt again. Ask your admin.", 403);
@@ -657,9 +649,7 @@ const countReprint = async (req, res) => {
   assertMayReprint(req);
   const session = await findInScope(req);
   const updated = await ParkingSession.findByIdAndUpdate(session._id, { $inc: { reprints: 1 } }, { returnDocument: "after" });
-  await audit.record(req, "PARKING_REPRINT", {
-    entity: "ParkingSession", entityId: session._id, companyId: session.companyId, meta: { ticketNumber: session.ticketNumber },
-  });
+  await recordReprint(req, session, session.isOpen ? "ticket" : "receipt");
   res.json({ success: true, data: { reprints: updated.reprints } });
 };
 
@@ -677,6 +667,7 @@ const printSlip = async (req, res) => {
       });
   if (!result) throw new AppError("No single printer is set up for this gate", 404);
   await ParkingSession.updateOne({ _id: session._id }, { $inc: { reprints: 1 } });
+  await recordReprint(req, session, session.isOpen ? "ticket" : "receipt");
 
   res.status(201).json({
     success: true,

@@ -96,10 +96,6 @@ const locationSchema = new mongoose.Schema(
       allowReEntry: { type: Boolean },
       exitAmountEdit: { type: Boolean },
       autoExitHours: { type: Number, min: 0, max: 720 },
-      // How many re-entries one gate operator may make in a day at this location (0 = no limit). Set by an admin.
-      reEntryLimit: { type: Number, min: 0, max: 1000 },
-      // Re-entries made before this moment are not counted (the admin's "reset counter").
-      reEntryCountFrom: { type: Date },
       // Per vehicle type: close a ticket still open after `days` days. `amount` is what the vehicle
       // still owes (written on the ticket and in the alert; no money is recorded by the system).
       autoExitRules: [

@@ -94,7 +94,6 @@ const fields = (isCreate) => ({
     fields: {
       allowReEntry: { type: "boolean" }, exitAmountEdit: { type: "boolean" },
       autoExitHours: { type: "number", integer: true, min: 0, max: 720 },
-      reEntryLimit: { type: "number", integer: true, min: 0, max: 1000 },
       printTicketNumber: { type: "boolean" }, printPhoto: { type: "boolean" },
       photoAutoCapture: { type: "boolean" }, printPassReceipt: { type: "boolean" },
       autoExitRules: {
@@ -127,9 +126,6 @@ router.post(
   validateBody({ vehicleType: { type: "string", required: true, enum: VEHICLE_TYPES } }),
   controller.runAutoExit
 );
-// The re-entry counter: only an admin can see it, and only an admin can reset it.
-router.get("/:id/re-entries", validateIdParam(), requirePermission(PERMISSIONS.LOCATION_MANAGE), controller.reEntryCounter);
-router.post("/:id/re-entries/reset", validateIdParam(), requirePermission(PERMISSIONS.LOCATION_MANAGE), controller.resetReEntryCounter);
 // The Lanes tab: every lane with its operators and devices (?q= search, ?page=, ?limit=). The switch turns one lane on or off.
 router.get("/:id/lanes", validateIdParam(), controller.listLanes);
 // The Create / Edit Parking Lane form: one lane = one vehicle and one direction. Name, class and numbers follow from it.

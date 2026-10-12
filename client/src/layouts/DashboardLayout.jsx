@@ -36,6 +36,7 @@ const MENU = [
     children: [
       { to: '/dashboard/pass-management/users', label: 'Pass Users', permission: 'PASS_MANAGE' },
       { to: '/dashboard/pass-management/companies', label: 'Company Master', permission: 'PASS_MANAGE' },
+      { to: '/dashboard/pass-management/charges', label: 'Pass Charges', permission: 'PASS_MANAGE' },
       { to: '/dashboard/pass-management/passes', label: 'Passes List', permission: 'PASS_MANAGE' },
       { to: '/dashboard/pass-management/vehicles', label: 'Vehicle List', permission: 'PASS_MANAGE' },
       { to: '/dashboard/pass-management/invoices', label: 'Manage Invoice', permission: 'PASS_MANAGE' },

@@ -25,6 +25,7 @@ const wallets = require("../services/walletService");
 const fastagService = require("../services/fastagService");
 const fastagProvider = require("../integrations/fastag");
 const WalletTxn = require("../models/WalletTxn");
+const { editedFee } = require("../utils/operations");
 const { FEE_VALID_MINUTES, completePaidSession } = payments;
 
 const PAGE_SIZE = 50;
@@ -98,8 +99,39 @@ const createPayment = async (req, res) => {
   }
   // What is owed is the fee less any advance taken at entry.
   const owed = advances.amountDue(session);
-  if (Math.abs(amount - owed) > 0.005) {
+  // At the counter (cash, UPI or card) the customer may hand over MORE than the fee, and what was received is what
+  // is recorded: there is no change to give back. Less than the fee is never accepted.
+  const extra = round2(amount - owed);
+  const MORE_ALLOWED = ["CASH", "UPI", "CARD"];
+  if (extra < -0.005 || (extra > 0.005 && !MORE_ALLOWED.includes(method))) {
     throw new AppError(`The amount to pay for this session is ${owed}. Look the vehicle up again.`, 409);
+  }
+  let received = session;
+  if (extra > 0.005) {
+    // The ticket's fee becomes what was received (tax worked out again, the tariff's amount kept as `feeEdit.calculated`).
+    const raised = editedFee(session.toObject().fee, round2(session.fee.total + extra));
+    const updated = await ParkingSession.findOneAndUpdate(
+      { _id: session._id, isOpen: true, status: "PAYMENT_PENDING" },
+      {
+        $set: {
+          "fee.subtotal": raised.subtotal, "fee.tax": raised.tax, "fee.total": raised.total, "fee.reason": raised.reason,
+          "fee.due": round2(owed + extra),
+          ...(session.feeEdit && session.feeEdit.reason
+            ? {}
+            : {
+                "feeEdit.calculated": session.fee.total, "feeEdit.reason": "Amount received was more than the fee",
+                "feeEdit.by": req.user._id, "feeEdit.at": new Date(),
+              }),
+        },
+      },
+      { returnDocument: "after" }
+    );
+    if (!updated) throw new AppError("This session is no longer waiting for payment", 409);
+    received = updated;
+    await audit.record(req, "PARKING_FEE_EDITED", {
+      entity: "ParkingSession", entityId: session._id, companyId: session.companyId,
+      meta: { ticketNumber: session.ticketNumber, calculated: session.fee.total, charged: raised.total, reason: "Amount received was more than the fee" },
+    });
   }
 
   // Payments taken during the operator's open shift are counted in that shift.
@@ -110,8 +142,8 @@ const createPayment = async (req, res) => {
     companyId: session.companyId,
     locationId: session.locationId,
     sessionId: session._id,
-    amount: owed,
-    tax: session.fee.tax,
+    amount: round2(owed + Math.max(0, extra)),
+    tax: received.fee.tax,
     kind: "FEE",
     method,
     collectedBy: req.user._id,

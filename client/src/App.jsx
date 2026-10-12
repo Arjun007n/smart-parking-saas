@@ -34,6 +34,7 @@ import PassUserPasses from './pages/pass/PassUserPasses'
 import PassUserVehicles from './pages/pass/PassUserVehicles'
 import PassUserEdit from './pages/pass/PassUserEdit'
 import CompanyMaster from './pages/pass/CompanyMaster'
+import PassCharges from './pages/pass/PassCharges'
 import PassesList from './pages/pass/PassesList'
 import VehicleList from './pages/pass/VehicleList'
 import PassInvoices from './pages/pass/PassInvoices'
@@ -141,6 +142,7 @@ function App() {
             <Route path="pass-management/users/:id/vehicles" element={<PassUserVehicles />} />
             <Route path="pass-management/users/:id/edit" element={<PassUserEdit />} />
             <Route path="pass-management/companies" element={<CompanyMaster />} />
+            <Route path="pass-management/charges" element={<PassCharges />} />
             <Route path="pass-management/passes" element={<PassesList />} />
             <Route path="pass-management/vehicles" element={<VehicleList />} />
             <Route path="pass-management/invoices" element={<PassInvoices />} />

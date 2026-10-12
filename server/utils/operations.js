@@ -8,8 +8,6 @@ const DEFAULTS = Object.freeze({
   exitAmountEdit: false,
   // Close tickets that are still open after this many hours as "closed automatically". 0 = never.
   autoExitHours: 0,
-  // How many re-entries one gate operator may make in a day (0 = no limit). Only an admin sets it.
-  reEntryLimit: 0,
   // Print the ticket number in words on the ticket (the QR code, if on, is printed either way).
   printTicketNumber: true,
   // Show the entry photo on the ticket and receipt.
@@ -22,7 +20,6 @@ const DEFAULTS = Object.freeze({
 
 const KEYS = Object.freeze(Object.keys(DEFAULTS));
 const MAX_AUTO_EXIT_HOURS = 720;
-const MAX_RE_ENTRY_LIMIT = 1000;
 
 const resolveOperations = (raw) => {
   const source = (raw && typeof raw.toObject === "function" ? raw.toObject() : raw) || {};
@@ -32,8 +29,6 @@ const resolveOperations = (raw) => {
   }
   const hours = Number(source.autoExitHours);
   out.autoExitHours = Number.isFinite(hours) && hours > 0 ? Math.min(MAX_AUTO_EXIT_HOURS, Math.floor(hours)) : 0;
-  const limit = Number(source.reEntryLimit);
-  out.reEntryLimit = Number.isFinite(limit) && limit > 0 ? Math.min(MAX_RE_ENTRY_LIMIT, Math.floor(limit)) : 0;
   return out;
 };
 

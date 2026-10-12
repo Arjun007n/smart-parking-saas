@@ -12,6 +12,9 @@ const Pass = require("../models/Pass");
 const { typeSummary } = require("../services/typeSummaryService");
 const { validUpto } = require("../services/licenceService");
 const { VEHICLE_KEYS } = require("../models/constants");
+const { can } = require("../middleware/permission");
+const { PERMISSIONS } = require("../config/permissions");
+const reprintService = require("../services/reprintService");
 
 const TYPES = VEHICLE_KEYS;
 const PENDING_TOO_LONG_MINUTES = 30;
@@ -319,9 +322,45 @@ const getDashboard = async (req, res) => {
     alerts.push({ type: "SUBSCRIPTION_EXPIRY", severity: "critical", message: "Subscription payment is overdue" });
   }
 
+  // Re-entries and reprints made by each operator in the period. Only an admin (who manages locations) gets
+  // these: supervisors can open the dashboard, but the counts are not for them or for the operators.
+  let reEntries;
+  let reprints;
+  if (can(req, PERMISSIONS.LOCATION_MANAGE)) {
+    const rows = await ParkingSession.aggregate([
+      { $match: { ...inScope, reEntry: true, entryTime: { $gte: period.start, $lt: period.end } } },
+      { $group: { _id: "$entryOperatorId", count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+    ]);
+    const people = await User.find({ _id: { $in: rows.map((r) => r._id).filter(Boolean) } }).select("name loginId").lean();
+    const byId = new Map(people.map((u) => [String(u._id), u]));
+    reEntries = {
+      total: rows.reduce((sum, r) => sum + r.count, 0),
+      operators: rows.slice(0, 5).map((r) => {
+        const person = byId.get(String(r._id));
+        return { userId: r._id, name: person ? person.name : "Unknown", loginId: person ? person.loginId : undefined, count: r.count };
+      }),
+    };
+
+    const printRows = await reprintService.byOperator(
+      reprintService.matchFor({ tenantFilter: req.tenantFilter, locationIds: inScope.locationId.$in, start: period.start, end: period.end })
+    );
+    const printers = await User.find({ _id: { $in: printRows.map((r) => r._id).filter(Boolean) } }).select("name loginId").lean();
+    const printerById = new Map(printers.map((u) => [String(u._id), u]));
+    reprints = {
+      total: printRows.reduce((sum, r) => sum + r.count, 0),
+      operators: printRows.slice(0, 5).map((r) => {
+        const person = printerById.get(String(r._id));
+        return { userId: r._id, name: person ? person.name : "Unknown", loginId: person ? person.loginId : undefined, count: r.count };
+      }),
+    };
+  }
+
   res.json({
     success: true,
     data: {
+      ...(reEntries ? { reEntries } : {}),
+      ...(reprints ? { reprints } : {}),
       generatedAt: now,
       date: todayText,
       period: { from: period.from, to: period.to, days: period.days, isToday },

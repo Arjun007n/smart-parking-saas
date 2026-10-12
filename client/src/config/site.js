@@ -10,8 +10,6 @@ export const SITE = {
   legalName: '',
   // The place whose courts decide disputes, for example 'Bhopal, Madhya Pradesh, India'. Left out when empty.
   jurisdiction: '',
-  // When paid plans may be cancelled and what is refunded, in one or two sentences. Left out when empty.
-  refundPolicy: '',
   // A link to your demo video (YouTube or any page). The "Watch demo video" button shows only when this is set.
   demoVideoUrl: '',
 

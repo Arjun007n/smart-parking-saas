@@ -117,7 +117,7 @@ export default function BookLocation() {
             <Button type="submit" loading={create.isPending}>
               {fee > 0 ? `Continue to pay ${money(fee)}` : 'Book now'}
             </Button>
-            {fee > 0 && <p className="text-xs text-slate-500">The fee is taken off your parking charge when you arrive. If you cancel, ask the parking for a refund.</p>}
+            {fee > 0 && <p className="text-xs text-slate-500">The fee is taken off your parking charge when you arrive. The booking fee is not refundable.</p>}
           </form>
         )}
       </div>

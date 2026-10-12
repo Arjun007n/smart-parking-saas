@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { passCompanyApi, passUserApi } from '../../services/api'
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { passChargeApi, passCompanyApi, passUserApi } from '../../services/api'
 import { useMyLocations } from '../../hooks/useMyLocations'
 import { errorMessage } from '../../utils/errors'
 import { VEHICLE_LABELS, money } from '../../utils/format'
@@ -10,9 +10,21 @@ import CompanyModal from './CompanyModal'
 import { PM } from './listState'
 
 const ADD_COMPANY = 'add-new-company'
-const blankRow = (locationId = '') => ({ vehicleNumber: '', vehicleType: '', locationId, startDate: '', endDate: '', amount: '' })
+const blankRow = (locationId = '') => ({ vehicleNumber: '', vehicleType: '', locationId, startDate: '', endDate: '', amount: '', touched: false })
 const BLANK_USER = { mobile: '', name: '', passCompanyId: '', address: '', email: '', gstNumber: '' }
 const DAY = 86400000
+
+const pad = (n) => String(n).padStart(2, '0')
+const todayText = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+// "1 month + 5 days" under the charges, when they came from the Pass Charges table.
+const termText = (quote) => [
+  quote.months > 0 && `${quote.months} month${quote.months === 1 ? '' : 's'}`,
+  quote.days > 0 && `${quote.days} day${quote.days === 1 ? '' : 's'}`,
+].filter(Boolean).join(' + ')
 
 // "₹ 500.00 / month" under the charges, worked out from the two dates.
 const perMonth = (row) => {
@@ -39,7 +51,22 @@ export default function CreatePassForm({ onClose }) {
   const options = useQuery({ queryKey: ['pass-user-options'], queryFn: passUserApi.options, enabled: mode === 'existing' })
   const setU = (key) => (event) => setUser((u) => ({ ...u, [key]: event.target.value }))
   const setRow = (index, patch) => setRows((list) => list.map((r, i) => (i === index ? { ...r, ...patch } : r)))
-  const anyCharge = useMemo(() => rows.some((r) => Number(r.amount) > 0), [rows])
+  // The charges come from the Pass Charges table as soon as the location, vehicle type and dates are chosen.
+  // Typing an amount by hand (a discount, say) wins over the table until "Use table charges" is pressed.
+  const quotes = useQueries({
+    queries: rows.map((r) => {
+      const start = r.startDate || todayText()
+      return {
+        queryKey: ['pass-charge-quote', r.locationId, r.vehicleType, start, r.endDate],
+        queryFn: () => passChargeApi.quote({ locationId: r.locationId, vehicleType: r.vehicleType, startDate: start, endDate: r.endDate }),
+        enabled: Boolean(r.locationId && r.vehicleType && r.endDate && r.endDate >= start),
+        retry: false,
+      }
+    }),
+  })
+  const quoteOf = (index) => quotes[index]?.data
+  const amountOf = (row, index) => (row.touched ? row.amount : quoteOf(index)?.found ? String(quoteOf(index).amount) : row.amount)
+  const anyCharge = rows.some((r, i) => Number(amountOf(r, i)) > 0)
 
   const create = useMutation({
     mutationFn: () => passUserApi.create({
@@ -49,9 +76,9 @@ export default function CreatePassForm({ onClose }) {
         ...(user.passCompanyId ? { passCompanyId: user.passCompanyId } : {}),
       }),
       ...(anyCharge ? { method } : {}),
-      rows: rows.map((r) => ({
+      rows: rows.map((r, index) => ({
         vehicleNumber: r.vehicleNumber.trim(), vehicleType: r.vehicleType, locationId: r.locationId,
-        ...(r.startDate ? { startDate: r.startDate } : {}), endDate: r.endDate, amount: Number(r.amount),
+        ...(r.startDate ? { startDate: r.startDate } : {}), endDate: r.endDate, amount: Number(amountOf(r, index)),
       })),
     }),
     onSuccess: () => {
@@ -68,7 +95,7 @@ export default function CreatePassForm({ onClose }) {
     if (mode === 'existing' && !existingId) return setProblem('Choose the pass user.')
     if (mode === 'new' && !/^\d{10}$/.test(user.mobile.trim())) return setProblem('Mobile number must be exactly 10 digits.')
     if (mode === 'new' && (!user.name.trim() || !user.address.trim())) return setProblem('Enter the user name and the address.')
-    const incomplete = rows.findIndex((r) => !r.vehicleNumber.trim() || !r.vehicleType || !r.locationId || !r.endDate || r.amount === '')
+    const incomplete = rows.findIndex((r, i) => !r.vehicleNumber.trim() || !r.vehicleType || !r.locationId || !r.endDate || amountOf(r, i) === '')
     if (incomplete >= 0) return setProblem(`Fill in every field of vehicle ${incomplete + 1}.`)
     if (rows.some((r) => r.startDate && r.startDate > r.endDate)) return setProblem('A pass cannot end before it starts.')
     create.mutate()
@@ -155,8 +182,23 @@ export default function CreatePassForm({ onClose }) {
                 <td className="p-2"><input aria-label={`Vehicle ${index + 1} valid from`} type="date" className="w-full rounded-md border border-slate-300 px-2 py-1.5" value={row.startDate} onChange={(e) => setRow(index, { startDate: e.target.value })} /></td>
                 <td className="p-2"><input aria-label={`Vehicle ${index + 1} valid to`} type="date" className="w-full rounded-md border border-slate-300 px-2 py-1.5" min={row.startDate || undefined} value={row.endDate} onChange={(e) => setRow(index, { endDate: e.target.value })} /></td>
                 <td className="p-2">
-                  <input aria-label={`Vehicle ${index + 1} charges`} type="number" min="0" className="w-full rounded-md border border-slate-300 px-2 py-1.5" value={row.amount} onChange={(e) => setRow(index, { amount: e.target.value })} />
-                  <span className="text-xs text-slate-500">{perMonth(row)}</span>
+                  <input aria-label={`Vehicle ${index + 1} charges`} type="number" min="0" className="w-full rounded-md border border-slate-300 px-2 py-1.5" value={amountOf(row, index)} onChange={(e) => setRow(index, { amount: e.target.value, touched: true })} />
+                  {quoteOf(index)?.found && !row.touched && (
+                    <span className="block text-xs text-slate-500">
+                      {termText(quoteOf(index))} · {money(quoteOf(index).monthlyRate)}/month, {money(quoteOf(index).dailyRate)}/day
+                    </span>
+                  )}
+                  {quoteOf(index)?.found && row.touched && (
+                    <button type="button" className="block text-xs font-medium text-blue-700 underline" onClick={() => setRow(index, { touched: false, amount: '' })}>
+                      Use table charges ({money(quoteOf(index).amount)})
+                    </button>
+                  )}
+                  {quoteOf(index)?.found === false && (
+                    <span className="block text-xs text-amber-700">
+                      No charges set for this location and vehicle. Enter the amount, or <Link className="underline" to={`${PM}/charges`}>set it in Pass Charges</Link>.
+                    </span>
+                  )}
+                  {!quoteOf(index) && <span className="text-xs text-slate-500">{perMonth({ ...row, amount: amountOf(row, index) })}</span>}
                 </td>
                 <td className="p-2 text-center">
                   {index === rows.length - 1 && rows.length < 20 && (

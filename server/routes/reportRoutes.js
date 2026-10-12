@@ -29,6 +29,9 @@ router.get("/transactions", transactions.transactionsReport);
 router.get("/peak-hours", advanced.peakHoursReport);
 router.get("/occupancy-trend", advanced.occupancyTrendReport);
 router.get("/exceptions", advanced.exceptionsReport);
+// Admins only (the controller checks LOCATION_MANAGE): who replaced which tickets, who printed which again.
+router.get("/re-entries", advanced.reEntriesReport);
+router.get("/reprints", advanced.reprintsReport);
 router.get("/payments", advanced.paymentsReport);
 router.get("/durations", advanced.durationsReport);
 router.get("/passes", advanced.passesReport);

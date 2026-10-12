@@ -19,6 +19,10 @@ const AuditLog = require("../models/AuditLog");
 const mongoose = require("mongoose");
 const { normalizePlate, escapeRegex } = require("../utils/plate");
 const { sumCounts } = require("../models/constants");
+const { can } = require("../middleware/permission");
+const { PERMISSIONS } = require("../config/permissions");
+const { operatorIdFromQuery } = require("../utils/scope");
+const reprintService = require("../services/reprintService");
 
 const { reportScope, respond, userNames, wantsExport, pageFrom, CSV_LIMIT, PAGE_SIZE } = reports;
 const SESSION_LIMIT = 50000;
@@ -103,13 +107,126 @@ const occupancyTrendReport = async (req, res) => {
   ], rows, { capacity, busiest, from: range.from, to: range.to });
 };
 
+// ---------------------------------------------------------------- re-entries
+
+// GET /api/reports/re-entries?from=&to=&locationId=&operatorId=&page=
+// Every ticket an operator replaced with "Re-entry": who did it, when, for which vehicle, and the old and new
+// ticket. Admins only: the operators and supervisors never see these counts.
+const reEntriesReport = async (req, res) => {
+  if (!can(req, PERMISSIONS.LOCATION_MANAGE)) throw new AppError("Only an admin can see re-entries", 403);
+  const { locationNames, inScope, range } = await reportScope(req);
+  const operatorId = operatorIdFromQuery(req);
+  const filter = {
+    ...inScope, reEntry: true, entryTime: { $gte: range.start, $lt: range.end },
+    ...(operatorId ? { entryOperatorId: operatorId } : {}),
+  };
+  const csv = wantsExport(req);
+  const page = pageFrom(req);
+  const [docs, total, perOperator] = await Promise.all([
+    ParkingSession.find(filter).sort({ entryTime: -1 }).skip(csv ? 0 : (page - 1) * PAGE_SIZE).limit(csv ? CSV_LIMIT : PAGE_SIZE).lean(),
+    ParkingSession.countDocuments(filter),
+    ParkingSession.aggregate([
+      { $match: filter },
+      { $group: { _id: "$entryOperatorId", count: { $sum: 1 }, last: { $max: "$entryTime" } } },
+      { $sort: { count: -1 } },
+    ]),
+  ]);
+
+  // The new ticket remembers which one it replaced in its request key ("reentry-<old ticket id>").
+  const oldIdOf = (doc) => {
+    const key = typeof doc.idempotencyKey === "string" ? doc.idempotencyKey : "";
+    const id = key.startsWith("reentry-") ? key.slice(8) : "";
+    return mongoose.isValidObjectId(id) ? id : "";
+  };
+  const [oldTickets, names] = await Promise.all([
+    ParkingSession.find({ _id: { $in: docs.map(oldIdOf).filter(Boolean) } }).select("ticketNumber entryTime").lean(),
+    userNames([...docs.map((d) => d.entryOperatorId), ...perOperator.map((r) => r._id)]),
+  ]);
+  const oldById = new Map(oldTickets.map((t) => [String(t._id), t]));
+
+  const rows = docs.map((d) => {
+    const old = oldById.get(oldIdOf(d));
+    return {
+      when: d.entryTime,
+      location: locationNames.get(String(d.locationId)) || "",
+      operator: names.get(String(d.entryOperatorId)) || "Unknown",
+      vehicle: d.vehicleNumber,
+      type: d.vehicleType,
+      oldTicket: old ? old.ticketNumber : "",
+      ticket: d.ticketNumber,
+      gate: d.entryGate || "",
+      // How long the replaced ticket had been open when it was swapped.
+      durationMinutes: old ? Math.max(0, Math.round((new Date(d.entryTime) - new Date(old.entryTime)) / 60000)) : "",
+    };
+  });
+
+  respond(req, res, `re-entries-${range.from}-to-${range.to}`, [
+    { key: "when", label: "When" },
+    { key: "location", label: "Location" },
+    { key: "operator", label: "Operator" },
+    { key: "vehicle", label: "Vehicle" },
+    { key: "type", label: "Vehicle type" },
+    { key: "oldTicket", label: "Old ticket" },
+    { key: "ticket", label: "New ticket" },
+    { key: "gate", label: "Gate" },
+    { key: "durationMinutes", label: "Old ticket was open (min)" },
+  ], rows, {
+    total, page, pageSize: PAGE_SIZE,
+    byOperator: perOperator.map((r) => ({ operator: names.get(String(r._id)) || "Unknown", count: r.count, last: r.last })),
+    from: range.from, to: range.to,
+  });
+};
+
+// ---------------------------------------------------------------- reprints
+
+// GET /api/reports/reprints?from=&to=&locationId=&operatorId=&page=
+// Every time a ticket or receipt was printed again: who, when, which ticket and vehicle. Admins only.
+// There is no limit on reprinting; this is only the count.
+const reprintsReport = async (req, res) => {
+  if (!can(req, PERMISSIONS.LOCATION_MANAGE)) throw new AppError("Only an admin can see reprints", 403);
+  const { locationNames, inScope, range } = await reportScope(req);
+  const operatorId = operatorIdFromQuery(req);
+  const match = reprintService.matchFor({
+    tenantFilter: req.tenantFilter, locationIds: inScope.locationId.$in, start: range.start, end: range.end, operatorId,
+  });
+  const csv = wantsExport(req);
+  const page = pageFrom(req);
+  const [docs, total, perOperator] = await Promise.all([
+    AuditLog.find(match).sort({ createdAt: -1 }).skip(csv ? 0 : (page - 1) * PAGE_SIZE).limit(csv ? CSV_LIMIT : PAGE_SIZE).lean(),
+    AuditLog.countDocuments(match),
+    reprintService.byOperator(match),
+  ]);
+  const names = await userNames([...docs.map((d) => d.actorId), ...perOperator.map((r) => r._id)]);
+
+  const rows = docs.map((d) => ({
+    when: d.createdAt,
+    location: locationNames.get(String(d.meta && d.meta.locationId)) || "",
+    operator: names.get(String(d.actorId)) || d.actorEmail || "Unknown",
+    ticket: (d.meta && d.meta.ticketNumber) || "",
+    vehicle: (d.meta && d.meta.vehicleNumber) || "",
+    printed: d.meta && d.meta.kind === "receipt" ? "Receipt" : "Ticket",
+  }));
+
+  respond(req, res, `reprints-${range.from}-to-${range.to}`, [
+    { key: "when", label: "When" },
+    { key: "location", label: "Location" },
+    { key: "operator", label: "Operator" },
+    { key: "ticket", label: "Ticket" },
+    { key: "vehicle", label: "Vehicle" },
+    { key: "printed", label: "Printed" },
+  ], rows, {
+    total, page, pageSize: PAGE_SIZE,
+    byOperator: perOperator.map((r) => ({ operator: names.get(String(r._id)) || "Unknown", count: r.count, last: r.last })),
+    from: range.from, to: range.to,
+  });
+};
+
 // ---------------------------------------------------------------- exceptions
 
 const EXCEPTION_TYPES = {
   CANCELLED: "Entry cancelled",
   OVERRIDE: "Released by admin",
   LOST_TICKET: "Lost ticket",
-  REFUND: "Refund",
   PAYMENT_FAILED: "Online payment failed",
   PAYMENT_PROBLEM: "Payment problem",
   STILL_INSIDE: "Inside for over 24 hours",
@@ -124,7 +241,7 @@ const PAYMENT_PROBLEM_ACTIONS = {
 
 // GET /api/reports/exceptions?type=
 // Everything unusual in one list: cancellations, releases by an admin, lost
-// tickets, refunds, failed online payments, money that does not match the
+// tickets, failed online payments, money that does not match the
 // records, and vehicles that have been inside for over a day.
 const exceptionsReport = async (req, res) => {
   const { locationNames, inScope, range } = await reportScope(req);
@@ -137,14 +254,11 @@ const exceptionsReport = async (req, res) => {
   const found = []; // { when, type, locationId, vehicle, ticket, amount, by, detail }
   const sessionQuery = (filter, sort) => ParkingSession.find({ ...inScope, ...filter }).sort(sort).limit(PER_SOURCE).lean();
 
-  const [closedByAdmin, lost, refunds, failedOnline, stuck, problemLogs] = await Promise.all([
+  const [closedByAdmin, lost, failedOnline, stuck, problemLogs] = await Promise.all([
     wants("CANCELLED") || wants("OVERRIDE")
       ? sessionQuery({ status: { $in: ["CANCELLED", "MANUAL_OVERRIDE"] }, exitTime: between }, { exitTime: -1 })
       : [],
     wants("LOST_TICKET") ? sessionQuery({ status: "LOST_TICKET", exitTime: between }, { exitTime: -1 }) : [],
-    wants("REFUND")
-      ? Payment.find({ ...inScope, status: "REFUNDED", "refund.refundedAt": between }).sort({ "refund.refundedAt": -1 }).limit(PER_SOURCE).lean()
-      : [],
     wants("PAYMENT_FAILED")
       ? Payment.find({ ...inScope, method: "GATEWAY", status: "FAILED", createdAt: between }).sort({ createdAt: -1 }).limit(PER_SOURCE).lean()
       : [],
@@ -166,12 +280,12 @@ const exceptionsReport = async (req, res) => {
   const problemById = new Map(problemPayments.map((p) => [String(p._id), p]));
 
   const wantedSessionIds = [
-    ...refunds.map((p) => p.sessionId), ...failedOnline.map((p) => p.sessionId), ...problemPayments.map((p) => p.sessionId),
+    ...failedOnline.map((p) => p.sessionId), ...problemPayments.map((p) => p.sessionId),
   ];
   const [sessionDocs, names] = await Promise.all([
     ParkingSession.find({ _id: { $in: wantedSessionIds } }).select("ticketNumber vehicleNumber").lean(),
     userNames([
-      ...closedByAdmin.map((s) => s.closedBy), ...refunds.map((p) => p.refund && p.refund.refundedBy), ...lost.map((s) => s.exitOperatorId),
+      ...closedByAdmin.map((s) => s.closedBy), ...lost.map((s) => s.exitOperatorId),
     ]),
   ]);
   const sessionById = new Map(sessionDocs.map((s) => [String(s._id), s]));
@@ -189,13 +303,6 @@ const exceptionsReport = async (req, res) => {
     found.push({
       when: s.exitTime, type: "LOST_TICKET", locationId: s.locationId, vehicle: s.vehicleNumber, ticket: s.ticketNumber,
       amount: s.fee && s.fee.total !== undefined ? s.fee.total : "", by: names.get(String(s.exitOperatorId)) || "", detail: "",
-    });
-  }
-  for (const p of refunds) {
-    found.push({
-      when: p.refund.refundedAt, type: "REFUND", locationId: p.locationId, vehicle: ofSession(p.sessionId).vehicleNumber || "",
-      ticket: ofSession(p.sessionId).ticketNumber || "", amount: p.refund.amount, by: names.get(String(p.refund.refundedBy)) || "",
-      detail: p.refund.reason || "",
     });
   }
   for (const p of failedOnline) {
@@ -248,20 +355,16 @@ const exceptionsReport = async (req, res) => {
 // ------------------------------------------------------------------ payments
 
 // GET /api/reports/payments
-// How people pay: share by method, how often online payments fail, refunds.
+// How people pay: share by method and how often online payments fail.
 const paymentsReport = async (req, res) => {
   const { inScope, range } = await reportScope(req, { maxDays: 366 });
   const between = { $gte: range.start, $lt: range.end };
   const sum = { count: { $sum: 1 }, amount: { $sum: "$amount" } };
 
-  const [paid, passPaid, failed, refunded, reasons] = await Promise.all([
+  const [paid, passPaid, failed, reasons] = await Promise.all([
     Payment.aggregate([{ $match: { ...inScope, status: { $in: ["SUCCESS", "REFUNDED"] }, paidAt: between } }, { $group: { _id: "$method", ...sum } }]),
     PassPayment.aggregate([{ $match: { ...inScope, amount: { $gt: 0 }, paidAt: between } }, { $group: { _id: "$method", ...sum } }]),
     Payment.aggregate([{ $match: { ...inScope, status: "FAILED", createdAt: between } }, { $group: { _id: "$method", count: { $sum: 1 } } }]),
-    Payment.aggregate([
-      { $match: { ...inScope, status: "REFUNDED", "refund.refundedAt": between } },
-      { $group: { _id: "$method", count: { $sum: 1 }, amount: { $sum: "$refund.amount" } } },
-    ]),
     Payment.aggregate([
       { $match: { ...inScope, status: "FAILED", createdAt: between } },
       { $group: { _id: "$failureReason", count: { $sum: 1 } } },
@@ -272,7 +375,7 @@ const paymentsReport = async (req, res) => {
 
   const byMethod = new Map();
   const row = (method) => {
-    if (!byMethod.has(method)) byMethod.set(method, { method, payments: 0, amount: 0, passAmount: 0, failed: 0, refunds: 0, refunded: 0 });
+    if (!byMethod.has(method)) byMethod.set(method, { method, payments: 0, amount: 0, passAmount: 0, failed: 0 });
     return byMethod.get(method);
   };
   for (const r of paid) Object.assign(row(r._id), { payments: r.count, amount: r.amount });
@@ -283,11 +386,9 @@ const paymentsReport = async (req, res) => {
     m.passAmount = r.amount;
   }
   for (const r of failed) row(r._id).failed = r.count;
-  for (const r of refunded) Object.assign(row(r._id), { refunds: r.count, refunded: r.amount });
 
   const totalAmount = [...byMethod.values()].reduce((t, r) => t + r.amount, 0);
   const totalPayments = [...byMethod.values()].reduce((t, r) => t + r.payments, 0);
-  const totalRefunded = [...byMethod.values()].reduce((t, r) => t + r.refunded, 0);
   const rows = [...byMethod.values()]
     .map((r) => ({
       method: r.method,
@@ -298,8 +399,6 @@ const paymentsReport = async (req, res) => {
       failed: r.failed,
       // Only online payments can fail in a way worth measuring; at the counter the operator confirms the money.
       successRate: r.method === "GATEWAY" ? math.percent(r.payments, r.payments + r.failed) : "",
-      refunds: r.refunds,
-      refunded: round2(r.refunded),
     }))
     .sort((a, b) => b.amount - a.amount);
 
@@ -311,13 +410,8 @@ const paymentsReport = async (req, res) => {
     { key: "average", label: "Average payment" },
     { key: "failed", label: "Failed" },
     { key: "successRate", label: "Success rate %" },
-    { key: "refunds", label: "Refunds" },
-    { key: "refunded", label: "Refunded" },
   ], rows, {
-    total: {
-      payments: totalPayments, amount: round2(totalAmount), refunded: round2(totalRefunded),
-      refundRate: math.percent(totalRefunded, totalAmount),
-    },
+    total: { payments: totalPayments, amount: round2(totalAmount) },
     failureReasons: reasons.filter((r) => r._id).map((r) => ({ reason: r._id, count: r.count })),
     from: range.from, to: range.to,
   });
@@ -639,7 +733,6 @@ const locationsReport = async (req, res) => {
         lostTickets: gone ? gone.lostTickets : 0,
         collected: round2(collected),
         passSales: round2(passMoney.get(id) ? passMoney.get(id).amount : 0),
-        refunded: round2(back.get(id) ? back.get(id).amount : 0),
         net: round2(net),
         perEntry: entryCount ? round2(net / entryCount) : "",
       };
@@ -659,7 +752,6 @@ const locationsReport = async (req, res) => {
     { key: "lostTickets", label: "Lost tickets" },
     { key: "collected", label: "Collected" },
     { key: "passSales", label: "Of which passes" },
-    { key: "refunded", label: "Refunded" },
     { key: "net", label: "Net" },
     { key: "perEntry", label: "Net per entry" },
   ], rows, {
@@ -755,5 +847,5 @@ const hardwareReport = async (req, res) => {
 
 module.exports = {
   peakHoursReport, occupancyTrendReport, exceptionsReport, paymentsReport, durationsReport, passesReport, hardwareReport,
-  frequentVehiclesReport, locationsReport,
+  frequentVehiclesReport, locationsReport, reEntriesReport, reprintsReport,
 };

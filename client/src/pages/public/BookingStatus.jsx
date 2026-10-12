@@ -106,7 +106,7 @@ export default function BookingStatus() {
   const reached = stepReached(booking)
   const payUrl = booking.payment?.payUrl
   const realPage = typeof payUrl === 'string' && /^https:\/\//i.test(payUrl)
-  const refundDue = booking.payment?.state === 'REFUND_DUE'
+  const unusable = booking.payment?.state === 'REFUND_DUE'
   const paid = booking.payment?.state === 'PAID'
 
   return (
@@ -177,13 +177,16 @@ export default function BookingStatus() {
               {paid ? ' Your booking fee is taken off your parking charge.' : ''} We keep the booking for {waitText(booking.waitingMinutes ?? booking.graceHours * 60)} after your arrival time.
             </Alert>
           )}
+          {booking.status === 'BOOKED' && paid && (
+            <p className="text-xs text-slate-500">A paid booking cannot be cancelled. The booking fee is not refundable.</p>
+          )}
           {booking.status === 'BOOKED' && booking.canCancel && (
             <div className="space-y-2">
               <Alert>{cancel.error && errorMessage(cancel.error)}</Alert>
               {confirmCancel ? (
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm text-slate-700">
-                    Cancel this booking?{paid ? ' Your booking fee will be refunded by the parking.' : ''}
+                    Cancel this booking?
                   </span>
                   <Button variant="danger" loading={cancel.isPending} onClick={() => cancel.mutate()}>Yes, cancel it</Button>
                   <Button variant="secondary" disabled={cancel.isPending} onClick={() => setConfirmCancel(false)}>Keep it</Button>
@@ -195,12 +198,12 @@ export default function BookingStatus() {
             </div>
           )}
           {booking.status === 'ARRIVED' && <Alert type="success">Your vehicle has entered. Thank you!</Alert>}
-          {['CANCELLED', 'EXPIRED'].includes(booking.status) && !refundDue && (
+          {['CANCELLED', 'EXPIRED'].includes(booking.status) && !unusable && (
             <Alert>This booking is {look.label.toLowerCase()}. <Link to="/book" className="underline">Book again</Link></Alert>
           )}
-          {refundDue && (
+          {unusable && (
             <Alert type="info">
-              Your payment of {money(booking.amount)} could not be used for this booking. The parking has been told and will refund it. Quote {booking.code} if you need to ask.
+              Your payment of {money(booking.amount)} could not be used for this booking. The parking has been told. Quote {booking.code} if you need help.
             </Alert>
           )}
           <p className="text-xs text-slate-500">Keep this page address: it is how you open your booking. Do not share it.</p>

@@ -27,10 +27,13 @@ const REPORTS = {
   hardware: { label: 'Hardware', range: true },
   'frequent-vehicles': { label: 'Repeat vehicles', range: true, min: true, search: true, paged: true },
   locations: { label: 'Locations', range: true },
+  // Which operator replaced which tickets. Admins only: the server refuses everyone else.
+  're-entries': { label: 'Re-entries', range: true, operator: true, paged: true, admin: true },
+  reprints: { label: 'Reprints', range: true, operator: true, paged: true, admin: true },
 }
 
 const MONEY_KEYS = [
-  'collected', 'tax', 'refunded', 'net', 'amount', 'fee', 'cash', 'fees', 'average', 'passSales', 'perEntry',
+  'collected', 'tax', 'net', 'amount', 'fee', 'cash', 'fees', 'average', 'passSales', 'perEntry',
   'entryAmount', 'exitAmount', 'upi', 'card', 'online', 'fastag', 'wallet', 'systemCollection', 'actualCollection', 'difference',
   'advance', 'payable', 'total',
 ]
@@ -38,7 +41,7 @@ const DATE_KEYS = ['paidAt', 'entryTime', 'exitTime', 'when', 'lastVisit', 'date
 const PERCENT_KEYS = ['utilization', 'peakUtilization', 'share', 'successRate', 'readRate', 'averageConfidence']
 const MINUTE_KEYS = ['durationMinutes', 'averageStayMinutes', 'averageMinutes']
 const NUMBER_KEYS = [
-  'payments', 'refunds', 'entries', 'exits', 'corrections', 'vehicles', 'capacity', 'peakInside', 'failed', 'passVisits',
+  'payments', 'entries', 'exits', 'corrections', 'vehicles', 'capacity', 'peakInside', 'failed', 'passVisits',
   'daysLeft', 'commands', 'acked', 'outages', 'detections', 'corrected', 'averageEntries', 'averageSeconds',
   'visits', 'locationCount', 'lostTickets', 'insideNow',
   'transactions', 'reprints', 'passEntries', 'paidEntries', 'passExits', 'paidExits', 'shifts', 'parked', 'photos',
@@ -47,7 +50,7 @@ const NUMBER_KEYS = [
 const TXN_STATUS = { PENDING: 'Pending', UNKNOWN: 'Being checked', FAILED: 'Declined or failed' }
 
 const EXCEPTION_TYPES = {
-  CANCELLED: 'Entry cancelled', OVERRIDE: 'Released by admin', LOST_TICKET: 'Lost ticket', REFUND: 'Refund',
+  CANCELLED: 'Entry cancelled', OVERRIDE: 'Released by admin', LOST_TICKET: 'Lost ticket',
   PAYMENT_FAILED: 'Online payment failed', PAYMENT_PROBLEM: 'Payment problem', STILL_INSIDE: 'Inside for over 24 hours',
 }
 const HARDWARE_TYPES = { ANPR_CAMERA: 'ANPR camera', BARRIER: 'Barrier', PRINTER: 'Printer' }
@@ -96,7 +99,8 @@ export default function Reports() {
   const { can } = useAuth()
   // A link from the dashboard can open a report ready-filtered: ?report=vehicles&from=&to=&vehicleType=&locationId=
   const [linked] = useSearchParams()
-  const [name, setName] = useState(() => (REPORTS[linked.get('report')] ? linked.get('report') : 'revenue'))
+  const allowed = (key) => REPORTS[key] && (!REPORTS[key].admin || can('LOCATION_MANAGE'))
+  const [name, setName] = useState(() => (allowed(linked.get('report')) ? linked.get('report') : 'revenue'))
   const [filters, setFilters] = useState(() => {
     const day = /^\d{4}-\d{2}-\d{2}$/
     const from = day.test(linked.get('from') || '') ? linked.get('from') : todayInput()
@@ -130,7 +134,7 @@ export default function Reports() {
       <h1 className="text-2xl font-bold text-slate-900">Reports</h1>
 
       <div role="tablist" aria-label="Report" className="flex gap-1 overflow-x-auto border-b border-slate-300">
-        {Object.entries(REPORTS).map(([key, r]) => (
+        {Object.entries(REPORTS).filter(([key]) => allowed(key)).map(([key, r]) => (
           <button
             key={key}
             role="tab"
@@ -255,7 +259,6 @@ export default function Reports() {
                 <option value="PENDING">Pending</option>
                 {filters.kind === 'fastag' && <option value="UNKNOWN">Being checked</option>}
                 <option value="FAILED">Declined or failed</option>
-                {filters.kind === 'online' && <option value="REFUNDED">Refunded</option>}
               </Select>
             )}
           </>
@@ -328,10 +331,9 @@ export default function Reports() {
         data && (
           <>
             {name === 'revenue' && data.total && (
-              <div className="grid gap-4 sm:grid-cols-3">
+              <div className="grid gap-4 sm:grid-cols-2">
                 {[
                   ['Collected', money(data.total.collected), `${data.total.payments} payments`],
-                  ['Refunded', money(data.total.refunded), null],
                   ['Net revenue', money(data.total.net), null],
                 ].map(([label, value, hint]) => (
                   <div key={label} className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
@@ -386,7 +388,7 @@ export default function Reports() {
                     ['Accepted', money(data.tiles.accepted), 'Money that went through'],
                     ['In progress', money(data.tiles.inProgress), 'Waiting for the bank or being checked'],
                     ['Declined / failed', money(data.tiles.declined), 'Not charged'],
-                    ['Refunded', money(data.tiles.refunded), `${data.tiles.count} attempts in this period`],
+                    ['All attempts', String(data.tiles.count), 'In this period'],
                   ].map(([label, value, hint]) => (
                     <div key={label} className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
                       <p className="text-sm text-slate-500">{label}</p>
@@ -455,11 +457,37 @@ export default function Reports() {
               </Card>
             )}
 
+            {(name === 're-entries' || name === 'reprints') && data.byOperator && (
+              <Card title={`${name === 're-entries' ? 'Re-entries' : 'Reprints'} by operator (${data.total})`}>
+                {data.byOperator.length === 0 ? (
+                  <p className="text-sm text-slate-500">No {name === 're-entries' ? 're-entries' : 'reprints'} in this period.</p>
+                ) : (
+                  <table className="w-full text-left text-sm">
+                    <thead className="text-slate-500">
+                      <tr>
+                        <th className="pb-2 pr-3 font-medium">Operator</th>
+                        <th className="pb-2 pr-3 text-right font-medium">{name === 're-entries' ? 'Re-entries' : 'Reprints'}</th>
+                        <th className="pb-2 font-medium">Last one</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.byOperator.map((row) => (
+                        <tr key={row.operator} className="border-t border-slate-200">
+                          <td className="py-2 pr-3 font-medium text-slate-900">{row.operator}</td>
+                          <td className="py-2 pr-3 text-right font-semibold">{row.count}</td>
+                          <td className="py-2">{dateTime(row.last)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </Card>
+            )}
+
             {name === 'payments' && data.total && (
-              <div className="grid gap-4 sm:grid-cols-3">
+              <div className="grid gap-4 sm:grid-cols-2">
                 {[
                   ['Money taken', money(data.total.amount), `${data.total.payments} payments, passes included`],
-                  ['Refunded', money(data.total.refunded), `${data.total.refundRate}% of the money`],
                   ['Top online failure', data.failureReasons[0]?.reason || 'None', data.failureReasons[0] ? `${data.failureReasons[0].count} time(s)` : null],
                 ].map(([label, value, hint]) => (
                   <div key={label} className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">

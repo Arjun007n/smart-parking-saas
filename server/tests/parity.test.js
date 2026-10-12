@@ -39,6 +39,9 @@ test("customer cancel: only a confirmed booking, only until the set time before 
   assert.equal(online.canCustomerCancel(booking("ARRIVED", 500), location, now), false);
   assert.equal(online.canCustomerCancel(booking("AWAITING_PAYMENT", 500), location, now), false);
   assert.equal(online.canCustomerCancel(booking("BOOKED", 500), { onlineBooking: { cancelBeforeMinutes: 0 } }, now), false, "0 means customers cannot cancel");
+  const paid = { ...booking("BOOKED", 500), payment: { state: "PAID" } };
+  assert.equal(online.canCustomerCancel(paid, location, now), false, "a paid booking is final: there are no refunds");
+  assert.equal(online.canCustomerCancel({ ...paid, payment: { state: "NONE" } }, location, now), true);
 });
 
 test("transactions: statuses fall into the tile groups", () => {
@@ -46,7 +49,7 @@ test("transactions: statuses fall into the tile groups", () => {
   assert.equal(groupOf("PENDING"), "IN_PROGRESS");
   assert.equal(groupOf("UNKNOWN"), "IN_PROGRESS");
   assert.equal(groupOf("FAILED"), "DECLINED");
-  assert.equal(groupOf("REFUNDED"), "REFUNDED");
+  assert.equal(groupOf("REFUNDED"), "ACCEPTED", "a payment that was refunded still counts as accepted money; there is no refunded tile");
 });
 
 test("the Operator role still has only gate permissions", () => {

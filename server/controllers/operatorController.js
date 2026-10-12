@@ -2,7 +2,7 @@
 // and the Entry and Exit lists (with Excel / CSV / PDF download).
 const AppError = require("../utils/AppError");
 const audit = require("../services/auditService");
-const { dayRange } = require("../utils/time");
+const { dayRange, dateTimeRange } = require("../utils/time");
 const { locationsInScope } = require("../utils/scope");
 const { normalizePlate, escapeRegex } = require("../utils/plate");
 const { formatOf, buildReportFile } = require("../services/reportExport");
@@ -51,11 +51,14 @@ const canSeeMoney = (req) => can(req, P.PAYMENT_COLLECT) || can(req, P.REPORT_VI
 const scopeOf = async (req) => {
   const locations = await locationsInScope(req);
   req.reportScopeName = req.query.locationId && locations.length === 1 ? locations[0].name : "All locations";
-  const range = dayRange(req.query.date);
+  // A day (?date=), or any period from one date and time to another (?from=2026-10-01T09:00&to=2026-10-05T18:00).
+  const { from, to } = req.query;
+  const period = from !== undefined || to !== undefined;
+  const range = period ? dateTimeRange(from, to) : dayRange(req.query.date);
   return {
     locations,
     range,
-    date: req.query.date || null,
+    date: period ? `${String(from).slice(0, 16).replace(":", "")}-to-${String(to).slice(0, 16).replace(":", "")}` : req.query.date || null,
     inScope: { ...req.tenantFilter, locationId: { $in: locations.map((l) => l._id) } },
   };
 };

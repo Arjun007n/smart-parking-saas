@@ -320,7 +320,8 @@ it("entry: using a suggestion (with a correction) settles it and queues the barr
   const hw = entry.body.data.hardware;
   assert.equal(hw.barrier.deviceName, "bar-in");
   assert.equal(hw.barrier.status, "PENDING");
-  assert.equal(hw.print.deviceName, "printer");
+  assert.equal(hw.print.deviceName, "printer", "the ticket is printed by itself when the camera made the entry");
+  assert.equal(hw.print.status, "PENDING");
   s.entryBarrier = hw.barrier.commandId;
 
   // Once settled, it is gone from the queue.
@@ -461,7 +462,7 @@ it("exit: pay at the counter, the exit barrier opens and the receipt is queued",
   assert.equal(paid.status, 201, JSON.stringify(paid.body));
   const hw = paid.body.data.hardware;
   assert.equal(hw.barrier.deviceName, "bar-out");
-  assert.equal(hw.print.deviceName, "printer");
+  assert.equal(hw.print, null, "the receipt is not printed by itself at exit");
   s.exitBarrier = hw.barrier.commandId;
 
   const [open] = (await takeCommands("bar-out")).filter((c) => c.type === "BARRIER_OPEN");
@@ -469,12 +470,7 @@ it("exit: pay at the counter, the exit barrier opens and the receipt is queued",
   await device("bar-out", "POST", `/commands/${open.id}/ack`, { ok: true });
 
   const slips = await drain("printer");
-  const receipt = slips.find((c) => c.type === "PRINT_RECEIPT");
-  assert.ok(receipt);
-  s.autoReceipt = receipt.id;
-  assert.match(receipt.payload.text, new RegExp(`TOTAL\\s+Rs\\. ${fee.toFixed(2)}`));
-  assert.match(receipt.payload.text, /CASH/);
-  await device("printer", "POST", `/commands/${receipt.id}/ack`, { ok: true });
+  assert.equal(slips.find((c) => c.type === "PRINT_RECEIPT"), undefined, "nothing is sent to the printer until the operator asks");
 });
 
 it("exit: asking for the barrier again returns the same command; only for a vehicle just cleared", async () => {
@@ -522,8 +518,9 @@ it("printer: reprint the ticket or receipt on demand", async () => {
   const receipt = await api("POST", `/api/parking/sessions/${s.session._id}/print`, { token: s.exit });
   assert.equal(receipt.status, 201, JSON.stringify(receipt.body));
   assert.equal((await HardwareCommand.findById(receipt.body.data.commandId)).type, "PRINT_RECEIPT");
-  // The slip printed automatically at exit was already done: this is a new copy.
-  assert.notEqual(receipt.body.data.commandId, s.autoReceipt);
+  // The first slip is printed only when the operator asks for it.
+  const slip = await HardwareCommand.findById(receipt.body.data.commandId);
+  assert.match(slip.payload.text, /TOTAL\s+Rs\./);
   // A double tap while that copy is still waiting is one slip.
   const dup = await api("POST", `/api/parking/sessions/${s.session._id}/print`, { token: s.exit });
   assert.equal(dup.body.data.commandId, receipt.body.data.commandId);
@@ -878,7 +875,7 @@ it("open barrier by hand: no single barrier means a clear answer, and the rate l
   assert.equal(manualLiftAllowed(user, 1_000_000 + 61_000), true, "a minute later it works again");
 });
 
-it("re-entry: a fresh ticket is swapped for a new one; old ones need an admin; double tap is one new ticket", async () => {
+it("re-entry: a ticket is swapped for a new one at any age; double tap is one new ticket", async () => {
   const entry = await api("POST", "/api/parking/entry", {
     token: s.gate, body: { locationId: s.loc._id, vehicleNumber: "MH12RE0001", vehicleType: "CAR", gate: "Gate A" },
   });
@@ -910,12 +907,11 @@ it("re-entry: a fresh ticket is swapped for a new one; old ones need an admin; d
   const closed = await api("POST", `/api/parking/sessions/${fresh._id}/re-entry`, { token: s.exit, body: {} });
   assert.equal(closed.status, 403, "an exit operator cannot enter vehicles");
 
-  // An old ticket needs an admin.
+  // No age window: an operator can replace a ticket that is 40 minutes old.
   await ParkingSession.updateOne({ _id: fresh._id }, { $set: { entryTime: new Date(Date.now() - 40 * 60000) } });
-  const tooOld = await api("POST", `/api/parking/sessions/${fresh._id}/re-entry`, { token: s.gate, body: {} });
-  assert.equal(tooOld.status, 403, JSON.stringify(tooOld.body));
-  assert.match(tooOld.body.message, /Ask an admin/);
-  const byAdmin = await api("POST", `/api/parking/sessions/${fresh._id}/re-entry`, { token: s.site, body: { vehicleType: "CAR" } });
+  const late = await api("POST", `/api/parking/sessions/${fresh._id}/re-entry`, { token: s.gate, body: {} });
+  assert.equal(late.status, 201, JSON.stringify(late.body));
+  const byAdmin = await api("POST", `/api/parking/sessions/${late.body.data.session._id}/re-entry`, { token: s.site, body: { vehicleType: "CAR" } });
   assert.equal(byAdmin.status, 201, JSON.stringify(byAdmin.body));
   assert.equal(byAdmin.body.data.session.vehicleNumber, "MH12RE0001");
 
@@ -923,7 +919,7 @@ it("re-entry: a fresh ticket is swapped for a new one; old ones need an admin; d
   assert.equal((await api("POST", `/api/parking/sessions/${byAdmin.body.data.session._id}/re-entry`, { token: s.else, body: {} })).status, 404);
 });
 
-it("re-entry: refused for a blocked vehicle, for an exited vehicle and when an advance was taken", async () => {
+it("re-entry: refused for a blocked vehicle and for an exited vehicle; an advance is given back", async () => {
   const make = async (plate, extra = {}) => {
     const res = await api("POST", "/api/parking/entry", { token: s.a.token, body: { locationId: s.loc._id, vehicleNumber: plate, vehicleType: "CAR", ...extra } });
     assert.equal(res.status, 201, JSON.stringify(res.body));
@@ -931,10 +927,9 @@ it("re-entry: refused for a blocked vehicle, for an exited vehicle and when an a
   };
 
   const withAdvance = await make("MH12RE0002", { advance: { amount: 50, method: "CASH" } });
-  const refusedAdvance = await api("POST", `/api/parking/sessions/${withAdvance._id}/re-entry`, { token: s.a.token, body: {} });
-  assert.equal(refusedAdvance.status, 409, JSON.stringify(refusedAdvance.body));
-  assert.match(refusedAdvance.body.message, /advance/);
-  assert.equal((await ParkingSession.findById(withAdvance._id)).status, "ACTIVE", "nothing was cancelled");
+  const withAdvanceAgain = await api("POST", `/api/parking/sessions/${withAdvance._id}/re-entry`, { token: s.a.token, body: {} });
+  assert.equal(withAdvanceAgain.status, 201, JSON.stringify(withAdvanceAgain.body));
+  assert.equal((await ParkingSession.findById(withAdvance._id)).status, "CANCELLED", "the old ticket is cancelled and its advance given back");
 
   const blockedSession = await make("MH12RE0003");
   const vehicle = await api("POST", "/api/vehicles", { token: s.a.token, body: { plateNumber: "MH12RE0003", type: "CAR" } });

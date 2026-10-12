@@ -34,7 +34,7 @@ import { receiptSettings } from '../../utils/receiptSettings'
 import { operationSettings } from '../../utils/operations'
 import TicketPhoto from '../../components/operator/TicketPhoto'
 
-function Ticket({ session, locationName, repeated, settings, operations, reprinted = false }) {
+function Ticket({ session, locationName, repeated, settings, operations, reprinted = false, autoPrint = false }) {
   const { user } = useAuth()
   const look = receiptSettings(settings)
   const ops = operationSettings(operations)
@@ -43,6 +43,12 @@ function Ticket({ session, locationName, repeated, settings, operations, reprint
     if (reprinted) parkingApi.reprint(session._id).catch(() => {})
     window.print()
   }
+  // A ticket the camera made by itself is printed by itself (once per ticket), unless the gate's own printer already got it.
+  useEffect(() => {
+    if (!autoPrint || repeated) return undefined
+    const timer = setTimeout(() => window.print(), 600)
+    return () => clearTimeout(timer)
+  }, [autoPrint, repeated, session._id])
   return (
     <div className="print-area rounded-xl border-2 border-dashed border-slate-400 bg-white p-6 text-center">
       <p className="text-sm font-semibold text-slate-600">{locationName}</p>
@@ -446,6 +452,7 @@ function EntryForm({ locations, defaultId }) {
                   locationName={ticket.locationName}
                   repeated={ticket.repeated}
                   reprinted={Boolean(ticket.reprint)}
+                  autoPrint={Boolean(ticket.auto) && !ticket.hardware?.print}
                   settings={locations.find((l) => l._id === ticket.session.locationId)?.receiptSettings}
                   operations={locations.find((l) => l._id === ticket.session.locationId)?.operations}
                 />

@@ -68,10 +68,13 @@ const cancelBeforeOf = (location) => {
   return Number.isFinite(minutes) && minutes > 0 ? Math.min(MAX_CANCEL_MINUTES, Math.floor(minutes)) : 0;
 };
 
-// Can the customer cancel this booking now? Only a booking that is confirmed and still waiting.
+// A booking whose fee has been paid is final: there are no refunds, so the customer cannot cancel it.
+const isPaid = (booking) => Boolean(booking.payment && booking.payment.state === "PAID");
+
+// Can the customer cancel this booking now? Only a confirmed, unpaid booking that is still waiting.
 const canCustomerCancel = (booking, location, now = new Date()) => {
   const before = cancelBeforeOf(location);
-  return before > 0 && booking.status === "BOOKED" && now.getTime() <= new Date(booking.expectedAt).getTime() - before * 60000;
+  return before > 0 && booking.status === "BOOKED" && !isPaid(booking) && now.getTime() <= new Date(booking.expectedAt).getTime() - before * 60000;
 };
 
 const offerOf = (location) => {
@@ -199,13 +202,14 @@ const viewOf = (booking, location) => ({
   ...(booking.cancelReason ? { cancelReason: booking.cancelReason } : {}),
 });
 
-// The customer cancels their own booking. A paid fee is flagged for refund, as for a staff cancel.
+// The customer cancels their own booking. Only an unpaid booking can be cancelled this way.
 const CUSTOMER_CANCEL_REASON = "Cancelled by customer";
 const cancelByCustomer = async (booking, location, now = new Date()) => {
   if (!canCustomerCancel(booking, location, now)) {
     const before = cancelBeforeOf(location);
     if (before <= 0) throw new AppError("This parking does not allow cancelling online. Please call the parking.", 409);
     if (booking.status !== "BOOKED") throw new AppError("This booking can no longer be cancelled", 409);
+    if (isPaid(booking)) throw new AppError("A booking that has been paid for cannot be cancelled online. The booking fee is not refundable.", 409);
     throw new AppError(`A booking can be cancelled up to ${before} minutes before the arrival time`, 409);
   }
   const cancelled = await Booking.findOneAndUpdate(

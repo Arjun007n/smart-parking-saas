@@ -173,7 +173,7 @@ export default function DetailsForm({ location }) {
               <Field
                 label="Customer can cancel until (minutes before arrival)"
                 type="number" min="0" step="1"
-                hint="0 = customers cannot cancel online. A paid fee is flagged for refund."
+                hint="0 = customers cannot cancel online. A booking that has been paid for cannot be cancelled by the customer."
                 error={errors.cancelBeforeMinutes?.message}
                 {...register('cancelBeforeMinutes', number)}
               />

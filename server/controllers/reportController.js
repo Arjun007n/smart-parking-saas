@@ -119,15 +119,13 @@ const revenueReport = async (req, res) => {
       collected: round2(r.collected),
       tax: round2(r.tax),
       passes: round2(r.passes),
-      refunds: r.refunds,
-      refunded: round2(r.refunded),
       net: round2(r.collected - r.refunded),
     }))
     .sort((a, b) => a.period.localeCompare(b.period));
 
   const total = rows.reduce(
-    (t, r) => ({ payments: t.payments + r.payments, collected: round2(t.collected + r.collected), refunded: round2(t.refunded + r.refunded), net: round2(t.net + r.net) }),
-    { payments: 0, collected: 0, refunded: 0, net: 0 }
+    (t, r) => ({ payments: t.payments + r.payments, collected: round2(t.collected + r.collected), net: round2(t.net + r.net) }),
+    { payments: 0, collected: 0, net: 0 }
   );
 
   respond(req, res, `revenue-${range.from}-to-${range.to}`, [
@@ -136,8 +134,6 @@ const revenueReport = async (req, res) => {
     { key: "collected", label: "Collected" },
     { key: "passes", label: "Of which passes" },
     { key: "tax", label: "Tax" },
-    { key: "refunds", label: "Refunds" },
-    { key: "refunded", label: "Refunded" },
     { key: "net", label: "Net" },
   ], rows, { total, groupBy, from: range.from, to: range.to });
 };
@@ -176,7 +172,6 @@ const collectionReport = async (req, res) => {
       status: p.status,
       operator: names.get(String(p.collectedBy)) || "",
       reference: p.transactionId || "",
-      refundReason: p.refund && p.refund.reason ? p.refund.reason : "",
     };
   });
 
@@ -191,7 +186,6 @@ const collectionReport = async (req, res) => {
     { key: "status", label: "Status" },
     { key: "operator", label: "Collected by" },
     { key: "reference", label: "Reference" },
-    { key: "refundReason", label: "Refund reason" },
   ], rows, { total, page, pageSize: PAGE_SIZE, from: range.from, to: range.to });
 };
 
@@ -328,7 +322,7 @@ const operatorReport = async (req, res) => {
   const operatorId = operatorIdFromQuery(req);
   const only = (field) => (operatorId ? { [field]: operatorId } : { [field]: { $ne: null } });
 
-  const [entries, exits, overrides, paid, passSold, refunds] = await Promise.all([
+  const [entries, exits, overrides, paid, passSold] = await Promise.all([
     ParkingSession.aggregate([
       { $match: { ...inScope, entryTime: between, ...only("entryOperatorId") } },
       { $group: { _id: "$entryOperatorId", count: { $sum: 1 } } },
@@ -349,17 +343,13 @@ const operatorReport = async (req, res) => {
       { $match: { ...inScope, amount: { $gt: 0 }, paidAt: between, ...only("collectedBy") } },
       { $group: { _id: "$collectedBy", amount: { $sum: "$amount" }, count: { $sum: 1 }, cash: { $sum: { $cond: [{ $eq: ["$method", "CASH"] }, "$amount", 0] } } } },
     ]),
-    Payment.aggregate([
-      { $match: { ...inScope, status: "REFUNDED", "refund.refundedAt": between, ...only("refund.refundedBy") } },
-      { $group: { _id: "$refund.refundedBy", amount: { $sum: "$refund.amount" }, count: { $sum: 1 } } },
-    ]),
   ]);
 
   const byOperator = new Map();
   const row = (id) => {
     const key = String(id);
     if (!byOperator.has(key)) {
-      byOperator.set(key, { id, entries: 0, exits: 0, corrections: 0, payments: 0, collected: 0, cash: 0, refunds: 0, refunded: 0 });
+      byOperator.set(key, { id, entries: 0, exits: 0, corrections: 0, payments: 0, collected: 0, cash: 0 });
     }
     return byOperator.get(key);
   };
@@ -373,7 +363,6 @@ const operatorReport = async (req, res) => {
     o.collected = round2(o.collected + r.amount);
     o.cash = round2(o.cash + r.cash);
   }
-  for (const r of refunds) Object.assign(row(r._id), { refunds: r.count, refunded: round2(r.amount) });
 
   const names = await userNames([...byOperator.values()].map((r) => r.id));
   const rows = [...byOperator.values()]
@@ -388,8 +377,6 @@ const operatorReport = async (req, res) => {
     { key: "collected", label: "Collected" },
     { key: "cash", label: "Of which cash" },
     { key: "corrections", label: "Cancels and overrides" },
-    { key: "refunds", label: "Refunds" },
-    { key: "refunded", label: "Refunded" },
   ], rows, { from: range.from, to: range.to });
 };
 

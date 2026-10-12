@@ -96,7 +96,7 @@ Devices are tied to a lane by giving them the same gate name and direction.
    (use the device name you gave it). The plate appears on the operator **Entry** page under
    "Camera suggestions". Press *Use*, correct it if needed, create the ticket. The ticket is
    "printed" into `gate-agent/printed/` and the entry barrier is "opened".
-8. Do the exit and payment. The receipt is printed and the exit barrier opens (add a second barrier
+8. Do the exit and payment. The exit barrier opens (the receipt is printed only when the operator presses *Print bill*) (add a second barrier
    for `Gate B` / *Exit* to see that).
 9. Stop the agent and wait two minutes: the devices turn **Offline** and a critical alert appears
    under Notifications. Entry and exit still work by hand.

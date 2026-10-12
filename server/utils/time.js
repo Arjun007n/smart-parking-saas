@@ -29,6 +29,25 @@ const dayRange = (dateText, now = new Date()) => {
   return { start, end: new Date(start.getTime() + DAY) };
 };
 
+// Start and end (UTC instants) of a period given as local date-times "YYYY-MM-DDTHH:mm" (the browser's
+// datetime-local format). Both minutes are included: "to" 18:00 covers up to 18:00:59. At most 92 days.
+const dateTimeRange = (fromText, toText) => {
+  const offset = utcOffset() * MINUTE;
+  const parse = (text, name) => {
+    const match = typeof text === "string" && /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(text);
+    if (!match) throw new AppError(`${name} must look like 2026-03-02T09:30`, 400);
+    const [y, mo, d, h, mi] = match.slice(1).map(Number);
+    const check = new Date(Date.UTC(y, mo - 1, d, h, mi));
+    if (check.getUTCMonth() !== mo - 1 || check.getUTCDate() !== d || h > 23 || mi > 59) throw new AppError(`${name} is not a real date and time`, 400);
+    return new Date(check.getTime() - offset);
+  };
+  const start = parse(fromText, "from");
+  const end = new Date(parse(toText, "to").getTime() + MINUTE);
+  if (end <= start) throw new AppError("The end must be after the start", 400);
+  if (end - start > 92 * DAY) throw new AppError("Choose a period of at most 92 days", 400);
+  return { start, end };
+};
+
 // "260302" for 2 March 2026, in local time. Used in ticket numbers.
 const localDateStamp = (date = new Date()) => {
   const local = new Date(date.getTime() + utcOffset() * MINUTE);
@@ -82,6 +101,6 @@ const addMonthsLocal = (instant, months) => {
 const addDaysLocal = (instant, days) => new Date(instant.getTime() + days * DAY);
 
 module.exports = {
-  dayRange, localDateStamp, timezoneString, localDateText, rangeFromQuery, utcOffsetMinutes: utcOffset, DAY, MINUTE,
+  dayRange, dateTimeRange, localDateStamp, timezoneString, localDateText, rangeFromQuery, utcOffsetMinutes: utcOffset, DAY, MINUTE,
   startOfLocalDay, addMonthsLocal, addDaysLocal,
 };

@@ -145,9 +145,6 @@ export const locationApi = {
   download: (format = 'xlsx') => downloadFile('/locations/export', {}, `parking-locations.${format}`, format),
   // Applies one vehicle type's auto exit rule now.
   runAutoExit: (id, vehicleType) => unwrap(api.post(`/locations/${id}/auto-exit/run`, { vehicleType })),
-  // The re-entry counter (admins only): the limit and today's re-entries per operator; reset starts again from now.
-  reEntries: (id) => unwrap(api.get(`/locations/${id}/re-entries`)),
-  resetReEntries: (id) => unwrap(api.post(`/locations/${id}/re-entries/reset`)),
   // The Lanes tab: lanes with their operators and devices; params { q, page, limit }.
   lanes: (id, params) => unwrap(api.get(`/locations/${id}/lanes`, { params })),
   // The Create / Edit Parking Lane form: one lane is one vehicle going one way.
@@ -232,7 +229,6 @@ export const paymentApi = {
   cancel: (id) => unwrap(api.post(`/payments/${id}/cancel`)),
   // Development only: play the customer's side of an online payment.
   simulate: (id, outcome) => unwrap(api.post(`/payments/${id}/simulate`, { outcome })),
-  refund: (id, reason) => unwrap(api.post(`/payments/${id}/refund`, { reason })),
   collection: (params) => unwrap(api.get('/payments/collection', { params })),
 }
 
@@ -306,6 +302,14 @@ export const passCompanyApi = {
   create: (body) => unwrap(api.post('/pass-companies', body)),
   update: (id, body) => unwrap(api.put(`/pass-companies/${id}`, body)),
   remove: (id) => unwrap(api.delete(`/pass-companies/${id}`)),
+}
+
+// The Pass Charges table: monthly and daily price per location and vehicle type; `quote` works out a pass's total.
+export const passChargeApi = {
+  list: () => unwrap(api.get('/pass-charges')),
+  save: (body) => unwrap(api.post('/pass-charges', body)),
+  remove: (id) => unwrap(api.delete(`/pass-charges/${id}`)),
+  quote: (params) => unwrap(api.get('/pass-charges/quote', { params })),
 }
 
 export const walletApi = {

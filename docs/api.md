@@ -99,8 +99,6 @@ See `docs/shop.md` for the full table.
 | PATCH | `/locations/:id/lanes/:laneId/status` | `LOCATION_MANAGE`. `{ isActive }` switches a lane on or off. A lane that is off refuses entries, exits and manual barrier lifts with 409; the switch turns one lane on or off. Audited as `LOCATION_LANE_ON` / `LOCATION_LANE_OFF` |
 | PUT | `/locations/:id` (more fields) | `parkingType` (`NORMAL` or `AIRPORT`); `gates[]` `{ _id (send it back for an existing gate), name, type, lane, vehicleType, vehicleClass, doorNo, readerNo, fastag, fastagLaneId, cameraSerial, laneCode, plazaId, isActive }`. **Lanes:** a lane is one gate for one vehicle and one direction (`type` `ENTRY` or `EXIT`, never `BOTH`), named `Car-Entry`, `Bike-Exit` ...; send `lane` (the vehicle's short name) and `vehicleType` and the server sets `vehicleClass` (`TWO_WHEELER` for `BIKE`, `FOUR_WHEELER` for every other type) and gives each lane its Door/Lane No. (`L1D1`) and Reader (`L1R1`). When any gate has a `lane`, every gate must, and the location needs an entry lane and an exit lane for two-wheelers and for four-wheelers (400 otherwise; a location that works with lanes cannot go back to none). Gates with no `lane` are old-style gates and behave as before. A lane refuses the other class of vehicle at entry and at exit (400). Normally lanes are added one at a time with `POST /locations/:id/lanes`. Gate names must be unique (case does not matter, 400); a rename follows the lane's operators and devices; a lane missing from the list is removed, refused with 409 while operators or devices are tied to it; `operations.autoExitRules` `[{ vehicleType, active, days (1-365), amount }]` closes a ticket of that vehicle type that is still open after `days` days (no payment is recorded; `amount` is written on the ticket and in the alert). A type without an active rule follows `autoExitHours` |
 | GET | `/locations/export?format=xlsx\|csv\|pdf` | The Locations table as a file (default xlsx): parking type, seats and valid upto, the gate switches, auto exit on or off, capacity, lanes |
-| GET | `/locations/:id/re-entries` | `LOCATION_MANAGE`. The re-entry counter: `{ limit, since, total, operators: [{ userId, name, loginId, count, last, atLimit }] }` for today (or since the last reset) |
-| POST | `/locations/:id/re-entries/reset` | `LOCATION_MANAGE`. Starts the count again from now; returns the same shape. Audited as `LOCATION_REENTRY_COUNTER_RESET` |
 | POST | `/locations/:id/auto-exit/run` | `LOCATION_MANAGE`. `{ vehicleType }` applies that type's active rule now; returns `{ closed }` |
 | DELETE | `/locations/:id` | Company Admin. Deactivates; refused while vehicles are parked |
 
@@ -175,7 +173,7 @@ All need `TARIFF_MANAGE`. A Location Admin only sees tariffs of assigned locatio
 |---|---|---|---|
 | POST | `/parking/entry` | `ENTRY_CREATE` | locationId, vehicleNumber, vehicleType, gate?, idempotencyKey?. Returns the session with its ticket number. A vehicle that already has an open ticket gets `409` with `data: { code: "ALREADY_INSIDE", session }` (that ticket), so the entry screen can offer Re-Print, Re-Entry or Exit |
 | GET | `/parking/entries?locationId=&q=&date=&page=&match=` | Gate staff, admins | Vehicles inside now. `q` = ticket, or start of a vehicle number; `match=contains` finds the text anywhere in the number (exit search box) |
-| POST | `/parking/exit` | `EXIT_CREATE` | locationId, ticketNumber or vehicleNumber, lostTicket?, gate?, editedAmount?, editReason?. Calculates the fee. Returns `paymentRequired`. `editedAmount` (with a reason of at least 5 letters) is accepted only when the location's `exitAmountEdit` switch is on; tax is worked out again, the original fee is kept on the ticket and the change is audited as `PARKING_FEE_EDITED`. Entry is refused for a vehicle already inside when `allowReEntry` is off |
+| POST | `/parking/exit` | `EXIT_CREATE` | locationId, ticketNumber or vehicleNumber, lostTicket?, gate?, editedAmount?, editReason?. Calculates the fee. Returns `paymentRequired`. `editedAmount` (with a reason of at least 5 letters) is accepted only when the location's `exitAmountEdit` switch is on; tax is worked out again, the original fee is kept on the ticket and the change is audited as `PARKING_FEE_EDITED`. |
 | GET | `/parking/exits?locationId=&q=&date=&page=` | Gate staff, admins | Closed sessions of one day (default today) |
 | GET | `/parking/sessions/:id` | Gate staff, admins | |
 | GET | `/parking/sessions/:id/receipt` | Gate staff, admins | After exit only |
@@ -189,7 +187,7 @@ All need `TARIFF_MANAGE`. A Location Admin only sees tariffs of assigned locatio
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| GET | `/operator/summary?locationId=&date=` | any gate permission or `REPORT_VIEW` | Home: `license`, `counts` (all and per vehicle type: capacity, parked, available, entries, exits) and `collection` (by vehicle type; `null` without `PAYMENT_COLLECT` or `REPORT_VIEW`) |
+| GET | `/operator/summary?locationId=&date=` (or `&from=2026-10-01T09:00&to=2026-10-05T18:00`: a period between two local date-times, both minutes included, at most 92 days; `from` and `to` go together and replace `date`; the other operator lists and the collection take them too) | any gate permission or `REPORT_VIEW` | Home: `license`, `counts` (all and per vehicle type: capacity, parked, available, entries, exits) and `collection` (by vehicle type; `null` without `PAYMENT_COLLECT` or `REPORT_VIEW`) |
 | GET | `/operator/collection?locationId=&date=&format=` | `PAYMENT_COLLECT` or `REPORT_VIEW` | Money by vehicle type: entry (advance) and exit amounts, cash, online, UPI, card, FASTag, total, refunded, net. `format` = xlsx, csv or pdf |
 | GET | `/operator/entries?locationId=&date=&q=&page=&pageSize=&format=` | any gate permission or `REPORT_VIEW` | Vehicles that came in on a day. `pageSize` 10, 25, 50, 100 or 200 (default 25) |
 | GET | `/operator/exits?...` | same | Vehicles that left on a day, with out time, total time, advance, paid and payable |
@@ -197,7 +195,7 @@ All need `TARIFF_MANAGE`. A Location Admin only sees tariffs of assigned locatio
 | POST | `/bookings` | `ENTRY_CREATE` | locationId, vehicleNumber, vehicleType, customerName?, phone?, note?, expectedAt? |
 | POST | `/bookings/:id/cancel` | `ENTRY_CREATE` | reason?. A cancelled booking with a paid online fee becomes `payment.state: REFUND_DUE` and an admin is alerted |
 | POST | `/parking/barrier` | `ENTRY_CREATE` / `EXIT_CREATE` | Open the lane barrier by hand: locationId, direction (ENTRY or EXIT), gate?, reason?. 6 a minute per user |
-| POST | `/parking/sessions/:id/re-entry` | `ENTRY_CREATE` | Cancel this ticket and issue a new one: gate?, vehicleType?. Operators within `RE_ENTRY_WINDOW_MINUTES`, admins any age |
+| POST | `/parking/sessions/:id/re-entry` | `ENTRY_CREATE` | Cancel this ticket and issue a new one: gate?, vehicleType?. No daily limit, age window or advance rule (an advance on the old ticket is given back); only the location's `allowReEntry` switch can turn it off. Every one is counted for the operator (see `/reports/re-entries`) |
 | GET | `/hardware/agent-package` | `LOCATION_MANAGE` | Zip of the gate agent with this server's address in `config.json` (404 when the files are not on the server) |
 | GET | `/hardware/agent-package/info` | `LOCATION_MANAGE` | `{ available }` |
 
@@ -226,7 +224,7 @@ Entry, exit, payment and override answers include `hardware: { barrier, print }`
 
 | Method | Path | Who | Notes |
 |---|---|---|---|
-| POST | `/payments` | `PAYMENT_COLLECT` | sessionId, method (CASH, UPI, CARD, FASTAG, WALLET, GATEWAY), amount, transactionId?, walletId (WALLET only), tagId (FASTAG when a FASTag partner is set up: charges the tag; 202 `completed:false` means not confirmed yet, send the same request again; 422 declined). Completes the exit |
+| POST | `/payments` | `PAYMENT_COLLECT` | sessionId, method (CASH, UPI, CARD, FASTAG, WALLET, GATEWAY), amount, transactionId?, walletId (WALLET only), tagId (FASTAG when a FASTag partner is set up: charges the tag; 202 `completed:false` means not confirmed yet, send the same request again; 422 declined). Completes the exit. `amount` must be what is due; for CASH, UPI and CARD it may be more (what the customer paid): that amount is recorded on the payment and as the ticket's fee (the tariff amount stays in `feeEdit.calculated`), nothing is returned. Less is refused (409); WALLET, GATEWAY and FASTAG must match exactly |
 | GET | `/payments?locationId=&date=&page=` | `PAYMENT_COLLECT` or `REPORT_VIEW` | |
 | GET | `/payments/collection?locationId=&date=` | `PAYMENT_COLLECT` or `REPORT_VIEW` | Day total, by method and by operator, plus `walletTopups` (money put into wallets, shown apart from income) |
 | GET | `/payments/options` | `PAYMENT_COLLECT` or `REPORT_VIEW` | Which gateway is set up (and whether it is the simulator), and `fastag` (true when FASTag is really charged) |
@@ -281,6 +279,9 @@ With method `GATEWAY`, `POST /payments` starts an online payment and answers wit
 | GET | `/pass-invoices/eligible?locationId=&passCompanyId=(id\|none)&passUserId=` | `PASS_MANAGE` | Passes that can go on a GST invoice: approved, not cancelled, not already invoiced, with charges |
 | POST | `/pass-invoices/preview`, `/pass-invoices` | `PASS_MANAGE` | `{ locationId, passCompanyId (id or "none"), passUserId?, passIds, taxPercent? }`. Preview shows the figures; the second saves the invoice (numbers count up from 100001 in a company) and marks the passes. 409 if a pass was invoiced meanwhile |
 | GET | `/pass-invoices`, `/pass-invoices/:id` | `PASS_MANAGE` | List (`?locationId=&passCompanyId=&passUserId=&q=&format=`) and one invoice with the seller details |
+| GET, POST | `/pass-charges` | `PASS_MANAGE` | The Pass Charges table. GET lists the rates of the user's locations (`locationName` included). POST `{ locationId, vehicleType, monthlyRate, dailyRate }` adds one, or changes the rate when that location and vehicle type already has one (audited `PASS_CHARGE_SAVED`) |
+| DELETE | `/pass-charges/:id` | `PASS_MANAGE` | Removes a rate (audited `PASS_CHARGE_REMOVED`) |
+| GET | `/pass-charges/quote?locationId=&vehicleType=&startDate=&endDate=` | `PASS_MANAGE` | What a pass would cost for those days (both included, `YYYY-MM-DD`): `{ found, months, days, totalDays, monthlyRate, dailyRate, amount }`; `found: false` when the table has no rate. Months are calendar months from the start day, leftover days use the daily rate |
 | DELETE | `/pass-companies/:id` | `PASS_MANAGE` | Only a company with no users and no passes (otherwise 409: switch it off) |
 | GET, POST | `/pass-companies` | `PASS_MANAGE` | List (`?q=&active=true`, with pass counts) or add a company master: name, contactName, phone, email, gstin, address, notes |
 | PUT | `/pass-companies/:id` | `PASS_MANAGE` | Edit, or switch off with `isActive: false` |
@@ -327,12 +328,12 @@ All need `REPORT_VIEW` and only cover locations the user may see.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/dashboard?locationId=&from=&to=` | Everything on the operations dashboard, in one call. `from` and `to` (local dates, up to 92 days apart, default today) set the period of the day figures: `traffic` by hour, `revenue.byHour` (24 hours, after refunds) and `revenue.inPeriod`, `byVehicleType`, operators, payments, exceptions, reprints. `period` echoes them (`isToday`). Not affected by the period: vehicles inside now, month tiles, `revenue.last7Days`, `momentum` (vehicles inside by hour, today only: empty for other periods), `passes` {active, endingSoon, total, `activeRevenue` = paid for passes valid now}, `subscription` and `locationPlans` (each location with its plan status RUNNING, EXPIRING within 30 days, EXPIRED or NO_PLAN, the expiry date, package and validity; one plan covers the whole company, so locations share a date) |
+| GET | `/dashboard?locationId=&from=&to=` | Everything on the operations dashboard, in one call. `from` and `to` (local dates, up to 92 days apart, default today) set the period of the day figures: `traffic` by hour, `revenue.byHour` (24 hours, after refunds) and `revenue.inPeriod`, `byVehicleType`, operators, payments, exceptions, reprints. `period` echoes them (`isToday`). Not affected by the period: vehicles inside now, month tiles, `revenue.last7Days`, `momentum` (vehicles inside by hour, today only: empty for other periods), `passes` {active, endingSoon, total, `activeRevenue` = paid for passes valid now}, `subscription` and `locationPlans` (each location with its plan status RUNNING, EXPIRING within 30 days, EXPIRED or NO_PLAN, the expiry date, package and validity; one plan covers the whole company, so locations share a date) Admins (`LOCATION_MANAGE`) also get `reEntries: { total, operators: [{ userId, name, loginId, count }] }`, the re-entries each operator made in the period; other roles do not get the field. |
 | GET | `/reports/revenue?from=&to=&groupBy=&locationId=` | groupBy: day, week, month, location. Up to 366 days |
 | GET | `/reports/collection?from=&to=&locationId=&operatorId=&method=&page=` | One row per payment |
 | GET | `/reports/vehicles?from=&to=&locationId=&q=&status=&entryOperatorId=&exitOperatorId=&page=` | One row per visit. Filter by the person who made the entry or did the exit |
 | GET | `/reports/occupancy?date=&locationId=` | Vehicles inside for each hour of a day |
-| GET | `/reports/operators?from=&to=&locationId=&operatorId=` | Entries, exits, collections, refunds per person |
+| GET | `/reports/operators?from=&to=&locationId=&operatorId=` | Entries, exits, collections per person |
 
 | GET | `/reports/operator-collection?from=&to=&locationId=&operatorId=&vehicleType=` | With `vehicleType`, only tickets of that class are counted (pass sales and shift differences are left out). Per operator: entries, reprints, pass and paid entries, exits, cash, UPI, card, online, FASTag, pass sales, refunded, **system collection**, closed shifts, **actual collection** (system plus the cash differences found when shifts were closed in the period) and the difference |
 | GET | `/reports/transactions?kind=fastag\|online&from=&to=&locationId=&status=&q=&view=list\|daily&page=` | Every FASTag charge attempt or online (gateway) payment, whatever its outcome: date, location, vehicle, ticket or tag, transaction number, provider, status, amount, reason. `status` (FASTag: SUCCESS, PENDING, UNKNOWN, FAILED; online: SUCCESS, PENDING, FAILED, REFUNDED). `tiles` give accepted, in-progress, declined and refunded amounts for the whole period. `view=daily` lists successful amounts per day. This is what our system recorded, not a bank settlement statement |
@@ -340,13 +341,15 @@ All need `REPORT_VIEW` and only cover locations the user may see.
 | GET | `/reports/periods` | `{ currentDays, currentFrom }`: where the Current and Old periods split |
 | GET | `/reports/peak-hours?by=hour\|weekday` | Entries by hour of day or weekday |
 | GET | `/reports/occupancy-trend` | Daily average and peak occupancy |
-| GET | `/reports/exceptions?type=` | Cancelled entries, admin releases, lost tickets, refunds, failed online payments, payment problems, vehicles inside over 24 hours |
-| GET | `/reports/payments` | By method and status, refunds, failures |
+| GET | `/reports/exceptions?type=` | Cancelled entries, admin releases, lost tickets, failed online payments, payment problems, vehicles inside over 24 hours |
+| GET | `/reports/reprints?from=&to=&locationId=&operatorId=&page=` | Admins only (`LOCATION_MANAGE`, 403 for others). Every reprint of a ticket or receipt: when, location, operator, ticket, vehicle, ticket or receipt; `byOperator` gives the count and last time per operator. Reprints have no limit; only the user's `access.reprint` switch can turn them off. Counted from the audit log (`PARKING_REPRINT`) |
+| GET | `/reports/re-entries?from=&to=&locationId=&operatorId=&page=` | Admins only (`LOCATION_MANAGE`, 403 for others). Every ticket replaced with Re-entry: when, location, operator, vehicle, type, old and new ticket, gate, how long the old ticket had been open; `byOperator` gives the count and last time per operator |
+| GET | `/reports/payments` | By method and status, failures |
 | GET | `/reports/durations` | How long vehicles stay (buckets) |
 | GET | `/reports/passes?due=7\|14\|30\|60\|90` | Active and expiring passes, pass revenue |
 | GET | `/reports/hardware` | Device uptime and failed commands |
 | GET | `/reports/frequent-vehicles?min=2\|3\|5\|10\|20&q=&page=` | Vehicles that came back: visits, locations, stay, fees, free pass visits, lost tickets, their pass. `summary` has the repeat share of all visits. Up to 366 days |
-| GET | `/reports/locations` | Every location side by side: capacity, inside now, entries, exits, stay, pass visits, lost tickets, collected, pass sales, refunds, net, net per entry. Up to 366 days |
+| GET | `/reports/locations` | Every location side by side: capacity, inside now, entries, exits, stay, pass visits, lost tickets, collected, pass sales, net, net per entry. Up to 366 days |
 
 Reports that list dates also accept `period=current` (the last `REPORT_CURRENT_DAYS` days, default 90) or `period=old` (before that; with no dates it shows the 30 days just before the live period). With no `period` there is no limit, as before.
 

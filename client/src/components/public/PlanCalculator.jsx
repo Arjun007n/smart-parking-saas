@@ -12,7 +12,7 @@ export default function PlanCalculator() {
 
   const field = 'mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900'
   return (
-    <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
+    <div className="pub-card p-6 sm:p-8">
       <h3 className="text-xl font-extrabold text-[#0b4ea2]">Build your Parking Management plan</h3>
       <p className="mt-1 text-sm text-slate-600">Choose how many users and for how long. The longer the plan, the lower the price.</p>
       <div className="mt-5 grid gap-6 md:grid-cols-2">

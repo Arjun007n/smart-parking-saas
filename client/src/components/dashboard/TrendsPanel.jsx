@@ -68,7 +68,7 @@ export default function TrendsPanel({ locationId }) {
               <Stat
                 label="Net revenue"
                 value={money(revenue.data.total.net)}
-                hint={`${revenue.data.total.payments} payments${payments.data.total.refunded ? ` · ${money(payments.data.total.refunded)} refunded` : ''}`}
+                hint={`${revenue.data.total.payments} payments`}
               />
               <Stat
                 label="Busiest day"
@@ -160,7 +160,6 @@ export default function TrendsPanel({ locationId }) {
                     ['Free pass visits', passes.data.passVisits],
                     ['Sold or renewed', `${passes.data.sales.newPasses + passes.data.sales.renewals}`],
                     ['Pass money', money(passes.data.sales.amount)],
-                    ['Refunded', money(payments.data.total.refunded)],
                   ].map(([label, value]) => (
                     <div key={label} className="rounded-lg bg-slate-50 p-3">
                       <dt className="text-slate-500">{label}</dt>

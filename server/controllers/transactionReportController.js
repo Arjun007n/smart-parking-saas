@@ -15,10 +15,9 @@ const KINDS = ["fastag", "online"];
 
 // What the screen calls each state, and which group it counts in on the tiles.
 const GROUPS = {
-  ACCEPTED: ["SUCCESS"],
+  ACCEPTED: ["SUCCESS", "REFUNDED"],
   IN_PROGRESS: ["PENDING", "UNKNOWN"],
   DECLINED: ["FAILED"],
-  REFUNDED: ["REFUNDED"],
 };
 const groupOf = (status) => Object.keys(GROUPS).find((g) => GROUPS[g].includes(status)) || "IN_PROGRESS";
 
@@ -35,7 +34,7 @@ const transactionsReport = async (req, res) => {
   if (!isFastag) base.method = "GATEWAY";
 
   const status = typeof req.query.status === "string" ? req.query.status.trim().toUpperCase() : "";
-  const known = isFastag ? ["PENDING", "UNKNOWN", "SUCCESS", "FAILED"] : ["PENDING", "SUCCESS", "FAILED", "REFUNDED"];
+  const known = isFastag ? ["PENDING", "UNKNOWN", "SUCCESS", "FAILED"] : ["PENDING", "SUCCESS", "FAILED"];
   if (status && status !== "ALL" && !known.includes(status)) throw new AppError("Unknown status", 400);
   const filter = { ...base };
   if (status && status !== "ALL") filter.status = status;
@@ -47,10 +46,10 @@ const transactionsReport = async (req, res) => {
     { $match: base },
     { $group: { _id: "$status", amount: { $sum: "$amount" }, count: { $sum: 1 } } },
   ]);
-  const tiles = { accepted: 0, inProgress: 0, declined: 0, refunded: 0, count: 0 };
+  const tiles = { accepted: 0, inProgress: 0, declined: 0, count: 0 };
   for (const r of tileRows) {
     const group = groupOf(r._id);
-    const key = { ACCEPTED: "accepted", IN_PROGRESS: "inProgress", DECLINED: "declined", REFUNDED: "refunded" }[group];
+    const key = { ACCEPTED: "accepted", IN_PROGRESS: "inProgress", DECLINED: "declined" }[group];
     tiles[key] = round2(tiles[key] + r.amount);
     tiles.count += r.count;
   }

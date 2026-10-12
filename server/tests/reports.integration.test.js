@@ -148,36 +148,34 @@ it("occupancy trend: a row per day with entries, exits and the busiest moment", 
   assert.equal((await api("GET", `/api/reports/occupancy-trend?from=${s.to}&to=2000-01-01`, { token: s.a.token })).status, 400);
 });
 
-it("exceptions: cancellations, releases, lost tickets, refunds, failed payments and long stays, each once", async () => {
+it("exceptions: cancellations, releases, lost tickets, failed payments and long stays, each once", async () => {
   const res = await report("exceptions");
   assert.equal(res.status, 200, JSON.stringify(res.body));
   const { counts, rows, total } = res.body.data;
-  assert.deepEqual(counts, { CANCELLED: 1, OVERRIDE: 1, LOST_TICKET: 1, REFUND: 1, PAYMENT_FAILED: 1, STILL_INSIDE: 1 });
-  assert.equal(total, 6);
-  assert.equal(rows.length, 6);
+  assert.deepEqual(counts, { CANCELLED: 1, OVERRIDE: 1, LOST_TICKET: 1, PAYMENT_FAILED: 1, STILL_INSIDE: 1 });
+  assert.equal(total, 5);
+  assert.equal(rows.length, 5);
   const by = (what) => rows.find((r) => r.type === what);
   assert.equal(by("Entry cancelled").detail, "Entered by mistake");
   assert.equal(by("Released by admin").detail, "Barrier stuck, let him go");
-  assert.equal(by("Refund").detail, "Customer was overcharged");
-  assert.equal(by("Refund").amount, s.upi.amount);
+  assert.equal(by("Refund"), undefined, "refunds are not an exceptions type");
   assert.equal(by("Lost ticket").vehicle, "RJ14LOST01");
   assert.equal(by("Inside for over 24 hours").vehicle, "RJ14OLD001");
   assert.equal(by("Online payment failed").detail, "Declined in the simulator");
   assert.equal(by("Entry cancelled").by, "Admin rpa");
 
-  const refundsOnly = await report("exceptions", "type=REFUND");
-  assert.equal(refundsOnly.body.data.rows.length, 1);
+  assert.equal((await report("exceptions", "type=REFUND")).status, 400);
   assert.equal((await report("exceptions", "type=NOPE")).status, 400);
 
   // A location admin sees their own location; everything above happened at Main.
-  assert.equal((await report("exceptions", "", s.site)).body.data.total, 6);
+  assert.equal((await report("exceptions", "", s.site)).body.data.total, total, "everything above happened at Main");
   assert.equal((await report("exceptions", `locationId=${s.annex._id}`)).body.data.total, 0);
 
   const csv = await raw(`/api/reports/exceptions?${range()}&format=csv`, s.a.token);
   assert.equal(csv.status, 200);
   assert.match(csv.type, /text\/csv/);
   assert.match(csv.text, /Entry cancelled/);
-  assert.match(csv.text, /Customer was overcharged/);
+  assert.match(csv.text, /Online payment failed/);
 });
 
 it("exceptions: a payment problem (paid twice) shows up with the right vehicle", async () => {
@@ -197,21 +195,20 @@ it("exceptions: a payment problem (paid twice) shows up with the right vehicle",
   assert.equal((await report("exceptions", "type=PAYMENT_PROBLEM", s.b.token)).body.data.rows.length, 0);
 });
 
-it("payments: share by method, online success rate, refunds", async () => {
+it("payments: share by method and online success rate", async () => {
   const res = await report("payments");
   assert.equal(res.status, 200, JSON.stringify(res.body));
   const { rows, total, failureReasons } = res.body.data;
   const row = (m) => rows.find((r) => r.method === m);
   assert.ok(row("CASH").amount > 0);
-  assert.equal(row("UPI").refunds, 1);
-  assert.equal(row("UPI").refunded, s.upi.amount);
+  assert.equal(row("UPI").refunds, undefined, "no refund columns");
   assert.equal(row("GATEWAY").payments, 0);
   assert.ok(row("GATEWAY").failed >= 1);
   assert.equal(row("GATEWAY").successRate, 0);
   assert.equal(row("CASH").successRate, "");
   assert.ok(Math.abs(rows.reduce((t, r) => t + r.share, 0) - 100) < 0.5);
-  assert.equal(total.refunded, s.upi.amount);
-  assert.ok(total.refundRate > 0);
+  assert.equal(total.refunded, undefined);
+  assert.equal(total.refundRate, undefined);
   assert.ok(failureReasons.some((r) => r.reason === "Declined in the simulator" && r.count === 1));
   // The pass sale (1000, cash) is money too.
   assert.ok(row("CASH").amount >= 1000);

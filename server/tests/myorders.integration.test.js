@@ -95,7 +95,7 @@ it("filters: payment status, kind of order and order number", async () => {
   assert.equal(await count("?type=subscription"), 2);
   assert.equal(await count("?type=PLAN"), 1);
   assert.equal(await count("?type=HARDWARE&status=PAID"), 1);
-  assert.equal(await count(`?q=${s.purchase.orderNumber.slice(0, 12)}`), 2, "part of an order number (the purchase and the renewal share the start)");
+  assert.equal(await count(`?q=${s.purchase.orderNumber.slice(0, 16)}`), 1, "part of an order number (ORN + the millisecond it was made)");
   assert.equal(await count(`?q=${s.purchase.orderNumber}`), 1, "the whole order number");
   assert.equal(await count("?q=hw-100"), 2, "not case sensitive");
   assert.equal(await count("?q=HW-1002"), 1);

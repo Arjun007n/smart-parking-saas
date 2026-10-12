@@ -50,12 +50,6 @@ export default function CollectionByType({ rows, totals }) {
                 <td key={key} className="py-2 pr-3 text-right">{money(totals[key])}</td>
               ))}
             </tr>
-            {totals.refunded > 0 && (
-              <tr className="text-slate-600">
-                <td className="py-1 pr-3" colSpan={2}>Given back (refunds)</td>
-                <td className="py-1 pr-3 text-right" colSpan={COLUMNS.length}>− {money(totals.refunded)} · net {money(totals.net)}</td>
-              </tr>
-            )}
           </tfoot>
         )}
       </table>

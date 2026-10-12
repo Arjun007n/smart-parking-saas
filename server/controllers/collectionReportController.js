@@ -148,7 +148,6 @@ const operatorCollectionReport = async (req, res) => {
     { key: "fastag", label: "FASTag" },
     { key: "wallet", label: "Wallet (not counted)" },
     { key: "passSales", label: "Pass sales" },
-    { key: "refunded", label: "Refunded" },
     { key: "systemCollection", label: "System collection" },
     { key: "shifts", label: "Shifts closed" },
     { key: "actualCollection", label: "Actual collection" },
@@ -178,7 +177,6 @@ const daySummaryReport = async (req, res) => {
     { key: "online", label: "Online" },
     { key: "fastag", label: "FASTag" },
     { key: "passSales", label: "Of which passes" },
-    { key: "refunded", label: "Refunded" },
     { key: "total", label: "Total" },
   ], exportRows, { total, date: range.from, from: range.from, to: range.from });
 };

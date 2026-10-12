@@ -31,14 +31,6 @@ test("switches that are set are used, junk is ignored", () => {
   assert.equal(resolveOperations({ autoExitHours: 99999 }).autoExitHours, MAX_AUTO_EXIT_HOURS);
 });
 
-test("the re-entry limit defaults to none and is kept to a whole number from 0 to 1000", () => {
-  assert.equal(resolveOperations(undefined).reEntryLimit, 0);
-  assert.equal(resolveOperations({ reEntryLimit: 3.9 }).reEntryLimit, 3);
-  assert.equal(resolveOperations({ reEntryLimit: -2 }).reEntryLimit, 0);
-  assert.equal(resolveOperations({ reEntryLimit: "x" }).reEntryLimit, 0);
-  assert.equal(resolveOperations({ reEntryLimit: 99999 }).reEntryLimit, 1000);
-});
-
 test("a changed exit amount keeps tax right, tax included in the price", () => {
   const fee = { total: 100, subtotal: 84.75, tax: 15.25, taxPercent: 18, taxInclusive: true, reason: "CHARGED", breakdown: { base: 100 } };
   const edited = editedFee(fee, 59);

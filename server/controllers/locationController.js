@@ -8,7 +8,6 @@ const { buildReportFile, formatOf } = require("../services/reportExport");
 const { runRule } = require("../services/operationsService");
 const licences = require("../services/licenceService");
 const { resolveOperations } = require("../utils/operations");
-const reEntries = require("../services/reEntryService");
 const lanes = require("../services/laneService");
 
 // Tenant filter, plus "only my assigned locations" for location-level roles.
@@ -251,22 +250,4 @@ const runAutoExit = async (req, res) => {
   res.json({ success: true, data: { closed } });
 };
 
-// GET /api/locations/:id/re-entries: the limit and today's re-entries per operator (admins only).
-const reEntryCounter = async (req, res) => {
-  const location = await findInScope(req);
-  res.json({ success: true, data: await reEntries.overview(location) });
-};
-
-// POST /api/locations/:id/re-entries/reset: starts the count again from now.
-const resetReEntryCounter = async (req, res) => {
-  const location = await findInScope(req);
-  location.operations = location.operations || {};
-  location.operations.reEntryCountFrom = new Date();
-  await location.save();
-  await audit.record(req, "LOCATION_REENTRY_COUNTER_RESET", {
-    entity: "Location", entityId: location._id, companyId: location.companyId,
-  });
-  res.json({ success: true, data: await reEntries.overview(location) });
-};
-
-module.exports = { listLanes, createLane, updateLane, setLaneStatus, reEntryCounter, resetReEntryCounter, exportLocations, runAutoExit, listLocations, getLocation, createLocation, updateLocation, deactivateLocation };
+module.exports = { listLanes, createLane, updateLane, setLaneStatus, exportLocations, runAutoExit, listLocations, getLocation, createLocation, updateLocation, deactivateLocation };

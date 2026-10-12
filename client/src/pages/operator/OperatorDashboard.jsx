@@ -42,14 +42,18 @@ function Counts({ title, counts }) {
 export default function OperatorDashboard() {
   const { company, can } = useAuth()
   const { locations, defaultId } = useMyLocations()
-  const [filters, setFilters] = useState({ date: todayInput(), locationId: '' })
+  // The figures cover a period: from one date and time to another. It opens on today, midnight to 23:59.
+  const [filters, setFilters] = useState({ from: `${todayInput()}T00:00`, to: `${todayInput()}T23:59`, locationId: '' })
   const locationId = filters.locationId || (locations.length === 1 ? defaultId : '')
-  const params = { date: filters.date, ...(locationId ? { locationId } : {}) }
+  const params = { from: filters.from, to: filters.to, ...(locationId ? { locationId } : {}) }
+  const backwards = Boolean(filters.from && filters.to && filters.to < filters.from)
+  const isToday = filters.from === `${todayInput()}T00:00` && filters.to === `${todayInput()}T23:59`
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['operator-summary', params],
     queryFn: () => operatorApi.summary(params),
     refetchInterval: 30_000,
+    enabled: Boolean(filters.from && filters.to) && !backwards,
   })
 
   const license = data?.license
@@ -68,7 +72,11 @@ export default function OperatorDashboard() {
           )}
         </div>
         <div className="no-print flex flex-wrap items-end gap-3">
-          <Field label="Date" type="date" name="home-date" max={todayInput()} value={filters.date} onChange={(event) => setFilters((f) => ({ ...f, date: event.target.value || todayInput() }))} />
+          <Field label="From" type="datetime-local" name="home-from" max={filters.to || undefined} value={filters.from} onChange={(event) => setFilters((f) => ({ ...f, from: event.target.value }))} />
+          <Field label="To" type="datetime-local" name="home-to" min={filters.from || undefined} value={filters.to} onChange={(event) => setFilters((f) => ({ ...f, to: event.target.value }))} />
+          {!isToday && (
+            <Button type="button" variant="secondary" onClick={() => setFilters((f) => ({ ...f, from: `${todayInput()}T00:00`, to: `${todayInput()}T23:59` }))}>Today</Button>
+          )}
           {locations.length > 1 && (
             <Select label="Location" name="home-location" value={filters.locationId} onChange={(event) => setFilters((f) => ({ ...f, locationId: event.target.value }))}>
               <option value="">All my locations</option>
@@ -80,6 +88,7 @@ export default function OperatorDashboard() {
         </div>
       </div>
 
+      {backwards && <Alert>The end must be after the start.</Alert>}
       {error && <Alert>{errorMessage(error)}</Alert>}
       {isLoading ? (
         <CardSkeleton count={8} />

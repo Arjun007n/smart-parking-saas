@@ -117,8 +117,8 @@ it("advance less than the fee: the customer pays only what is left", async () =>
   assert.equal(pending.fee.due, 25);
   assert.deepEqual(quote.body.data.advance, { taken: 15, applied: 15, refund: 0, method: "CASH" });
 
-  // The old full amount is no longer accepted; the amount left is.
-  assert.equal((await pay({ sessionId: s.v2._id, method: "CASH", amount: FEE })).status, 409);
+  // Less than the amount left is not accepted; the amount left is.
+  assert.equal((await pay({ sessionId: s.v2._id, method: "CASH", amount: 20 })).status, 409);
   const paid = await pay({ sessionId: s.v2._id, method: "CASH", amount: 25 });
   assert.equal(paid.status, 201, JSON.stringify(paid.body));
   assert.equal(paid.body.data.payment.amount, 25);

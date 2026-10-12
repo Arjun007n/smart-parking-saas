@@ -133,7 +133,7 @@ function PaymentStep({ session, onPaid, onPaidOnline, onRecalculate, recalculati
       ? { status: 'UNKNOWN', tagId: pendingCharge.tagId, message: 'The FASTag partner has not confirmed the charge yet. Check again in a moment. Nothing is charged twice.' }
       : null
   )
-  // What the customer handed over (cash): the screen shows the change to give back.
+  // What the customer paid (cash): this amount is recorded as it is. There is no change to give back.
   const [given, setGiven] = useState(String(due))
   // Online payment is offered only once a gateway is set up on the server.
   const options = useQuery({ queryKey: ['payment-options'], queryFn: paymentApi.options, staleTime: 5 * 60 * 1000 })
@@ -143,14 +143,15 @@ function PaymentStep({ session, onPaid, onPaidOnline, onRecalculate, recalculati
   const cash = method === 'CASH'
   const chargeTag = method === 'FASTAG' && Boolean(options.data?.fastag)
   const short = cash && (!Number.isFinite(handed) || handed + 0.005 < due)
-  const change = cash && Number.isFinite(handed) ? Math.round((handed - due) * 100) / 100 : 0
+  // Cash: what was received is what is recorded (never less than the fee).
+  const payable = cash && Number.isFinite(handed) && handed > due ? Math.round(handed * 100) / 100 : due
 
   const pay = useMutation({
     mutationFn: () =>
       paymentApi.create({
         sessionId: session._id,
         method,
-        amount: due,
+        amount: payable,
         ...(chargeTag
           ? { tagId: tagId.trim() }
           : method !== 'CASH' && reference.trim().length >= 4 ? { transactionId: reference.trim() } : {}),
@@ -162,7 +163,7 @@ function PaymentStep({ session, onPaid, onPaidOnline, onRecalculate, recalculati
         return
       }
       setWaiting(null)
-      onPaid({ ...data, change: cash && change > 0 ? change : 0 })
+      onPaid(data)
     },
   })
 
@@ -241,10 +242,10 @@ function PaymentStep({ session, onPaid, onPaidOnline, onRecalculate, recalculati
                 <p className="text-sm font-semibold text-red-700" role="status">
                   {Number.isFinite(handed) && handed > 0 ? `Take ${money(due - handed)} more` : `Take ${money(due)}`}. The amount received must be at least {money(due)}.
                 </p>
-              ) : change > 0 ? (
-                <p className="text-lg font-bold text-green-700" role="status">Return {money(change)}</p>
+              ) : payable > due ? (
+                <p className="text-sm font-semibold text-green-700" role="status">{money(payable)} will be recorded for this exit.</p>
               ) : (
-                <p className="text-sm font-semibold text-green-700" role="status">Exact amount. Nothing to return.</p>
+                <p className="text-sm font-semibold text-green-700" role="status">{money(due)} will be recorded for this exit.</p>
               )}
             </div>
           ) : chargeTag ? (
@@ -286,7 +287,7 @@ function PaymentStep({ session, onPaid, onPaidOnline, onRecalculate, recalculati
             >
               {chargeTag
                 ? (waiting ? 'Check FASTag charge again' : `Charge FASTag ${money(due)} and exit`)
-                : `Exit — ${money(due)} received`}
+                : `Exit — ${money(payable)} received`}
             </Button>
             <span className="hidden shrink-0 text-center sm:block" title="Scan this code with the gate scanner to confirm the exit">
               <QrCode value={CMD_OK} size={64} label="Scan to confirm the exit" />
@@ -302,7 +303,7 @@ function PaymentStep({ session, onPaid, onPaidOnline, onRecalculate, recalculati
   )
 }
 
-function Done({ session, paid, method, advance, change, hardware, onNext, skipReceipt = false }) {
+function Done({ session, paid, method, advance, hardware, onNext, skipReceipt = false }) {
   const { user } = useAuth()
   const mayPrint = user?.access?.reprint !== false
   const covered = !paid && session.fee.total > 0 && session.fee.advanceApplied > 0
@@ -328,7 +329,6 @@ function Done({ session, paid, method, advance, change, hardware, onNext, skipRe
             ? `Exit successful. The advance covered the fee. ${session.vehicleNumber} may leave.`
             : `Exit successful. Nothing to pay. ${session.vehicleNumber} may leave.`}
       </Alert>
-      {change > 0 && <Alert type="info">Return {money(change)} to the customer.</Alert>}
       {giveBack > 0 && (
         <Alert type="info">
           Give {money(giveBack)} back to the customer
@@ -632,7 +632,7 @@ function ExitForm({ locations, defaultId }) {
   const session = result?.session
   const finished = result && (!result.paymentRequired || result.paid)
   const done = (data) => {
-    setResult({ session: data.session, paymentRequired: true, paid: true, method: data.payment?.method, hardware: data.hardware, pass: result.pass, advance: result.advance, change: data.change })
+    setResult({ session: data.session, paymentRequired: true, paid: true, method: data.payment?.method, hardware: data.hardware, pass: result.pass, advance: result.advance })
     refreshLists()
     markLocalAction()
     toast({ title: 'Payment recorded', message: `${data.session.vehicleNumber} may leave`, tone: 'success' })
@@ -701,7 +701,6 @@ function ExitForm({ locations, defaultId }) {
                     paid={result.paid}
                     method={result.method}
                     advance={result.advance}
-                    change={result.change}
                     hardware={result.hardware}
                     onNext={next}
                     // A location can switch the receipt off for pass holders, who pay nothing.

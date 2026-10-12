@@ -86,6 +86,22 @@ it("Home: counts of entries, exits, parked and free spaces per vehicle type", as
   assert.ok(license.plan, "the licence block names the plan");
 });
 
+it("Home: a period from one date and time to another", async () => {
+  const text = (ms) => new Date(Date.now() + ms).toISOString().slice(0, 16);
+  const day = 86400000;
+  const around = await api("GET", `/api/operator/summary?locationId=${s.loc._id}&from=${text(-day)}&to=${text(day)}`, { token: s.a.token });
+  assert.equal(around.status, 200, JSON.stringify(around.body));
+  assert.deepEqual(around.body.data.counts.all, { capacity: 5, parked: 2, available: 3, entries: 5, exits: 3 });
+  // Before anything happened: nothing came in or left (the vehicles still parked are counted as parked).
+  const before = await api("GET", `/api/operator/summary?locationId=${s.loc._id}&from=2020-01-01T00:00&to=2020-01-02T10:30`, { token: s.a.token });
+  assert.equal(before.status, 200, JSON.stringify(before.body));
+  assert.equal(before.body.data.counts.all.entries, 0);
+  assert.equal(before.body.data.counts.all.exits, 0);
+  assert.equal((await api("GET", `/api/operator/summary?from=${text(day)}&to=${text(-day)}`, { token: s.a.token })).status, 400);
+  assert.equal((await api("GET", `/api/operator/summary?from=${text(-day)}`, { token: s.a.token })).status, 400);
+  assert.equal((await api("GET", "/api/operator/summary?from=2026-10-01&to=2026-10-02", { token: s.a.token })).status, 400);
+});
+
 it("Home: money by vehicle type and payment mode, advances and exit payments apart", async () => {
   const res = await api("GET", `/api/operator/summary?locationId=${s.loc._id}`, { token: s.a.token });
   const { rows, totals } = res.body.data.collection;

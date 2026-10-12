@@ -334,7 +334,7 @@ function Operations({ locations }) {
           icon="chart"
           value={<CountUp value={isToday ? d.revenue.today : d.revenue.inPeriod} format={money} />}
           label={isToday ? "Today's Total Revenue" : 'Total Revenue'}
-          hint={isToday ? 'After refunds' : `${periodText} · after refunds`}
+          hint={isToday ? 'Today' : periodText}
         />
         <KpiCard
           icon="calendar"
@@ -346,7 +346,34 @@ function Operations({ locations }) {
         />
         <KpiCard icon="card" value={d.passes.total} label="Total Passes" hint={`${d.passes.active} active · ${d.passes.endingSoon} end within a week`} to="/dashboard/passes" />
         <KpiCard icon="wallet" value={money(d.passes.activeRevenue)} label="Current Active Passes Revenue" hint="Paid for passes valid now" to="/dashboard/passes" />
-        <KpiCard icon="clipboard" value={d.reprintsToday} label="Reprint Tickets Count" hint={isToday ? 'Today' : periodText} />
+        {d.reprints ? (
+          <KpiCard
+            to={`/dashboard/reports?${new URLSearchParams({ report: 'reprints', from: d.period.from, to: d.period.to, ...(locationId ? { locationId } : {}) })}`}
+            icon="clipboard"
+            value={d.reprints.total}
+            label="Reprint Tickets Count"
+            hint={
+              d.reprints.operators.length > 0
+                ? `${isToday ? 'Today' : periodText} · most: ${d.reprints.operators[0].name} (${d.reprints.operators[0].count})`
+                : isToday ? 'Today' : periodText
+            }
+          />
+        ) : (
+          <KpiCard icon="clipboard" value={d.reprintsToday} label="Reprint Tickets Count" hint={isToday ? 'Today' : periodText} />
+        )}
+        {d.reEntries && (
+          <KpiCard
+            to={`/dashboard/reports?${new URLSearchParams({ report: 're-entries', from: d.period.from, to: d.period.to, ...(locationId ? { locationId } : {}) })}`}
+            icon="clipboard"
+            value={d.reEntries.total}
+            label="Re-entry Count"
+            hint={
+              d.reEntries.operators.length > 0
+                ? `${isToday ? 'Today' : periodText} · most: ${d.reEntries.operators[0].name} (${d.reEntries.operators[0].count})`
+                : isToday ? 'Today' : periodText
+            }
+          />
+        )}
       </div>
 
       <TypeTable summary={d.byVehicleType} title="Vehicle Type Summary (Active Types)" period={d.period} locationId={locationId} />

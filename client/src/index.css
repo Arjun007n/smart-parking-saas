@@ -155,8 +155,73 @@ body {
 .gate-skin button.gate-btn-entry, .gate-skin button.gate-btn-exit { background-image: none; }
 .gate-skin h1 { color: #1e3d73; font-size: 1.25rem; font-weight: 800; }
 
-/* Public website: the same Montserrat face as the gate screens. */
-.site-skin { font-family: Montserrat, Arial, Helvetica, sans-serif; }
+/* Public website: Inter for text, Outfit for headings and numbers. Blue headings, orange buttons, soft blue-white backgrounds. */
+.site-skin {
+  --pub-blue: #0047ab;
+  --pub-blue-2: #1867e1;
+  --pub-navy: #10233f;
+  --pub-orange: #fc7800;
+  --pub-orange-2: #ff9a3c;
+  --pub-soft: #f7faff;
+  font-family: Inter, Arial, Helvetica, sans-serif;
+  color: var(--pub-navy);
+}
+.site-skin h1, .site-skin h2, .site-skin h3, .pub-display { font-family: Outfit, Inter, Arial, sans-serif; }
+
+/* Buttons */
+.pub-btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; border-radius: 0.65rem; padding: 0.7rem 1.4rem; font-weight: 600; transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease; }
+.pub-btn:active { transform: scale(0.97); }
+.pub-btn-orange { color: #fff; background: linear-gradient(135deg, var(--pub-orange), var(--pub-orange-2)); box-shadow: 0 8px 18px -8px rgba(252, 120, 0, 0.7); }
+.pub-btn-orange:hover { filter: brightness(1.06); box-shadow: 0 10px 22px -8px rgba(252, 120, 0, 0.85); }
+.pub-btn-blue { color: #fff; background: linear-gradient(135deg, var(--pub-blue-2), var(--pub-blue)); box-shadow: 0 8px 18px -8px rgba(0, 71, 171, 0.7); }
+.pub-btn-blue:hover { filter: brightness(1.08); }
+.pub-btn-ghost { color: var(--pub-blue); background: #fff; border: 1.5px solid #c9d9f2; }
+.pub-btn-ghost:hover { background: #eef4ff; }
+.pub-pill { white-space: nowrap; display: inline-flex; align-items: center; gap: 0.4rem; border-radius: 9999px; padding: 0.4rem 1rem; font-size: 0.875rem; font-weight: 600; color: #fff; background: var(--pub-orange); box-shadow: 0 4px 10px -4px rgba(252, 120, 0, 0.7); transition: filter 0.15s ease; }
+.pub-pill:hover { filter: brightness(1.08); }
+
+/* Section headings: small blue label, big navy heading, short intro */
+.pub-eyebrow { display: inline-block; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--pub-blue-2); }
+.pub-title { font-weight: 700; line-height: 1.15; color: var(--pub-blue); font-size: clamp(1.7rem, 3.4vw, 2.6rem); }
+.pub-lead { color: #4b5d78; }
+
+/* Backgrounds */
+.pub-hero-bg { background:
+  radial-gradient(circle at 12% 10%, rgba(24, 103, 225, 0.16), transparent 30%),
+  radial-gradient(circle at 90% 6%, rgba(252, 120, 0, 0.10), transparent 26%),
+  radial-gradient(circle at 80% 90%, rgba(122, 63, 210, 0.10), transparent 30%),
+  linear-gradient(180deg, #eaf3ff 0%, #ffffff 100%); }
+.pub-soft-bg { background: linear-gradient(180deg, #f7faff 0%, #ffffff 100%); }
+.pub-dots { background-image: radial-gradient(rgba(24, 103, 225, 0.16) 1.2px, transparent 1.2px); background-size: 22px 22px; }
+.pub-grid-bg { background-image: linear-gradient(rgba(24, 103, 225, 0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(24, 103, 225, 0.06) 1px, transparent 1px); background-size: 36px 36px; }
+.pub-night { color: #fff; background:
+  radial-gradient(circle at 15% 20%, rgba(24, 103, 225, 0.55), transparent 40%),
+  radial-gradient(circle at 85% 80%, rgba(122, 63, 210, 0.35), transparent 40%),
+  linear-gradient(135deg, #0a2147 0%, #0b2a55 55%, #123a78 100%); }
+
+/* Cards */
+.pub-card { background: #fff; border: 1px solid #e1eaf7; border-radius: 1rem; box-shadow: 0 10px 28px -18px rgba(16, 35, 63, 0.35); }
+.pub-card-lift { transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease; }
+.pub-card-lift:hover { transform: translateY(-4px); border-color: #b8cff0; box-shadow: 0 18px 34px -18px rgba(0, 71, 171, 0.45); }
+.pub-icon { display: flex; height: 3rem; width: 3rem; align-items: center; justify-content: center; border-radius: 0.9rem; background: linear-gradient(135deg, #e6f0ff, #d3e4ff); color: var(--pub-blue); }
+
+/* Floating hero pieces */
+@keyframes pub-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+@keyframes pub-drive { from { transform: translateX(-12%); } to { transform: translateX(0); } }
+@keyframes pub-barrier { 0%, 45% { transform: rotate(0deg); } 60%, 100% { transform: rotate(-70deg); } }
+.pub-float { animation: pub-float 5s ease-in-out infinite; }
+.pub-float-slow { animation: pub-float 7s ease-in-out infinite; }
+.pub-drive { animation: pub-drive 1.4s ease-out both; }
+.pub-barrier-arm { transform-box: fill-box; transform-origin: 0% 50%; animation: pub-barrier 6s ease-in-out infinite alternate; }
+@media (prefers-reduced-motion: reduce) {
+  .pub-float, .pub-float-slow, .pub-drive, .pub-barrier-arm { animation: none; }
+}
+
+/* Header nav link */
+.pub-nav-link { position: relative; white-space: nowrap; padding: 0.4rem 0.1rem; font-size: 0.875rem; font-weight: 600; color: var(--pub-navy); transition: color 0.15s ease; }
+.pub-nav-link::after { content: ""; position: absolute; left: 0; right: 0; bottom: -2px; height: 2px; border-radius: 2px; background: var(--pub-orange); transform: scaleX(0); transition: transform 0.2s ease; }
+.pub-nav-link:hover, .pub-nav-link.is-active { color: var(--pub-blue-2); }
+.pub-nav-link:hover::after, .pub-nav-link.is-active::after { transform: scaleX(1); }
 
 /* ---- Admin look (the dashboard for company staff): a white page, a header with a logo cell and icon cells,
    a horizontal menu with drop-downs, thin bordered cards, plain navy card titles, bordered tables, a footer.

@@ -363,8 +363,8 @@ audited as `BARRIER_MANUAL_OPEN`. It answers 404 when the lane has no single bar
 
 **Re-entry.** *Re-Entry* in the vehicles-inside table (`POST /api/parking/sessions/:id/re-entry`, needs `ENTRY_CREATE`) cancels a
 ticket and issues a fresh one for the same vehicle, for a driver who turned back or a ticket that was misprinted.
-Rules: only an open ticket; refused when an advance was taken (cancel it properly, which gives the advance back); operators
-within `RE_ENTRY_WINDOW_MINUTES` (default 15), older tickets need an admin with `LOCATION_MANAGE`; blocked vehicles are refused;
+Rules: only an open ticket; any age, any number of times per day (an advance on the old ticket is given back); only the
+location's *Allow re-entry* switch can turn it off; blocked vehicles are refused;
 repeating the same call returns the same new ticket. The old ticket is `CANCELLED` ("Re-entry: a new ticket was issued") and the
 space is not counted twice.
 
@@ -406,7 +406,7 @@ the page says so. This is a zip that needs Node.js 20 on the gate PC, not a Wind
 See `server/.env.example`: `PAYMENT_PROVIDER`, `PAYMENT_WEBHOOK_SECRET`, `RAZORPAY_KEY_ID`,
 `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `GATEWAY_PAYMENT_MINUTES`, `PHOTO_STORAGE_DIR`,
 `PHOTO_RETENTION_DAYS`, `PHOTO_MAX_BYTES`, `EMAIL_PROVIDER`, `RESEND_API_KEY`, `EMAIL_FROM`, `EMAIL_REPLY_TO`,
-`EMAIL_TIMEOUT_MS`, `EMAIL_ALERT_HOURLY_CAP`, `MESSAGING_PROVIDER`, `MESSAGING_CHANNELS`, `MESSAGING_DEFAULT_COUNTRY_CODE`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_SMS_FROM`, `TWILIO_MESSAGING_SERVICE_SID`, `TWILIO_WHATSAPP_FROM`, `MESSAGING_TIMEOUT_MS`, `MESSAGING_ALERT_HOURLY_CAP`, `MESSAGING_VISIT_MESSAGES`, `BOOKING_GRACE_HOURS`, `LIVE_MAX_STREAMS`, `RE_ENTRY_WINDOW_MINUTES`, `PUBLIC_API_URL`, `GATE_AGENT_DIR`.
+`EMAIL_TIMEOUT_MS`, `EMAIL_ALERT_HOURLY_CAP`, `MESSAGING_PROVIDER`, `MESSAGING_CHANNELS`, `MESSAGING_DEFAULT_COUNTRY_CODE`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_SMS_FROM`, `TWILIO_MESSAGING_SERVICE_SID`, `TWILIO_WHATSAPP_FROM`, `MESSAGING_TIMEOUT_MS`, `MESSAGING_ALERT_HOURLY_CAP`, `MESSAGING_VISIT_MESSAGES`, `BOOKING_GRACE_HOURS`, `LIVE_MAX_STREAMS`, `PUBLIC_API_URL`, `GATE_AGENT_DIR`.
 
 ## Known limits
 

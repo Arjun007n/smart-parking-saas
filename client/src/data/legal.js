@@ -1,6 +1,6 @@
 // The Privacy Policy and the Terms, as plain sections. This is a working draft written from what the
 // software actually does. Have a lawyer read it before you rely on it, and set `legalName`,
-// `jurisdiction` and `refundPolicy` in config/site.js so the placeholders below are filled in.
+// `jurisdiction` in config/site.js so the placeholders below are filled in.
 
 export const LEGAL_UPDATED = '5 October 2026'
 
@@ -96,7 +96,7 @@ export const termsSections = (site) => {
       body: [
         'Paid plans are charged per user per month, or for the period you choose, at the price shown when you subscribe. Prices are before GST and other applicable taxes, which are added at checkout.',
         'A free trial lets you try the service for the period shown on the site. When it ends you can choose a paid plan; if you do not, the account may be limited or closed.',
-        ...(site.refundPolicy ? [site.refundPolicy] : []),
+        'All fees are final. We do not offer refunds on subscriptions, hardware orders or online booking fees.',
       ],
     },
     {

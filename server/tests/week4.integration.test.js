@@ -235,7 +235,8 @@ it("reports: revenue by day and by location", async () => {
   assert.equal(byDay.status, 200, JSON.stringify(byDay.body));
   assert.equal(byDay.body.data.rows.length, 1);
   const row = byDay.body.data.rows[0];
-  assert.deepEqual([row.payments, row.collected, row.refunds, row.refunded, row.net], [4, 80, 1, 20, 60]);
+  assert.deepEqual([row.payments, row.collected, row.net], [4, 80, 60]);
+  assert.equal(row.refunded, undefined, "the revenue report no longer shows a refunded figure");
   assert.equal(byDay.body.data.total.net, 60);
 
   for (const groupBy of ["week", "month"]) {
@@ -257,7 +258,7 @@ it("reports: collection, vehicle history, occupancy and operators, with filters"
   const collection = await api("GET", "/api/reports/collection", { token: s.a.token });
   assert.equal(collection.body.data.total, 4);
   const refunded = collection.body.data.rows.find((r) => r.status === "REFUNDED");
-  assert.equal(refunded.refundReason, "Charged twice");
+  assert.equal(refunded.refundReason, undefined);
   assert.equal(refunded.vehicle, "RJ14AA0001");
   assert.equal(refunded.operator, "Collector");
   assert.equal((await api("GET", "/api/reports/collection?method=UPI", { token: s.a.token })).body.data.total, 1);
@@ -284,7 +285,8 @@ it("reports: collection, vehicle history, occupancy and operators, with filters"
   const collector = operators.body.data.rows.find((r) => r.operator === "Collector");
   assert.deepEqual([collector.exits, collector.payments, collector.collected, collector.cash], [4, 4, 80, 60]);
   const admin = operators.body.data.rows.find((r) => r.operator === "Admin w4a");
-  assert.deepEqual([admin.entries, admin.refunds, admin.refunded, admin.corrections], [6, 1, 20, 1]);
+  assert.deepEqual([admin.entries, admin.corrections], [6, 1]);
+  assert.equal(admin.refunded, undefined);
 });
 
 it("reports: CSV download", async () => {
@@ -293,8 +295,8 @@ it("reports: CSV download", async () => {
   assert.match(csv.type, /text\/csv/);
   assert.match(csv.disposition, /attachment; filename="revenue-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}\.csv"/);
   const lines = csv.text.replace(/^﻿/, "").split("\r\n");
-  assert.equal(lines[0], "Date,Payments,Collected,Of which passes,Tax,Refunds,Refunded,Net");
-  assert.match(lines[1], /^\d{4}-\d{2}-\d{2},4,80,0,0,1,20,60$/);
+  assert.equal(lines[0], "Date,Payments,Collected,Of which passes,Tax,Net");
+  assert.match(lines[1], /^\d{4}-\d{2}-\d{2},4,80,0,0,60$/);
 
   const collection = await raw("/api/reports/collection?format=csv", s.a.token);
   assert.equal(collection.text.replace(/^﻿/, "").split("\r\n").length, 5); // header + 4 payments

@@ -68,7 +68,7 @@ function OpenShift({ shift, locationName }) {
       <p className="text-sm text-slate-600">
         Shift at {locationName || 'your location'} started {dateTime(shift.openedAt)}.
       </p>
-      <dl className="grid gap-3 text-sm sm:grid-cols-4">
+      <dl className="grid gap-3 text-sm sm:grid-cols-3">
         <div className="rounded-lg bg-slate-50 p-3">
           <dt className="text-slate-500">Opening cash</dt>
           <dd className="text-lg font-bold text-slate-900">{money(shift.openingCash)}</dd>
@@ -76,10 +76,6 @@ function OpenShift({ shift, locationName }) {
         <div className="rounded-lg bg-slate-50 p-3">
           <dt className="text-slate-500">Collected ({t.payments})</dt>
           <dd className="text-lg font-bold text-slate-900">{money(t.collected)}</dd>
-        </div>
-        <div className="rounded-lg bg-slate-50 p-3">
-          <dt className="text-slate-500">Cash refunds</dt>
-          <dd className="text-lg font-bold text-slate-900">{money(t.cashRefunded)}</dd>
         </div>
         <div className="rounded-lg bg-blue-50 p-3">
           <dt className="text-slate-600">Cash expected in drawer</dt>
@@ -95,7 +91,7 @@ function OpenShift({ shift, locationName }) {
       {(t.walletTopups?.count > 0 || t.walletSpent?.count > 0) && (
         <p className="text-sm text-slate-600">
           Wallets: {money(t.walletTopups?.amount)} put in ({t.walletTopups?.count || 0}), {money(t.walletSpent?.amount)} paid from wallets ({t.walletSpent?.count || 0}).
-          Money put in is counted above; fees paid from wallets are not new money (a fee later refunded to the wallet still shows here).
+          Money put in is counted above; fees paid from wallets are not new money.
         </p>
       )}
 
