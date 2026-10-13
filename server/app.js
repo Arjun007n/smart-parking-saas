@@ -6,12 +6,15 @@ const morgan = require("morgan");
 const env = require("./config/env");
 const { notFound, errorHandler } = require("./middleware/errorHandler");
 const rateLimit = require("./middleware/rateLimit");
+const { redactUrl } = require("./utils/redactUrl");
 
 // Builds the Express app without starting it, so tests can use it too.
 const app = express();
 
-// Needed for correct client IPs (rate limiting, audit) behind a hosting proxy.
-if (env.isProduction) app.set("trust proxy", 1);
+// Needed for correct client IPs (rate limiting, audit) behind a hosting proxy. TRUST_PROXY is the number of
+// proxies in front of the server (default 1). A wrong number lets a caller pick their own IP address or puts
+// everyone behind one address, so set it to match the host (see docs/security.md).
+if (env.isProduction && env.trustProxy > 0) app.set("trust proxy", env.trustProxy);
 
 // Optional: refuse plain http in production (when the host does not already
 // redirect to https). `req.secure` uses the proxy's x-forwarded-proto header.
@@ -38,7 +41,13 @@ app.use(
 );
 app.use(express.urlencoded({ extended: true, limit: "100kb" }));
 
-if (env.nodeEnv !== "test") app.use(morgan(env.isProduction ? "combined" : "dev"));
+// Logs never carry the secret of a booking link or a reset link (?token=...): the address and the referrer are redacted.
+morgan.token("safe-url", (req) => redactUrl(req.originalUrl || req.url));
+morgan.token("safe-referrer", (req) => redactUrl(req.headers.referer || req.headers.referrer || "") || "-");
+const LOG_COMBINED =
+  ':remote-addr - :remote-user [:date[clf]] ":method :safe-url HTTP/:http-version" :status :res[content-length] ":safe-referrer" ":user-agent"';
+const LOG_DEV = ":method :safe-url :status :response-time ms - :res[content-length]";
+if (env.nodeEnv !== "test") app.use(morgan(env.isProduction ? LOG_COMBINED : LOG_DEV));
 
 app.get("/", (req, res) => {
   res.json({ success: true, message: "Smart Parking SaaS API is running" });

@@ -197,3 +197,39 @@ test("CORS: only the approved web addresses, https and required in production", 
   withUrl("http://app.example.com", "production", () => assert.throws(check, /must use https/));
   withUrl("https://app.example.com", "production", () => assert.doesNotThrow(check));
 });
+
+// ---- secrets in web addresses never reach the log; the proxy count is checked ----
+
+test("redactUrl: the secret of a booking link or reset link is hidden, the rest stays", () => {
+  const { redactUrl } = require("../utils/redactUrl");
+  assert.equal(redactUrl("/api/public/booking/bookings/66f1?token=abc123"), "/api/public/booking/bookings/66f1?token=[hidden]");
+  assert.equal(redactUrl("/x?a=1&token=abc&b=2"), "/x?a=1&token=[hidden]&b=2");
+  assert.equal(redactUrl("https://site.test/reset-password?token=AbC_-9"), "https://site.test/reset-password?token=[hidden]");
+  assert.equal(redactUrl("/x?TOKEN=abc&password=hunter2&key=k&secret=s&code=123456"), "/x?TOKEN=[hidden]&password=[hidden]&key=[hidden]&secret=[hidden]&code=[hidden]");
+  assert.equal(redactUrl("/api/operator/entries?page=2&q=RJ14"), "/api/operator/entries?page=2&q=RJ14");
+  assert.equal(redactUrl("/x?mytoken=abc"), "/x?mytoken=abc", "only whole parameter names");
+  assert.equal(redactUrl(undefined), undefined);
+});
+
+test("TRUST_PROXY: default 1, a number from 0 to 5, anything else stops the server in production", () => {
+  const saved = process.env.TRUST_PROXY;
+  try {
+    delete process.env.TRUST_PROXY;
+    assert.equal(env.trustProxy, 1);
+    process.env.TRUST_PROXY = "2";
+    assert.equal(env.trustProxy, 2);
+    process.env.TRUST_PROXY = "0";
+    assert.equal(env.trustProxy, 0);
+    process.env.TRUST_PROXY = "";
+    assert.equal(env.trustProxy, 1);
+    process.env.TRUST_PROXY = "many";
+    assert.equal(env.trustProxy, 1, "a wrong value never becomes a number");
+    process.env.MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/unit";
+    assert.throws(() => env.validateEnv(), /TRUST_PROXY must be a number from 0 to 5/);
+    process.env.TRUST_PROXY = "7";
+    assert.throws(() => env.validateEnv(), /TRUST_PROXY must be a number from 0 to 5/);
+  } finally {
+    if (saved === undefined) delete process.env.TRUST_PROXY;
+    else process.env.TRUST_PROXY = saved;
+  }
+});

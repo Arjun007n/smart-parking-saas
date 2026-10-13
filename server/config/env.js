@@ -63,6 +63,11 @@ const validateEnv = () => {
   }
   const fastagProblems = fastag.provider().problems();
   if (fastagProblems.length) throw new Error(`FASTAG_PROVIDER=${fastag.providerName()}: ${fastagProblems.join("; ")}`);
+  // How many proxies sit in front of the server (used to find the caller's real IP address).
+  const hops = process.env.TRUST_PROXY;
+  if (hops !== undefined && String(hops).trim() !== "" && !/^[0-5]$/.test(String(hops).trim())) {
+    throw new Error("TRUST_PROXY must be a number from 0 to 5: how many proxies are in front of the server (0 = none)");
+  }
   // Browsers: only the approved web addresses may call the API. In production they must be set (not the
   // localhost default) and must be https.
   if (process.env.NODE_ENV === "production") {
@@ -104,6 +109,11 @@ module.exports = {
   get corsOrigins() {
     const list = parseOrigins(process.env.CLIENT_URL);
     return list.length ? list : ["http://localhost:5173"];
+  },
+  // Proxies in front of the server (hosting load balancer, CDN). Default 1, like most single-host setups.
+  get trustProxy() {
+    const text = String(process.env.TRUST_PROXY ?? "").trim();
+    return /^[0-5]$/.test(text) ? Number(text) : 1;
   },
   get authRateLimitMax() {
     return Number(process.env.AUTH_RATE_LIMIT_MAX) || 20;

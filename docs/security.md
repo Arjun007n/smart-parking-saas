@@ -18,7 +18,7 @@ where the system is hosted and must be done on Day 30.
 | CSRF protection | Not needed | Login uses an `Authorization` header, not cookies, so a foreign site cannot send it |
 | CORS | Tested | Only the addresses in `CLIENT_URL` (one or several, comma separated) may call the API from a browser. In production `CLIENT_URL` is required and must be https, or the server will not start |
 | Operators in requests | Tested | Any `$operator` key in a body, query or route parameter is refused with 400 (`middleware/noOperators.js`), on top of each route's field list |
-| Security headers | Tested | helmet: no-sniff, frame options, HSTS, content security policy; `X-Powered-By` removed |
+| Security headers | Tested (API) | helmet: no-sniff, frame options, HSTS, content security policy; `X-Powered-By` removed. The website's own pages get theirs from the host: `client/public/_headers` has them (see "Website security headers" below) |
 | Payment webhook verification | Tested | HMAC-SHA256 over the exact body, constant-time comparison; refused when no secret is set |
 | Audit logs | Tested | Append-only in the model, no API to change them |
 | Secret management | Partly | Secrets live in `.env`, which Git ignores. Production secrets must be set in the host's settings, never in files. **Rotate the database password** that was shared in chat |
@@ -54,6 +54,32 @@ Each is sent six times at the same moment against the real database:
 - Same session paid: one successful payment, counted once in the shift.
 - Same payment refunded, same shift closed or opened: happens once.
 - Afterwards, each location's occupancy equals its number of open sessions.
+
+## Security review of 13 October 2026
+
+A code review of the whole site found no way for an outsider to break in. What it found, and what was done:
+
+| Finding | What was done |
+|---|---|
+| The customer's booking link and the reset link carry a secret in the address (`?token=`), and the production log wrote full addresses | The log now hides `token`, `key`, `code`, `secret` and `password` values in the address and in the referrer (`server/utils/redactUrl.js`, tested) |
+| The server trusted exactly one proxy, whatever the hosting | `TRUST_PROXY` (0 to 5, default 1) sets how many proxies sit in front. See below |
+| The website's pages had no security headers of their own (only the API did) | `client/public/_headers` carries a content security policy, frame protection, no-sniff, a referrer policy that sends the site name only (so a token in a page address never leaves the site), a permissions policy and HSTS |
+
+Looked at and left as they are, on purpose:
+
+* **Sign-in token lasts 7 days.** Gate staff stay signed in across shifts. Set `JWT_EXPIRES_IN` (for example `12h`) to make it shorter. In the mobile app the token must be kept in the phone's secure storage, not browser storage.
+* **The 15-minute account lock can be set off by someone who knows a login ID** (ten wrong passwords). The locked person opens Forgot password: a reset clears the lock at once.
+* **Sign-up says when an email is already registered, and the company-code check says when a code is taken.** The signup form needs both answers; they are rate limited.
+* **Password rule** is 8 to 72 characters, by choice.
+* **Rate limits are kept in the server's memory.** One server process is fine. With several instances, move them to a shared store such as Redis.
+
+### TRUST_PROXY
+
+The rate limits and the audit log use the caller's IP address, which the server reads from the proxy in front of it. Set `TRUST_PROXY` to the number of proxies: **1** for Render alone, **2** with a CDN such as Cloudflare in front of Render, **0** with none. Too low, and everyone shares one address (one busy gate can use up everybody's limit); too high, and a caller can write their own address into the header.
+
+### Website security headers
+
+The API sets its own headers; the website's pages come from a separate static host. `client/public/_headers` is read by Netlify and Cloudflare Pages. On Render, open the static site's Settings, then Headers, and add each header name and value from that file for the path `/*`. After deploying, open the site with the browser console open: the policy lists anything it blocks (for example a new outside service). The policy allows Google Maps and Google Fonts, the API on https, and the gate agent's live picture on `127.0.0.1`.
 
 ## Changes made on Day 29
 

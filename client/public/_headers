@@ -1,0 +1,18 @@
+# Security headers for the website's pages (the API sets its own with helmet; these cover the pages themselves).
+# Read by Netlify and Cloudflare Pages. On Render, add the same headers under the static site's Settings > Headers
+# (see docs/security.md). Test the site after deploying: the browser console names anything the policy blocks.
+#
+# script-src / frame-src / font-src / style-src: Google Maps and Google Fonts, the only outside services the pages use.
+# connect-src https: lets the pages call the API on its own https address.
+# img-src http://127.0.0.1:* is the live camera picture served by the gate agent on the same PC.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://maps.googleapis.com https://maps.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https: http://127.0.0.1:*; connect-src 'self' https:; frame-src https://www.google.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin
+  Permissions-Policy: camera=(self), geolocation=(self), microphone=(), payment=()
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+
+# The service worker and the app shell must never be served stale.
+/sw.js
+  Cache-Control: no-cache
