@@ -350,6 +350,7 @@ function AgentDownload() {
           <li>Download the agent and unzip it on the gate PC. Install <span className="font-semibold">Node.js 20 or newer</span> there first.</li>
           <li>Open <span className="font-mono">config.json</span>, paste the keys and set each device&apos;s driver. This server&apos;s address is already filled in.</li>
           <li>Double-click <span className="font-mono">start-agent.bat</span> (Windows) or run <span className="font-mono">sh start-agent.sh</span>. The devices show as online here within a minute.</li>
+          <li>For the live camera picture on the Entry and Exit screens, add a <span className="font-mono">preview</span> block to the ANPR camera in <span className="font-mono">config.json</span> (see the README in the zip). The agent shows the picture on the gate PC and tells this server where it is.</li>
         </ol>
         {info.data && !info.data.available ? (
           <Alert type="info">The agent files are not on this server. Copy the <span className="font-mono">gate-agent</span> folder from the project to the gate PC instead; the steps are the same.</Alert>

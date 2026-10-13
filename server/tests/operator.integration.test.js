@@ -181,6 +181,41 @@ it("Exit list: payable, advance and paid amounts for each vehicle that left", as
   assert.equal(byPlate.RJ14OP0001, undefined);
 });
 
+it("Entry and exit lists: filter by payment mode and by vehicle type", async () => {
+  const get = (path, token = s.a.token) => api("GET", path, { token });
+  const plates = (res) => res.body.data.sessions.map((r) => r.vehicle).sort();
+
+  // Entry list: the way the advance was paid.
+  const fastagIn = await get("/api/operator/entries?method=FASTAG");
+  assert.equal(fastagIn.status, 200, JSON.stringify(fastagIn.body));
+  assert.deepEqual(plates(fastagIn), ["RJ14OP0003"]);
+  const cashIn = await get("/api/operator/entries?method=CASH");
+  assert.ok(plates(cashIn).includes("RJ14OP0001"));
+  assert.ok(!plates(cashIn).includes("RJ14OP0003"));
+  assert.equal((await get("/api/operator/entries?type=CAR")).body.data.total, 4);
+  assert.deepEqual(plates(await get("/api/operator/entries?type=BIKE")), ["RJ14OP0002"]);
+
+  // Exit list: the way the fee was paid (an advance that covered the fee counts as its own way of paying).
+  assert.deepEqual(plates(await get("/api/operator/exits?method=UPI")), ["RJ14OP0004"]);
+  assert.deepEqual(plates(await get("/api/operator/exits?method=FASTAG")), ["RJ14OP0003", "RJ14OP0005"]);
+  assert.equal((await get("/api/operator/exits?method=CASH")).body.data.total, 0);
+  assert.equal((await get("/api/operator/exits?type=CAR")).body.data.total, 3);
+  assert.equal((await get("/api/operator/exits?type=BIKE&method=UPI")).body.data.total, 0, "both filters together");
+  assert.equal((await get("/api/operator/exits?method=NA")).body.data.total, 0, "nobody left without paying here");
+  assert.equal((await get("/api/operator/exits?method=PASS")).body.data.total, 0);
+
+  // Bad values are refused; NA only means something on the exit list; other companies see nothing.
+  assert.equal((await get("/api/operator/exits?method=BITCOIN")).status, 400);
+  assert.equal((await get("/api/operator/entries?method=NA")).status, 400);
+  assert.equal((await get("/api/operator/entries?type=SPACESHIP")).status, 400);
+  assert.equal((await get("/api/operator/exits?method=UPI", s.b.token)).body.data.total, 0);
+  // The downloaded file follows the filter too.
+  const csv = await raw("/api/operator/exits?method=UPI&format=csv", s.a.token);
+  assert.equal(csv.status, 200);
+  assert.match(csv.text, /RJ14OP0004/);
+  assert.doesNotMatch(csv.text, /RJ14OP0005/);
+});
+
 it("lists download as Excel, CSV and PDF, and only for people who may see them", async () => {
   const xlsx = await raw("/api/operator/entries?format=xlsx", s.a.token);
   assert.equal(xlsx.status, 200);

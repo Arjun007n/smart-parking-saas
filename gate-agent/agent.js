@@ -9,6 +9,7 @@ const path = require("path");
 const { DeviceWorker } = require("./lib/worker");
 const { AnprListener } = require("./lib/anprListener");
 const { ReaderListener } = require("./lib/readerListener");
+const { PreviewRelay, normalize: normalizePreview } = require("./lib/previewRelay");
 const log = require("./lib/log").make("agent");
 
 const loadConfig = (file) => {
@@ -25,13 +26,24 @@ const loadConfig = (file) => {
       throw new Error(`devices[${i}] ("${device.name}") has no real key. Use the key shown when the device was added.`);
     }
   });
+  config.devices.forEach((device, i) => {
+    if (device.preview === undefined) return;
+    if (device.type !== "ANPR_CAMERA") throw new Error(`devices[${i}] ("${device.name}"): "preview" is only for an ANPR_CAMERA`);
+    normalizePreview(device.preview, `devices[${i}] ("${device.name}") preview`);
+  });
   return config;
 };
 
 const build = (config) => {
   const parts = [];
   for (const device of config.devices) {
-    parts.push(new DeviceWorker({ serverUrl: config.serverUrl, device, pollMs: config.pollMs, heartbeatMs: config.heartbeatMs, instant: config.instantWake !== false }));
+    // A camera with a "preview" block gets its live picture served by this agent (see lib/previewRelay.js).
+    const relay = device.type === "ANPR_CAMERA" && device.preview ? new PreviewRelay({ device, options: device.preview }) : null;
+    parts.push(new DeviceWorker({
+      serverUrl: config.serverUrl, device, pollMs: config.pollMs, heartbeatMs: config.heartbeatMs, instant: config.instantWake !== false,
+      ...(relay ? { previewUrl: relay.url } : {}),
+    }));
+    if (relay) parts.push(relay);
     if (device.type === "ANPR_CAMERA" && device.driver === "listener") {
       parts.push(new AnprListener({ serverUrl: config.serverUrl, device }));
     }

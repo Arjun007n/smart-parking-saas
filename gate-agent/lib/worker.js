@@ -19,8 +19,10 @@ const log = require("./log");
 const REMEMBER = 300;
 
 class DeviceWorker {
-  constructor({ serverUrl, device, pollMs = 2000, heartbeatMs = 15000, client, instant, wakeOptions = {} }) {
+  constructor({ serverUrl, device, pollMs = 2000, heartbeatMs = 15000, client, instant, wakeOptions = {}, previewUrl }) {
     this.device = device;
+    // Where the live picture of this (ANPR) camera is served by this agent; told to the cloud with every heartbeat.
+    this.previewUrl = previewUrl || null;
     this.pollMs = pollMs;
     this.heartbeatMs = heartbeatMs;
     this.log = log.make(device.name);
@@ -113,7 +115,7 @@ class DeviceWorker {
   }
 
   async heartbeatOnce() {
-    await this.api.heartbeat();
+    await this.api.heartbeat(this.previewUrl ? { previewUrl: this.previewUrl } : {});
   }
 
   // Calls `work` again and again until stopped, never faster than `ms`,

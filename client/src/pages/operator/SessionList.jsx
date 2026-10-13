@@ -13,7 +13,7 @@ const PAGE_SIZES = [10, 25, 50, 100, 200]
 function SessionList({ kind }) {
   const entry = kind === 'entries'
   const { locations, defaultId } = useMyLocations()
-  const [filters, setFilters] = useState({ date: todayInput(), locationId: '', pageSize: 25, page: 1 })
+  const [filters, setFilters] = useState({ date: todayInput(), locationId: '', method: '', type: '', pageSize: 25, page: 1 })
   const [search, setSearch] = useState('')
   const [q, setQ] = useState('')
 
@@ -29,6 +29,8 @@ function SessionList({ kind }) {
     pageSize: filters.pageSize,
     page: filters.page,
     ...(locationId ? { locationId } : {}),
+    ...(filters.method ? { method: filters.method } : {}),
+    ...(filters.type ? { type: filters.type } : {}),
     ...(q ? { q } : {}),
   }
   const list = useQuery({
@@ -56,6 +58,20 @@ function SessionList({ kind }) {
             ))}
           </Select>
         )}
+        <Select label="Payment mode" name="list-method" value={filters.method} onChange={(event) => set({ method: event.target.value })}>
+          <option value="">All payment modes</option>
+          {!entry && <option value="NA">NA (no payment)</option>}
+          <option value="PASS">Pass</option>
+          {Object.entries(PAYMENT_LABELS).filter(([value]) => value !== 'COMPLIMENTARY').map(([value, label]) => (
+            <option key={value} value={value}>{label}</option>
+          ))}
+        </Select>
+        <Select label="Vehicle type" name="list-type" value={filters.type} onChange={(event) => set({ type: event.target.value })}>
+          <option value="">All vehicles</option>
+          {Object.entries(VEHICLE_LABELS).map(([value, label]) => (
+            <option key={value} value={value}>{label}</option>
+          ))}
+        </Select>
         <Select label="Show" name="list-size" value={filters.pageSize} onChange={(event) => set({ pageSize: Number(event.target.value) })}>
           {PAGE_SIZES.map((size) => (
             <option key={size} value={size}>{size} entries</option>

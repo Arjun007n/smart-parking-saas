@@ -10,7 +10,7 @@ const { round2 } = require("../services/collectionService");
 const sessionService = require("../services/sessionService");
 const { can } = require("../middleware/permission");
 const { PERMISSIONS: P } = require("../config/permissions");
-const { VEHICLE_TYPES } = require("../models/constants");
+const { VEHICLE_TYPES, PAYMENT_METHODS } = require("../models/constants");
 const ParkingSession = require("../models/ParkingSession");
 const Payment = require("../models/Payment");
 
@@ -236,6 +236,27 @@ const paymentsBySession = async (sessionIds) => {
   return map;
 };
 
+// The "payment mode" filter of the lists.
+//   PASS     the vehicle was covered by a pass
+//   NA       (exit list only) it left without any payment: a grace period, a free stay or a release
+//   CASH ... the way the money was taken: the advance on the Entry List, the fee on the Exit List
+const paymentModeCondition = async (method, { entry, inScope, range }) => {
+  if (method === "PASS") return { passId: { $exists: true, $ne: null } };
+  if (method === "NA") {
+    if (entry) throw new AppError("Unknown payment mode", 400);
+    return { paymentId: { $exists: false }, passId: { $exists: false } };
+  }
+  if (!PAYMENT_METHODS.includes(method)) throw new AppError("Unknown payment mode", 400);
+  if (entry) return { "advance.method": method };
+  // The fee is paid a few minutes after the exit is started, so look a day past the range.
+  const ids = await Payment.distinct("sessionId", {
+    ...inScope, method, kind: { $ne: "ADVANCE" }, status: { $in: ["SUCCESS", "REFUNDED"] },
+    paidAt: { $gte: range.start, $lt: new Date(range.end.getTime() + 24 * 3600 * 1000) },
+  });
+  // A stay the advance paid in full has no fee payment: the list shows the advance's way of paying for it.
+  return { $or: [{ _id: { $in: ids } }, { "advance.method": method, "fee.due": 0 }] };
+};
+
 const listOf = async (req, res, { kind }) => {
   const { locations, range, inScope, date } = await scopeOf(req);
   const names = new Map(locations.map((l) => [String(l._id), l.name]));
@@ -248,6 +269,14 @@ const listOf = async (req, res, { kind }) => {
   ];
   const q = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 30) : "";
   if (q) conditions.push(searchCondition(q));
+  // "All vehicles" and "All payment modes" are the two filters of the ismartparking.com lists.
+  const type = req.query.type;
+  if (type !== undefined && type !== "") {
+    if (!VEHICLE_TYPES.includes(type)) throw new AppError("Unknown vehicle type", 400);
+    conditions.push({ vehicleType: type });
+  }
+  const method = req.query.method;
+  if (method !== undefined && method !== "") conditions.push(await paymentModeCondition(method, { entry, inScope, range }));
   const filter = { $and: conditions };
 
   const exporting = formatOf(req) !== null;
@@ -308,7 +337,7 @@ const listOf = async (req, res, { kind }) => {
   });
 };
 
-// GET /api/operator/entries?locationId=&date=&q=&page=&pageSize=[&format=]   (vehicles that came in on a day)
+// GET /api/operator/entries?locationId=&date=&q=&type=&method=&page=&pageSize=[&format=]   (vehicles that came in on a day)
 const entryList = (req, res) => listOf(req, res, { kind: "entry" });
 // GET /api/operator/exits?...                                                (vehicles that left on a day)
 const exitList = (req, res) => listOf(req, res, { kind: "exit" });

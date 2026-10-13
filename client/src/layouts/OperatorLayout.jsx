@@ -12,6 +12,7 @@ import BookingsModal from '../components/operator/BookingsModal'
 import ThemeCustomizer from '../components/operator/ThemeCustomizer'
 import LiveBadge from '../components/operator/LiveBadge'
 import ShortcutHelp from '../components/operator/ShortcutHelp'
+import AgentDownloadMenu from '../components/operator/AgentDownloadMenu'
 import { roleLabel, usesOperatorArea } from '../utils/roles'
 import { CarIcon, EnterIcon, ExitIcon, HomeIcon, UserIcon } from '../components/operator/icons'
 
@@ -153,6 +154,7 @@ export default function OperatorLayout() {
                 </>
               )}
             </div>
+            <AgentDownloadMenu ink={ink} />
           </nav>
 
           <div className="flex items-center gap-2">

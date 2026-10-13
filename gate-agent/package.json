@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node agent.js",
     "simulate": "node simulate.js",
-    "test": "node --test tests/agent.test.js tests/wake.test.js"
+    "test": "node --test tests/agent.test.js tests/wake.test.js tests/preview.test.js"
   },
   "license": "ISC",
   "type": "commonjs",

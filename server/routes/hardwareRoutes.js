@@ -35,8 +35,10 @@ router.use(protect, tenant);
 const canView = requireAnyPermission(P.LOCATION_MANAGE, P.REPORT_VIEW);
 const canFollow = requireAnyPermission(P.ENTRY_CREATE, P.EXIT_CREATE, P.LOCATION_MANAGE);
 
-router.get("/agent-package/info", requirePermission(P.LOCATION_MANAGE), controller.agentInfo);
-router.get("/agent-package", requirePermission(P.LOCATION_MANAGE), controller.downloadAgent);
+// The gate agent download is also offered to gate staff (the Download menu of the operator screens): the package
+// holds the program and this server's address, never a device key.
+router.get("/agent-package/info", canFollow, controller.agentInfo);
+router.get("/agent-package", canFollow, controller.downloadAgent);
 router.get("/", canView, controller.listDevices);
 router.post(
   "/",

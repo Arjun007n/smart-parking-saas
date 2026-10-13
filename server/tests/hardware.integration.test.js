@@ -945,6 +945,17 @@ it("re-entry: refused for a blocked vehicle and for an exited vehicle; an advanc
   assert.equal((await api("POST", `/api/parking/sessions/${gone._id}/re-entry`, { token: s.a.token, body: {} })).status, 409);
 });
 
+it("the gate agent download is also open to gate staff (the operator Download menu)", async () => {
+  for (const token of [s.gate, s.exit]) {
+    const info = await api("GET", "/api/hardware/agent-package/info", { token });
+    assert.equal(info.status, 200, JSON.stringify(info.body));
+    if (!info.body.data.available) continue;
+    const file = await bytes("GET", "/api/hardware/agent-package", { token });
+    assert.equal(file.status, 200);
+    assert.equal(file.buffer.subarray(0, 2).toString("latin1"), "PK");
+  }
+});
+
 it("the gate agent download is for admins who manage locations, and is a zip", async () => {
   const company = await registerCompany("agentzip");
   const info = await api("GET", "/api/hardware/agent-package/info", { token: company.token });

@@ -117,7 +117,7 @@ The header has **Bookings (n)** (every customer who booked ahead and has not arr
 * a live camera panel (start it once; it is remembered) and a plate box;
 * large vehicle-type buttons that show how many spaces are free (Car, Bike, Taxi, Coach / Bus / Truck, Tempo / SUV / Mini bus). **Tapping a type creates the ticket** for the number in the box, as on ismartparking.com; the Enter key uses the highlighted type (the one the camera, the plate's history or the lane chose);
 * *Capture & read plate* or *Auto-read* fill in the plate for you (the operator always checks it);
-* *Auto entry* (off every time the page opens) creates the ticket by itself when a plate is read at 85% certainty or more with nothing to double-check and the ticket prints by itself: on the gate's thermal printer when the gate has one, otherwise the browser's print window opens for the new ticket (set the browser to print silently for a fully hands-free gate);
+* *Auto entry* (off every time the page opens) creates the ticket by itself when a plate is read at 85% certainty or more with nothing to double-check and the ticket prints by itself: on the gate's thermal printer when the gate has one, otherwise the browser's print window opens for the new ticket (this is the same when the operator taps the vehicle type to make a ticket by hand; only a ticket opened again from the history waits for the Print button) (set the browser to print silently for a fully hands-free gate);
 * *Read from photo* for a picture from a phone;
 * the ticket (with a QR code) appears beside the form, ready to print;
 * a plate that already has an open ticket opens **Vehicle Already Entered**: Re-Print (the ticket opens again), Re-Entry (cancel it and issue a new one), Exit (the Exit screen opens with that ticket looked up) and Close;
@@ -207,7 +207,7 @@ Rules to know: a **Pending** pass gets no free exit (the vehicle pays like anyon
 
 ## 9. Hardware
 
-Every device has its own key (`hwk_...`, shown once). A gate agent at the site connects outward over HTTPS; no router ports are opened.
+Every device has its own key (`hwk_...`, shown once). A gate agent at the site connects outward over HTTPS; no router ports are opened. The agent zip is on the Hardware page and in the operator bar's **Download** menu. **Live camera picture:** give the ANPR camera a `preview` block in the agent's `config.json` and the agent serves the camera's picture on the gate PC (`127.0.0.1`), which an https page may show, and tells the cloud the address by itself; the Entry and Exit screens then show it in the black camera panel. Not yet tried on a real camera and browser.
 
 | Device | What the software does | Honest limits |
 |---|---|---|

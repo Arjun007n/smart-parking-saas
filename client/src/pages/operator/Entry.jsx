@@ -43,7 +43,8 @@ function Ticket({ session, locationName, repeated, settings, operations, reprint
     if (reprinted) parkingApi.reprint(session._id).catch(() => {})
     window.print()
   }
-  // A ticket the camera made by itself is printed by itself (once per ticket), unless the gate's own printer already got it.
+  // A new ticket (made by the camera or by tapping the vehicle type) is printed by itself, once, unless the gate's own printer already got it.
+  // A ticket opened again from the history is a reprint and waits for the button.
   useEffect(() => {
     if (!autoPrint || repeated) return undefined
     const timer = setTimeout(() => window.print(), 600)
@@ -146,9 +147,9 @@ function EntryForm({ locations, defaultId }) {
   const [showBookings, setShowBookings] = useState(false)
   // "Vehicle Already Entered": the open ticket of the plate that was tried again.
   const [duplicate, setDuplicate] = useState(null)
-  // Automatic entry: with a gate camera it starts ON (the gate works by itself, like a real ANPR gate) and the
-  // operator can pause it with the switch. Without a gate camera it is off.
-  const [autoEntryChoice, setAutoEntry] = useState(null)
+  // Automatic entry always starts OFF when the page opens (also after a refresh, like ismartparking.com): the operator
+  // switches it on, so a refresh can never start making tickets by itself.
+  const [autoEntry, setAutoEntry] = useState(false)
   const recent = useRef({ plate: '', until: 0 })
   const ticketRef = useRef(null)
   const cameraCapture = useRef(null)
@@ -184,8 +185,6 @@ function EntryForm({ locations, defaultId }) {
   // camera could not tell (the operator is asked to check it).
   const [typeNote, setTypeNote] = useState(null)
   const showOwnCamera = ownCamera
-  // Until the operator uses the switch, automatic follows the camera: ON when this gate has one.
-  const autoEntry = autoEntryChoice ?? gateCamera.hasCamera
   const { bookings } = useBookings(locationId)
   // Is the plate being typed one that booked ahead?
   const booked = bookings.find((b) => b.vehicleNumber === cleanPlate(typedPlate))
@@ -452,7 +451,7 @@ function EntryForm({ locations, defaultId }) {
                   locationName={ticket.locationName}
                   repeated={ticket.repeated}
                   reprinted={Boolean(ticket.reprint)}
-                  autoPrint={Boolean(ticket.auto) && !ticket.hardware?.print}
+                  autoPrint={!ticket.reprint && !ticket.hardware?.print}
                   settings={locations.find((l) => l._id === ticket.session.locationId)?.receiptSettings}
                   operations={locations.find((l) => l._id === ticket.session.locationId)?.operations}
                 />

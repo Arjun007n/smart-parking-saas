@@ -307,6 +307,22 @@ device key into `config.json` (this server's address is already there) and set e
 `start-agent.bat` (Windows) or run `sh start-agent.sh`. The start file restarts the agent if it stops. To start it with the PC,
 put a shortcut to `start-agent.bat` in the Startup folder (`shell:startup`). It is a zip, not a Windows installer program.
 If the server is deployed without the `gate-agent` folder, the page says so; copy the folder from the project instead.
+The same download is in the **Download** menu of the operator bar, for gate staff (the zip never holds a device key).
+
+### The live camera picture (Entry and Exit screens)
+
+The screens are served over https, and a browser refuses a picture from a plain `http://192.168.x.x/...` camera address on such a
+page (and most cameras give RTSP, which no browser can show). So the agent serves the picture itself, on the gate PC, at
+`http://127.0.0.1:<port>/preview/<secret>`: a browser does allow `127.0.0.1` on an https page. Add a `preview` block to the ANPR
+camera in `config.json` (`mode` `mjpeg` or `snapshot`, the camera's `url`, optional `username` and `password`, optional `port`,
+default 8090; see `gate-agent/README.md`). The agent tells the cloud the address in its heartbeat, so nobody pastes it on the Hardware
+page, and the screens show the picture where it was a black box. The camera's address and password stay in `config.json`.
+
+* The secret in the address comes from the device key and stays the same across restarts. At most 4 screens watch at once.
+* The picture shows on the PC the agent runs on. Showing it on another PC needs a LAN address, which browsers do not allow on an
+  https site; run the operator screen on the gate PC.
+* Not yet tried against a real camera and browser: the code and tests use a stand-in camera. If a browser blocks the picture, the panel
+  says "The camera picture is not available" and offers **Try again**; open the browser's console for the reason.
 
 ## Troubleshooting
 
@@ -320,6 +336,7 @@ If the server is deployed without the `gate-agent` folder, the page says so; cop
 | Barrier/printer "not set up for this gate" although it exists | Two devices fit equally well. Give each its own gate name. |
 | Tag read but no suggestion | Tag not added to the pass vehicle, or the reader is registered for another gate or direction. Look at the reader's events for `UNKNOWN_TAG`. |
 | Photo missing on a ticket | CCTV agent offline or the snapshot address wrong. Use *Test snapshot* on the Hardware page. |
+| Live picture panel says "not available" | The agent is not running on this PC, the camera has no `preview` block in `config.json`, or the camera's stream address is wrong (open it in a browser tab on the gate PC to test). |
 | Suggestions never appear | Camera registered for the wrong gate/direction, or the Entry page has a different location selected. |
 
 ## Not built yet (by design)

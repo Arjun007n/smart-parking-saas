@@ -65,7 +65,8 @@ const createClient = ({ serverUrl, key, version = "gate-agent/1.0.0", timeoutMs 
   };
 
   return {
-    heartbeat: () => call("POST", "/heartbeat", {}),
+    // `extra` is { previewUrl } for an ANPR camera whose live picture the agent serves.
+    heartbeat: (extra = {}) => call("POST", "/heartbeat", extra),
     commands: () => call("GET", "/commands"),
     ack: (id, ok, error) => call("POST", `/commands/${id}/ack`, ok ? { ok: true } : { ok: false, error: String(error).slice(0, 300) }),
     event: (type, message, severity) => call("POST", "/events", { type, message, ...(severity ? { severity } : {}) }),

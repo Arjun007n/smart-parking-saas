@@ -475,8 +475,8 @@ function ExitForm({ locations, defaultId }) {
   const paymentLocked = Boolean(locks.online || locks.charge)
   // The camera suggestion the operator chose to use, if any.
   const [detection, setDetection] = useState(null)
-  // Auto exit: with a gate camera it starts ON and the operator can pause it with the switch. Without one it is off.
-  const [autoExitChoice, setAutoExit] = useState(null)
+  // Auto exit always starts OFF when the page opens (also after a refresh): the operator switches it on.
+  const [autoExit, setAutoExit] = useState(false)
   const recent = useRef({ plate: '', until: 0 })
   // The location and gate are the lane the admin assigned: the operator does not choose them.
   const { control } = useForm({ defaultValues: assignedLane(locations, user?.lanes, 'EXIT', defaultId) })
@@ -487,8 +487,6 @@ function ExitForm({ locations, defaultId }) {
   // With an ANPR camera registered for this gate, its readings appear as suggestions and fill the search box.
   // Without one, the operator types the number.
   const gateCamera = useGateCamera(locationId, 'EXIT', gate)
-  // Until the operator uses the switch, automatic follows the camera: ON when this gate has one.
-  const autoExit = autoExitChoice ?? gateCamera.hasCamera
 
   const refreshLists = () => {
     for (const key of ['locations', 'entries', 'collection', 'exits', 'operator-list', 'operator-summary', 'operator-collection', 'exit-search']) {
