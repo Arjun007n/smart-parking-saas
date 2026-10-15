@@ -11,6 +11,7 @@ import { EnterIcon, ExitIcon } from '../../components/operator/icons'
 import { CardSkeleton, CountUp, FillBar } from '../../components/motion'
 import MoneyTiles from '../../components/operator/MoneyTiles'
 import CollectionByType from '../../components/operator/CollectionByType'
+import PhoneHome from '../../components/operator/PhoneHome'
 
 // One card of counters: how many came in, went out, are free and are parked, with the capacity badge on top.
 function Counts({ title, counts }) {
@@ -61,6 +62,10 @@ export default function OperatorDashboard() {
 
   return (
     <div className="space-y-6">
+      <PhoneHome
+        collection={totals && totals.total !== undefined ? { total: totals.total, label: isToday ? "Today's collection" : 'Collection for the period' } : null}
+        onOpenBookings={() => window.dispatchEvent(new Event('sp:open-bookings'))}
+      />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-extrabold text-[#007bff]">{company?.name || 'Smart Parking'}</h1>

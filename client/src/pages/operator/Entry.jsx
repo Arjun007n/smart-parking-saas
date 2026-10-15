@@ -33,22 +33,40 @@ import QrCode from '../../components/QrCode'
 import { receiptSettings } from '../../utils/receiptSettings'
 import { operationSettings } from '../../utils/operations'
 import TicketPhoto from '../../components/operator/TicketPhoto'
+import { printerAvailable } from '../../native/printer'
+import { printTicketOnPhone } from '../../native/slips'
+import { plateReaderAvailable } from '../../native/plateReader'
+import { formatPlate } from '../../native/plate'
+import { isPhoneWidth } from '../../utils/phone'
+import GateBar, { ModeSwitch, OnlinePill } from '../../components/operator/GateBar'
+import PlateCamera from '../../components/operator/PlateCamera'
 
 function Ticket({ session, locationName, repeated, settings, operations, reprinted = false, autoPrint = false }) {
   const { user } = useAuth()
+  const toast = useToast()
   const look = receiptSettings(settings)
   const ops = operationSettings(operations)
+  // In the phone app the ticket goes to the Bluetooth printer; in a browser it goes through the print dialog.
+  const printOnPhone = async () => {
+    try {
+      await printTicketOnPhone({ session, locationName, settings, operations })
+    } catch (error) {
+      toast({ title: 'Ticket not printed', message: error.message, tone: 'error' })
+    }
+  }
   const print = () => {
     // A ticket opened again from the history is a reprint: counted for the operator's report.
     if (reprinted) parkingApi.reprint(session._id).catch(() => {})
-    window.print()
+    if (printerAvailable) printOnPhone()
+    else window.print()
   }
   // A new ticket (made by the camera or by tapping the vehicle type) is printed by itself, once, unless the gate's own printer already got it.
   // A ticket opened again from the history is a reprint and waits for the button.
   useEffect(() => {
     if (!autoPrint || repeated) return undefined
-    const timer = setTimeout(() => window.print(), 600)
+    const timer = setTimeout(() => (printerAvailable ? printOnPhone() : window.print()), 600)
     return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per ticket
   }, [autoPrint, repeated, session._id])
   return (
     <div className="print-area rounded-xl border-2 border-dashed border-slate-400 bg-white p-6 text-center">
@@ -76,7 +94,7 @@ function Ticket({ session, locationName, repeated, settings, operations, reprint
       {repeated && <p className="mt-2 text-xs text-slate-500">(This ticket was already created.)</p>}
       {!(reprinted && user?.access?.reprint === false) && (
         <Button variant="secondary" className="no-print mt-4" onClick={print}>
-          Print ticket
+          {printerAvailable && !reprinted ? 'Print again' : 'Print ticket'}
         </Button>
       )}
     </div>
@@ -181,6 +199,13 @@ function EntryForm({ locations, defaultId }) {
   // number box). This computer's own camera is only shown when the operator asks for it.
   const gateCamera = useGateCamera(locationId, 'ENTRY', gate)
   const [ownCamera, setOwnCamera] = useState(false)
+  // Phone only: which keyboard the vehicle number opens with (123 = number pad, ABC = letters).
+  const [keys, setKeys] = useState('123')
+  // Phone: read the plate with the camera, or type it (the two choices at the top of the screen).
+  const [phone] = useState(isPhoneWidth)
+  const [mode, setMode] = useState(phone && plateReaderAvailable ? 'camera' : 'keyboard')
+  const [cameraKey, setCameraKey] = useState(0)
+  const camera = phone && plateReaderAvailable && mode === 'camera'
   // How the vehicle type was chosen for the plate in the box: { from: CAMERA | HISTORY | LANE } or { from: null } when the
   // camera could not tell (the operator is asked to check it).
   const [typeNote, setTypeNote] = useState(null)
@@ -321,6 +346,18 @@ function EntryForm({ locations, defaultId }) {
 
   return (
     <div className="space-y-4">
+      <GateBar other={can('EXIT_CREATE') ? 'exit' : 'entry'}>
+        {can('ENTRY_CREATE') && <OpenBarrierButton locationId={locationId} direction="ENTRY" gate={gate} />}
+      </GateBar>
+      {plateReaderAvailable && (
+        <ModeSwitch
+          value={mode}
+          onChange={setMode}
+          options={[['camera', 'Camera'], ['keyboard', 'Keyboard']]}
+        />
+      )}
+      <OnlinePill />
+      <div className="max-md:hidden">
       <LaneBar location={location} gate={gate} company={company} parkingType={location?.parkingType}>
         {can('ENTRY_CREATE') && <OpenBarrierButton locationId={locationId} direction="ENTRY" gate={gate} />}
         <AutoSwitch
@@ -330,34 +367,80 @@ function EntryForm({ locations, defaultId }) {
           hint="When the gate camera reads a number plate clearly, the ticket is made, printed and the barrier opens by itself, with the vehicle type chosen below. No money is taken at entry. A wrong reading must be cancelled by an admin."
         />
       </LaneBar>
+      </div>
       {/* The location and gate are the lane the admin assigned: the operator does not choose them. */}
       <input type="hidden" {...register('locationId')} />
       <input type="hidden" {...register('gate')} />
 
-      <div className="grid items-start gap-4 lg:grid-cols-12">
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-12">
         {/* Middle: the camera, the number, the vehicle type and the button (first on a phone). */}
-        <div className="order-1 space-y-4 lg:order-2 lg:col-span-5">
-          <LivePreview locationId={locationId} direction="ENTRY" gate={gate} />
-          {showOwnCamera ? (
-            <EntryCamera onPhoto={setPhoto} hasPhoto={Boolean(photo)} captureRef={cameraCapture} />
-          ) : (
-            <GateCameraNote camera={gateCamera} direction="ENTRY" gate={gate} fills="the vehicle number below" onUseOwn={() => setOwnCamera(true)} ownLabel="Take an entry photo with this computer's camera" />
+        <div className="order-1 min-w-0 space-y-4 lg:order-2 lg:col-span-5">
+          {camera && (
+            <div className="md:hidden">
+              <PlateCamera
+                paused={Boolean(typedPlate?.trim()) || create.isPending || Boolean(ticket && !ticket.reprint)}
+                resetKey={cameraKey}
+                onProblem={() => setMode('keyboard')}
+                onPlate={(plate) => {
+                  // The car that just got its ticket is still in front of the camera: not read again for a minute.
+                  if (plate === recent.current.plate && Date.now() < recent.current.until) return
+                  setValue('vehicleNumber', formatPlate(plate), { shouldValidate: true })
+                  setTypeNote(null)
+                  playCue('entry')
+                }}
+              />
+            </div>
           )}
+          <div className="max-md:hidden">
+            <LivePreview locationId={locationId} direction="ENTRY" gate={gate} />
+            {showOwnCamera ? (
+              <EntryCamera onPhoto={setPhoto} hasPhoto={Boolean(photo)} captureRef={cameraCapture} />
+            ) : (
+              <GateCameraNote camera={gateCamera} direction="ENTRY" gate={gate} fills="the vehicle number below" onUseOwn={() => setOwnCamera(true)} ownLabel="Take an entry photo with this computer's camera" />
+            )}
+          </div>
 
           <Card className="no-print">
-            <form onSubmit={(event) => handleSubmit(submitEntry)(event)} className="space-y-5" noValidate>
+            <form onSubmit={(event) => handleSubmit(submitEntry)(event)} className="flex flex-col gap-5" noValidate>
               <Alert>{create.error && errorMessage(create.error)}</Alert>
+              {/* On a phone the vehicle type buttons come first, so the keyboard never hides them. */}
+              <div className={`space-y-5 md:order-1 ${camera ? 'order-1' : 'order-2'}`}>
               <Field
                 label="Vehicle number"
-                placeholder="RJ14 AB 1234"
+                placeholder="Enter or scan vehicle number"
                 data-plate-box
-                autoFocus
+                autoFocus={!camera}
                 autoComplete="off"
                 autoCapitalize="characters"
-                className="[&_input]:text-2xl [&_input]:font-bold [&_input]:uppercase [&_input]:tracking-wider [&_input]:py-3"
+                inputMode={keys === '123' ? 'numeric' : 'text'}
+                className={`${camera && typedPlate?.trim() ? '[&_input]:border-emerald-400 [&_input]:bg-emerald-50' : ''} [&_input]:rounded-xl [&_input]:border-2 [&_input]:text-xl [&_input]:font-bold [&_input]:uppercase [&_input]:tracking-normal [&_input]:py-3 sm:[&_input]:text-2xl sm:[&_input]:tracking-wider`}
                 error={errors.vehicleNumber?.message}
                 {...register('vehicleNumber')}
               />
+              {camera && typedPlate?.trim() && (
+                <button
+                  type="button"
+                  onClick={() => { resetField('vehicleNumber'); setCameraKey((k) => k + 1) }}
+                  className="-mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-slate-100 py-2 text-sm font-bold text-red-600 md:hidden"
+                >
+                  ⟳ Read another plate
+                </button>
+              )}
+              <div className={`justify-center md:hidden ${camera ? 'hidden' : 'flex'}`} role="group" aria-label="Keyboard">
+                <div className="inline-flex rounded-full bg-slate-100 p-1 ring-1 ring-slate-200">
+                  {[['123', '123'], ['ABC', 'ABC']].map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-pressed={keys === value}
+                      onClick={() => { setKeys(value); setTimeout(() => setFocus('vehicleNumber'), 50) }}
+                      className={`min-w-16 rounded-full px-4 py-1.5 text-sm font-bold ${keys === value ? 'bg-[#2563eb] text-white shadow' : 'text-slate-600'}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               {booked && (
                 <p className="-mt-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800" role="status">
                   Booked ahead{booked.customerName ? ` by ${booked.customerName}` : ''}
@@ -378,7 +461,8 @@ function EntryForm({ locations, defaultId }) {
                   </button>
                 </p>
               )}
-              <fieldset>
+              </div>
+              <fieldset className={`md:order-2 ${camera ? 'order-2' : 'order-1'}`}>
                 <legend className="mb-2 text-sm font-medium text-slate-700">
                   Vehicle type
                   {typedPlate?.trim() && typeNote?.from && (
@@ -389,7 +473,7 @@ function EntryForm({ locations, defaultId }) {
                   )}
                 </legend>
                 <input type="hidden" {...register('vehicleType')} />
-                <div className="grid gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   {types.map((type) => {
                     const key = CAPACITY_KEY[type]
                     const free = location && key ? location.capacity[key] - location.occupied[key] : null
@@ -401,12 +485,15 @@ function EntryForm({ locations, defaultId }) {
                         type="button"
                         disabled={create.isPending || full}
                         onClick={() => chooseType(type)}
-                        className={`sp-press flex w-full flex-col items-center rounded-xl bg-[#07417f] px-4 py-4 text-center text-white shadow transition hover:bg-[#0a559f] focus:outline-none focus-visible:ring-4 focus-visible:ring-blue-300 disabled:cursor-not-allowed disabled:opacity-50 ${
+                        className={`sp-press flex w-full flex-col items-center rounded-xl bg-gradient-to-b from-[#3b82f6] to-[#1d4ed8] px-2 py-4 text-center text-white shadow transition hover:from-[#2f74e8] hover:to-[#1a45c0] focus:outline-none focus-visible:ring-4 focus-visible:ring-blue-300 disabled:cursor-not-allowed disabled:opacity-50 ${
                           highlighted ? 'ring-4 ring-blue-300' : ''
                         }`}
                       >
-                        <span className="text-lg font-bold">{VEHICLE_LABELS[type]}</span>
-                        <span className="text-xs opacity-90">{create.isPending ? 'Please wait…' : full ? 'Full' : free !== null ? `${free} free` : ''}</span>
+                        <span className="text-base font-bold">{VEHICLE_LABELS[type]}</span>
+                        {!create.isPending && !full && location?.startingFees?.[type] !== undefined && (
+                          <span className="text-sm font-extrabold md:hidden">{money(location.startingFees[type])}</span>
+                        )}
+                        <span className="text-[11px] opacity-90">{create.isPending ? 'Please wait…' : full ? 'Full' : free !== null ? `${free} free` : ''}</span>
                       </button>
                     )
                   })}
@@ -419,7 +506,7 @@ function EntryForm({ locations, defaultId }) {
         </div>
 
         {/* Left: camera suggestions, the ticket that was just made and customer bookings. */}
-        <div className="order-2 space-y-4 lg:order-1 lg:col-span-3">
+        <div className="order-2 min-w-0 space-y-4 lg:order-1 lg:col-span-3">
           <PlateSuggestions
             locationId={locationId}
             direction="ENTRY"
@@ -432,7 +519,11 @@ function EntryForm({ locations, defaultId }) {
           <div ref={ticketRef}>
             {photoError && <Alert>{photoError}</Alert>}
             {ticket ? (
-              <div role="status">
+              <div
+                role="status"
+                className={ticket.reprint ? '' : 'max-md:fixed max-md:inset-0 max-md:z-50 max-md:overflow-y-auto max-md:bg-slate-900/60 max-md:p-4'}
+              >
+                <div className={ticket.reprint ? '' : 'max-md:mx-auto max-md:max-w-sm'}>
                 {!ticket.reprint && (
                   <div className="no-print mb-3 space-y-2">
                     <PassBanner pass={ticket.pass} at="entry" />
@@ -461,8 +552,10 @@ function EntryForm({ locations, defaultId }) {
                   <div className="no-print mt-3 space-y-4">
                     <DeviceStatus hardware={ticket.hardware} sessionId={ticket.session._id} direction="ENTRY" />
                     <PhotoPanel key={ticket.session._id} sessionId={ticket.session._id} kind="ENTRY" />
+                    <Button type="button" className="w-full md:hidden" onClick={() => setTicket(null)}>OK</Button>
                   </div>
                 )}
+                </div>
               </div>
             ) : (
               <Card className="no-print">
@@ -492,7 +585,7 @@ function EntryForm({ locations, defaultId }) {
         </div>
 
         {/* Right: who is inside, with search, Print and Re-entry. */}
-        <div className="order-3 lg:col-span-4">
+        <div className="order-3 min-w-0 lg:col-span-4">
           <EntryHistory
             compact
             locationId={locationId}

@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useBookings } from '../hooks/useBookings'
 import { isLightColor, useTheme } from '../hooks/useTheme'
@@ -13,6 +13,9 @@ import ThemeCustomizer from '../components/operator/ThemeCustomizer'
 import LiveBadge from '../components/operator/LiveBadge'
 import ShortcutHelp from '../components/operator/ShortcutHelp'
 import AgentDownloadMenu from '../components/operator/AgentDownloadMenu'
+import MobileTabBar from '../components/operator/MobileTabBar'
+import { isNative } from '../native/platform'
+import { printerAvailable } from '../native/printer'
 import { roleLabel, usesOperatorArea } from '../utils/roles'
 import { CarIcon, EnterIcon, ExitIcon, HomeIcon, UserIcon } from '../components/operator/icons'
 
@@ -50,6 +53,16 @@ export default function OperatorLayout() {
   const links = NAV.filter(
     (item) => (!item.permission || can(item.permission)) && (!item.dashboard || !usesOperatorArea(user, permissions)),
   )
+  // The phone's bottom bar: Home, Entry and Exit as tabs; the lists and everything else behind "Lists" and "Menu".
+  const tabTargets = ['/operator/dashboard', '/operator/entry', '/operator/exit']
+  const listTargets = ['/operator/entry-list', '/operator/exit-list']
+  const tabs = links.filter((item) => tabTargets.includes(item.to))
+  const lists = [...links.filter((item) => listTargets.includes(item.to)), ...MORE]
+  const menuItems = [
+    ...links.filter((item) => !tabTargets.includes(item.to) && !listTargets.includes(item.to)),
+    // Bluetooth printer set-up, only in the phone app.
+    ...(printerAvailable ? [{ to: '/operator/printer', label: 'Printer' }] : []),
+  ]
   const { theme, setTheme, reset } = useTheme()
   const [panel, setPanel] = useState('') // '', 'theme', 'bookings' or 'help'
   const [menu, setMenu] = useState('') // '', 'more' or 'profile'
@@ -76,6 +89,13 @@ export default function OperatorLayout() {
       playCue(ok ? 'success' : 'error')
     }
   }
+
+  // The phone Home asks for the bookings list with this event.
+  useEffect(() => {
+    const open = () => setPanel('bookings')
+    window.addEventListener('sp:open-bookings', open)
+    return () => window.removeEventListener('sp:open-bookings', open)
+  }, [])
 
   const go = (can_, path) => () => (can_ ? navigate(path) : false)
   useShortcuts({
@@ -105,6 +125,10 @@ export default function OperatorLayout() {
     navigate('/login')
   }
 
+  const { pathname } = useLocation()
+  const gateScreen = pathname === '/operator/entry' || pathname === '/operator/exit'
+  // Pages with their own top bar on a phone (the company header is hidden there).
+  const ownBar = gateScreen || pathname === '/operator/collection' || pathname === '/operator/account'
   const light = isLightColor(theme.color)
   const ink = light ? 'text-[#1e3d73]' : 'text-white'
   const closeMenu = () => setMenu('')
@@ -113,7 +137,7 @@ export default function OperatorLayout() {
   return (
     <LiveProvider onLiveEvent={onLiveEvent}>
     <div className={`gate-skin min-h-screen bg-[#f4f6fb] ${theme.style === 'dark' ? 'theme-dark' : ''}`}>
-      <header className="no-print relative border-b border-slate-200 shadow-sm" style={{ backgroundColor: theme.color }}>
+      <header className={`no-print relative border-b border-slate-200 shadow-sm ${ownBar ? 'max-md:hidden' : ''}`} style={{ backgroundColor: theme.color }}>
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2">
           <Link to="/operator/dashboard" className={`flex items-center gap-2 ${ink}`}>
             <span aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-[#007bff] to-[#0056b3] text-lg font-extrabold text-white">P</span>
@@ -123,7 +147,7 @@ export default function OperatorLayout() {
             </span>
           </Link>
 
-          <nav className="flex flex-1 items-center gap-1 overflow-x-auto" aria-label="Operator">
+          <nav className="hidden flex-1 items-center gap-1 overflow-x-auto md:flex" aria-label="Operator">
             {links.map((item) => (
               <NavLink key={item.to} to={item.to} className={({ isActive }) => pill(item, isActive, theme.compact)}>
                 {item.icon && <item.icon />}
@@ -154,7 +178,7 @@ export default function OperatorLayout() {
                 </>
               )}
             </div>
-            <AgentDownloadMenu ink={ink} />
+            {!isNative && <AgentDownloadMenu ink={ink} />}
           </nav>
 
           <div className="flex items-center gap-2">
@@ -198,9 +222,11 @@ export default function OperatorLayout() {
         {panel === 'theme' && <ThemeCustomizer theme={theme} setTheme={setTheme} reset={reset} onClose={() => setPanel('')} />}
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-5">
+      <main className={`mx-auto min-w-0 max-w-6xl px-3 py-4 sm:px-4 sm:py-5 md:pb-5 ${gateScreen ? 'pb-32' : 'pb-24'}`}>
         <Outlet />
       </main>
+      {/* The phone's Entry and Exit screens have their own top bar and bottom buttons. */}
+      {!gateScreen && <MobileTabBar tabs={tabs} lists={lists} menuItems={menuItems} profile={{ name: user.name, role: roleLabel(user), company: company?.name, onLogout: handleLogout }} />}
       {panel === 'bookings' && <BookingsModal onClose={() => setPanel('')} />}
       {panel === 'help' && <ShortcutHelp onClose={() => setPanel('')} />}
     </div>

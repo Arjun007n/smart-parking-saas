@@ -3,6 +3,8 @@ const { isCompanyWide } = require("../config/permissions");
 const audit = require("../services/auditService");
 const Company = require("../models/Company");
 const Location = require("../models/Location");
+const Tariff = require("../models/Tariff");
+const { startingFees } = require("../utils/startingFees");
 const { sumCounts, VEHICLE_KEYS } = require("../models/constants");
 const { buildReportFile, formatOf } = require("../services/reportExport");
 const { runRule } = require("../services/operationsService");
@@ -33,7 +35,20 @@ const requireCompanyWide = (req) => {
 // GET /api/locations
 const listLocations = async (req, res) => {
   const locations = await Location.find(scopeFilter(req)).sort({ createdAt: -1 }).limit(500);
-  res.json({ success: true, data: locations });
+  // Each location also carries the starting price of every vehicle type (shown on the gate screen's buttons).
+  // If the prices cannot be worked out the list still comes back without them.
+  let tariffs = [];
+  try {
+    tariffs = await Tariff.find({ locationId: { $in: locations.map((l) => l._id) }, isActive: true }).lean();
+  } catch {
+    tariffs = [];
+  }
+  const now = new Date();
+  const data = locations.map((location) => {
+    const own = tariffs.filter((t) => String(t.locationId) === String(location._id));
+    return { ...location.toJSON(), startingFees: startingFees(own, now) };
+  });
+  res.json({ success: true, data });
 };
 
 // GET /api/locations/:id

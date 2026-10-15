@@ -27,6 +27,14 @@ import WalletPayment from '../../components/operator/WalletPayment'
 import PhotoPanel from '../../components/operator/PhotoPanel'
 import PassBanner from '../../components/pass/PassBanner'
 import QrCode from '../../components/QrCode'
+import { printerAvailable } from '../../native/printer'
+import { nativeScannerAvailable, scanQrNative } from '../../native/scanner'
+import { printBillOnPhone } from '../../native/slips'
+import { plateReaderAvailable } from '../../native/plateReader'
+import { formatPlate } from '../../native/plate'
+import { isPhoneWidth } from '../../utils/phone'
+import GateBar, { ModeSwitch, OnlinePill } from '../../components/operator/GateBar'
+import PlateCamera from '../../components/operator/PlateCamera'
 
 // The last lookup without any amount change (what "Recalculate" and "Use the tariff amount" send).
 const withoutEdit = (body) => {
@@ -49,7 +57,57 @@ const CMD_PRINT = '{PRINT}'
 const isCommand = (text) => [CMD_OK, CMD_PRINT].includes(text.trim().toUpperCase())
 const fire = (name) => window.dispatchEvent(new CustomEvent(name))
 
-function SessionSummary({ session }) {
+function InfoTile({ label, value }) {
+  return (
+    <div className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200">
+      <dt className="text-xs font-semibold text-slate-500">{label}</dt>
+      <dd className="mt-0.5 text-sm font-bold leading-snug text-slate-900">{value}</dd>
+    </div>
+  )
+}
+
+// The bill of the vehicle that is leaving, as cards (phone): who it is, the times, the money, and the amount to take.
+function PhoneSummary({ session }) {
+  const fee = session.fee
+  const tiles = [
+    ['Entry Time', dateTime(session.entryTime)],
+    session.exitTime && ['Exit Time', dateTime(session.exitTime)],
+    ['Total Time', duration(session.durationMinutes)],
+    ['Advance Paid', money(fee.advanceApplied || 0)],
+    ['Parking Amount', money(fee.breakdown.base)],
+    fee.breakdown.overnight > 0 && ['Overnight Charge', money(fee.breakdown.overnight)],
+    fee.breakdown.lostTicket > 0 && ['Lost Ticket Penalty', money(fee.breakdown.lostTicket)],
+    fee.taxPercent > 0 && [`Tax (${fee.taxPercent}%${fee.taxInclusive ? ', included' : ''})`, money(fee.tax)],
+    fee.advanceApplied > 0 && ['Total Fee', money(fee.total)],
+    session.feeEdit?.reason && ['Amount changed', `from ${money(session.feeEdit.calculated)}: ${session.feeEdit.reason}`],
+  ].filter(Boolean)
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl bg-white p-3 ring-1 ring-slate-200">
+        <div className="flex items-start justify-between gap-3">
+          <p className="break-all text-2xl font-extrabold tracking-wide text-[#1d4ed8]">{session.vehicleNumber}</p>
+          <span className="shrink-0 rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-[#1d4ed8] ring-1 ring-blue-200">{VEHICLE_LABELS[session.vehicleType]}</span>
+        </div>
+        <p className="mt-1 text-sm font-medium text-slate-600">Token: {session.ticketNumber}</p>
+      </div>
+      <dl className="grid grid-cols-2 gap-2">
+        {tiles.map(([label, value]) => (
+          <InfoTile key={label} label={label} value={value} />
+        ))}
+      </dl>
+      <div className="flex items-center justify-between gap-3 rounded-xl bg-emerald-50 px-4 py-3 ring-1 ring-emerald-200">
+        <span className="flex items-center gap-2 text-base font-bold text-emerald-800">
+          <span aria-hidden="true" className="flex h-7 w-7 items-center justify-center rounded-md bg-emerald-600 text-sm text-white">✓</span>
+          Take Amount
+        </span>
+        <span className="text-2xl font-extrabold text-emerald-700">{money(amountDue(session))}</span>
+      </div>
+    </div>
+  )
+}
+
+function SessionSummary({ session, phone = false }) {
+  if (phone) return <PhoneSummary session={session} />
   const fee = session.fee
   const rows = [
     ['Vehicle', `${session.vehicleNumber} (${VEHICLE_LABELS[session.vehicleType]})`],
@@ -118,9 +176,13 @@ function AmountEdit({ session, onApply, onReset, pending, error }) {
   )
 }
 
-function PaymentStep({ session, onPaid, onPaidOnline, onRecalculate, recalculating, startMethod = 'CASH', wallet, detectedTag = '', pendingCharge = null, onLock }) {
+function PaymentStep({ session, onPaid, onPaidOnline, onRecalculate, recalculating, startMethod = 'CASH', wallet, detectedTag = '', pendingCharge = null, onLock, phone = false, onCancel, cancelDisabled = false }) {
   const { can } = useAuth()
   const due = amountDue(session)
+  // The location's UPI id (set by the admin in the receipt settings): on a phone a QR code for it, with the amount, is shown.
+  const { locations: myLocations } = useMyLocations()
+  const here = myLocations.find((l) => l._id === (session.locationId?._id || session.locationId))
+  const upiId = here?.receiptSettings?.upiId || ''
   // A wallet linked to the vehicle that can cover the fee is the likely way it is paying.
   const [method, setMethod] = useState(wallet?.enough ? 'WALLET' : startMethod)
   const [reference, setReference] = useState('')
@@ -195,14 +257,16 @@ function PaymentStep({ session, onPaid, onPaidOnline, onRecalculate, recalculati
     <div className="space-y-4">
       <Alert>{pay.error && errorMessage(pay.error)}</Alert>
       <fieldset>
-        <legend className="mb-2 text-sm font-medium text-slate-700">Payment mode</legend>
+        <legend className="mb-2 text-sm font-medium text-slate-700">{phone ? 'PAYMENT METHOD' : 'Payment mode'}</legend>
         <div className="flex flex-wrap gap-3">
           {methods.map((value) => (
             <label
               key={value}
-              className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium has-[:checked]:border-blue-600 has-[:checked]:bg-blue-50"
+              className={phone
+                ? 'flex cursor-pointer items-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold has-[:checked]:border-emerald-600 has-[:checked]:bg-emerald-600 has-[:checked]:text-white'
+                : 'flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium has-[:checked]:border-blue-600 has-[:checked]:bg-blue-50'}
             >
-              <input type="radio" name="method" value={value} checked={method === value} onChange={() => setMethod(value)} />
+              <input type="radio" name="method" value={value} checked={method === value} onChange={() => setMethod(value)} className={phone ? 'sr-only' : ''} />
               {PAYMENT_LABELS[value]}
             </label>
           ))}
@@ -220,8 +284,33 @@ function PaymentStep({ session, onPaid, onPaidOnline, onRecalculate, recalculati
         />
       ) : (
         <>
+          {phone && method === 'UPI' && upiId && (
+            <div className="flex flex-col items-center gap-1 py-1 text-center">
+              <p className="text-base font-extrabold text-slate-900">Scan to pay {money(due)}</p>
+              <QrCode
+                value={`upi://pay?pa=${upiId}&pn=${encodeURIComponent(here?.name || 'Parking')}&am=${Number(due).toFixed(2)}&cu=INR&tn=${encodeURIComponent(session.ticketNumber || session.vehicleNumber || 'Parking')}`}
+                size={190}
+                label={`UPI QR code to pay ${money(due)}`}
+              />
+              <p className="text-xs text-slate-500">{upiId}</p>
+              <p className="text-xs text-slate-500">Check the payment on the customer&apos;s phone, then tap Exit.</p>
+            </div>
+          )}
           {cash ? (
             <div className="space-y-2">
+              {phone && (
+                <div className="flex flex-col items-center gap-1 py-1 text-center">
+                  <p className="text-base font-extrabold text-slate-900">Collect Cash</p>
+                  <svg width="84" height="64" viewBox="0 0 84 64" aria-hidden="true" className="text-emerald-600">
+                    <rect x="6" y="14" width="60" height="38" rx="6" fill="currentColor" />
+                    <rect x="18" y="8" width="60" height="38" rx="6" fill="none" stroke="currentColor" strokeWidth="3" opacity="0.4" />
+                    <circle cx="36" cy="33" r="9" fill="#fff" />
+                    <rect x="12" y="22" width="6" height="4" rx="2" fill="#fff" opacity="0.8" />
+                    <rect x="54" y="40" width="6" height="4" rx="2" fill="#fff" opacity="0.8" />
+                  </svg>
+                  <p className="text-sm font-bold text-emerald-700">Amount: {money(due)}</p>
+                </div>
+              )}
               <Field
                 label="Amount received (₹)"
                 name="given-amount"
@@ -278,7 +367,9 @@ function PaymentStep({ session, onPaid, onPaidOnline, onRecalculate, recalculati
               onChange={(event) => setReference(event.target.value)}
             />
           )}
-          <div className="flex items-center gap-3">
+          <div className={phone
+            ? 'fixed inset-x-0 bottom-0 z-40 flex items-center gap-2 border-t border-slate-200 bg-white p-3 shadow-[0_-2px_8px_rgba(15,23,42,0.1)]'
+            : 'flex items-center gap-3'}>
             <Button
               className="w-full py-3 text-base"
               loading={pay.isPending}
@@ -287,8 +378,13 @@ function PaymentStep({ session, onPaid, onPaidOnline, onRecalculate, recalculati
             >
               {chargeTag
                 ? (waiting ? 'Check FASTag charge again' : `Charge FASTag ${money(due)} and exit`)
-                : `Exit — ${money(payable)} received`}
+                : phone ? `Exit · ${money(payable)}` : `Exit — ${money(payable)} received`}
             </Button>
+            {phone && onCancel && (
+              <Button type="button" variant="secondary" className="w-full py-3 text-base" disabled={cancelDisabled} onClick={onCancel}>
+                Scan Again
+              </Button>
+            )}
             <span className="hidden shrink-0 text-center sm:block" title="Scan this code with the gate scanner to confirm the exit">
               <QrCode value={CMD_OK} size={64} label="Scan to confirm the exit" />
               <span className="block text-[10px] text-slate-500">scan to exit</span>
@@ -303,12 +399,19 @@ function PaymentStep({ session, onPaid, onPaidOnline, onRecalculate, recalculati
   )
 }
 
-function Done({ session, paid, method, advance, hardware, onNext, skipReceipt = false }) {
+function Done({ session, paid, method, advance, hardware, onNext, skipReceipt = false, phone = false }) {
   const { user } = useAuth()
   const mayPrint = user?.access?.reprint !== false
   const covered = !paid && session.fee.total > 0 && session.fee.advanceApplied > 0
   const giveBack = session.fee.advanceRefunded || advance?.refund || 0
-  const print = useMutation({ mutationFn: () => parkingApi.print(session._id) })
+  // In the phone app the bill goes to the phone's Bluetooth printer; at a gate PC it goes to the gate's printer.
+  const print = useMutation({
+    mutationFn: async () => {
+      if (!printerAvailable) return parkingApi.print(session._id)
+      await printBillOnPhone(await parkingApi.receipt(session._id))
+      return null
+    },
+  })
   // A scanned {PRINT} code prints the bill, like pressing the button.
   const printRef = useRef(null)
   const canPrint = !skipReceipt && mayPrint
@@ -320,6 +423,53 @@ function Done({ session, paid, method, advance, hardware, onNext, skipReceipt = 
     window.addEventListener('sp:exit-print', handler)
     return () => window.removeEventListener('sp:exit-print', handler)
   }, [])
+  if (phone) {
+    // The invoice as a popup: OK goes back to the camera, Print Receipt sends it to the phone's printer.
+    const lines = [
+      ['TOKEN', session.ticketNumber],
+      ['VEHICLE', session.vehicleNumber],
+      ['TYPE', VEHICLE_LABELS[session.vehicleType]],
+      ['IN TIME', dateTime(session.entryTime)],
+      ['OUT TIME', dateTime(session.exitTime)],
+      ['DURATION', duration(session.durationMinutes)],
+    ]
+    return (
+      <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 p-4" role="status">
+        <div className="mx-auto mt-4 max-w-sm space-y-3 rounded-2xl bg-white p-4 shadow-2xl">
+          <div className="rounded-lg border border-slate-200 p-3 font-mono text-[13px] leading-6 text-slate-900">
+            <p className="text-center text-lg font-bold">INVOICE</p>
+            <hr className="my-2 border-dashed border-slate-400" />
+            {lines.map(([label, value]) => (
+              <p key={label} className="flex justify-between gap-3"><span>{label}:</span><span className="text-right">{value}</span></p>
+            ))}
+            <hr className="my-2 border-dashed border-slate-400" />
+            <p className="flex justify-between gap-3 text-base font-bold"><span>PARKING CHARGE:</span><span>{money(amountDue(session))}</span></p>
+            <p className="mt-2 text-center text-xs text-slate-500">THANK YOU AND HAVE A NICE DAY, DRIVE SAFE</p>
+          </div>
+          {giveBack > 0 && (
+            <Alert type="info">
+              Give {money(giveBack)} back to the customer
+              {advance?.method ? ` (the advance was paid by ${PAYMENT_LABELS[advance.method] || advance.method})` : ''}.
+            </Alert>
+          )}
+          <DeviceStatus hardware={hardware} sessionId={session._id} direction="EXIT" />
+          <Alert>{print.error && errorMessage(print.error)}</Alert>
+          <Alert type="success">{print.isSuccess && 'Receipt sent to the printer.'}</Alert>
+          <div className="grid grid-cols-2 gap-2">
+            <Button variant="secondary" className="py-3" autoFocus onClick={onNext}>OK</Button>
+            {canPrint ? (
+              <Button className="py-3" loading={print.isPending} onClick={() => print.mutate()}>Print Receipt</Button>
+            ) : (
+              <span />
+            )}
+          </div>
+          {!skipReceipt && (
+            <Link to={`/operator/receipt/${session._id}`} className="block text-center text-sm font-semibold text-[#2563eb]">View receipt</Link>
+          )}
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="space-y-4" role="status">
       <Alert type="success">
@@ -361,9 +511,12 @@ function Done({ session, paid, method, advance, hardware, onNext, skipReceipt = 
 
 // The big search box: click it to see the vehicles that are inside, newest first. Type to narrow
 // the list (3 or more characters search every vehicle inside); pick one to work out its fee.
-function VehicleSearch({ locationId, text, onText, onPick, onSubmitText, disabled }) {
+function VehicleSearch({ locationId, text, onText, onPick, onSubmitText, disabled, phone = false }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
+  // On a phone the list of vehicles inside is always shown under the box (no dropdown) and the keyboard can be numbers or letters.
+  const [keys, setKeys] = useState('123')
+  const showList = open || phone
   useEffect(() => {
     const timer = setTimeout(() => setQ(text.trim()), 250)
     return () => clearTimeout(timer)
@@ -374,7 +527,7 @@ function VehicleSearch({ locationId, text, onText, onPick, onSubmitText, disable
   const found = useQuery({
     queryKey: ['exit-search', locationId, enough ? q : ''],
     queryFn: () => parkingApi.entries(enough ? { locationId, q, match: 'contains' } : { locationId }),
-    enabled: Boolean(locationId) && open,
+    enabled: Boolean(locationId) && showList,
   })
   const typed = text.trim().toUpperCase().replace(/[\s-]/g, '')
   const all = found.data?.sessions || []
@@ -389,13 +542,14 @@ function VehicleSearch({ locationId, text, onText, onPick, onSubmitText, disable
       <input
         id="exit-search"
         data-plate-box
-        autoFocus
+        autoFocus={!phone}
         autoComplete="off"
         autoCapitalize="characters"
         disabled={disabled}
         value={text}
-        placeholder="Type min 3 characters to search…"
-        className="w-full rounded-xl border-2 border-slate-300 bg-white px-4 py-4 text-2xl font-bold uppercase tracking-wider text-slate-900 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-300 disabled:bg-slate-100"
+        placeholder={phone ? 'Search vehicle number' : 'Type min 3 characters to search…'}
+        inputMode={phone && keys === '123' ? 'numeric' : 'text'}
+        className="w-full rounded-xl border-2 border-slate-300 bg-white px-3 py-4 text-xl font-bold uppercase tracking-normal sm:px-4 sm:text-2xl sm:tracking-wider text-slate-900 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-300 disabled:bg-slate-100"
         onChange={(event) => {
           onText(event.target.value)
           setOpen(true)
@@ -413,8 +567,26 @@ function VehicleSearch({ locationId, text, onText, onPick, onSubmitText, disable
           }
         }}
       />
-      {open && !disabled && (
-        <div className="absolute z-20 mt-1 max-h-96 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-lg" role="listbox" aria-label="Vehicles inside">
+      {phone && (
+        <div className="mt-2 flex justify-center">
+          <div className="inline-flex rounded-full bg-slate-100 p-1 ring-1 ring-slate-200" role="group" aria-label="Keyboard">
+            {['123', 'ABC'].map((value) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={keys === value}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => { setKeys(value); document.getElementById('exit-search')?.blur(); setTimeout(() => document.getElementById('exit-search')?.focus(), 80) }}
+                className={`min-w-16 rounded-full px-4 py-1.5 text-sm font-bold ${keys === value ? 'bg-[#2563eb] text-white shadow' : 'text-slate-600'}`}
+              >
+                {value}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {showList && !disabled && (
+        <div className={`${phone ? 'mt-3' : 'absolute z-20 mt-1 max-h-96'} w-full overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-lg`} role="listbox" aria-label="Vehicles inside">
           {found.isLoading ? (
             <p className="px-3 py-2 text-sm font-semibold text-red-600">Searching…</p>
           ) : found.error ? (
@@ -429,8 +601,8 @@ function VehicleSearch({ locationId, text, onText, onPick, onSubmitText, disable
                 {typed
                   ? `${results.length} matching`
                   : total > all.length
-                    ? `Newest ${all.length} of ${total} vehicles inside. Type to find another.`
-                    : `${total} vehicle${total === 1 ? '' : 's'} inside`}
+                    ? `${phone ? 'Latest entry vehicles: newest' : 'Newest'} ${all.length} of ${total} vehicles inside. Type to find another.`
+                    : `${phone ? 'Latest entry vehicles: ' : ''}${total} vehicle${total === 1 ? '' : 's'} inside`}
               </p>
               {results.map((row) => (
                 <button
@@ -468,6 +640,10 @@ function ExitForm({ locations, defaultId }) {
   const [text, setText] = useState('')
   const [lostTicket, setLostTicket] = useState(false)
   const [scanning, setScanning] = useState(false)
+  // Phone: the camera reads the number plate ("Vehicle Number") or the phone's scanner reads the ticket's QR code.
+  const [phone] = useState(isPhoneWidth)
+  const [mode, setMode] = useState('plate')
+  const [cameraKey, setCameraKey] = useState(0)
   // A payment that has started online or at the FASTag partner must be finished or released first:
   // the vehicle cannot be cleared away or swapped for another one meanwhile.
   const [locks, setLocks] = useState({})
@@ -600,6 +776,16 @@ function ExitForm({ locations, defaultId }) {
     setScanning(false)
     run(scanned)
   }
+  // In the phone app the phone's own scanner opens; if it cannot, the page's camera reader is shown instead.
+  const startScan = async () => {
+    if (!nativeScannerAvailable) return setScanning(true)
+    try {
+      const scanned = await scanQrNative()
+      if (scanned) onScan(scanned)
+    } catch {
+      setScanning(true)
+    }
+  }
 
   const applySuggestion = (suggestion) => {
     setDetection(suggestion)
@@ -625,6 +811,19 @@ function ExitForm({ locations, defaultId }) {
     setText('')
     setLostTicket(false)
     lookup.reset()
+    setCameraKey((k) => k + 1)
+  }
+  // "Scan Again" / "OK" on a phone: clear this vehicle and be ready for the next one (the scanner opens again in QR mode).
+  const again = () => {
+    next()
+    if (phone && mode === 'qr') setTimeout(startScan, 300)
+  }
+  // The camera read a plate clearly: look the vehicle up. A plate that was just handled (or not found) is left alone for a minute.
+  const onCameraPlate = (plate) => {
+    if (lookup.isPending || result) return
+    if (plate === plateKey(recent.current.plate || '') && Date.now() < recent.current.until) return
+    setText(formatPlate(plate))
+    run(plate)
   }
 
   const session = result?.session
@@ -639,6 +838,11 @@ function ExitForm({ locations, defaultId }) {
 
   return (
     <div className="space-y-4">
+      <GateBar other={can('ENTRY_CREATE') ? 'entry' : 'exit'}>
+        {can('EXIT_CREATE') && <OpenBarrierButton locationId={locationId} direction="EXIT" gate={gate} />}
+      </GateBar>
+      <OnlinePill />
+      <div className="max-md:hidden">
       <LaneBar location={location} gate={gate} company={company} parkingType={location?.parkingType}>
         {can('EXIT_CREATE') && <OpenBarrierButton locationId={locationId} direction="EXIT" gate={gate} />}
         <AutoSwitch
@@ -648,50 +852,77 @@ function ExitForm({ locations, defaultId }) {
           hint="When the gate camera reads a number plate clearly, the vehicle is found and the fee is shown by itself. The barrier opens the moment the payment is recorded (or at once when nothing is due)."
         />
       </LaneBar>
+      </div>
 
-      <div className="grid items-start gap-4 lg:grid-cols-5">
-        <div className="space-y-4 lg:col-span-3">
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-5">
+        <div className="min-w-0 space-y-4 lg:col-span-3">
           <div className="no-print space-y-3">
             <Alert>{lookup.error && errorMessage(lookup.error)}</Alert>
-            <VehicleSearch
-              locationId={locationId}
-              text={text}
-              onText={(value) => {
-                setText(value)
-                setDetection((d) => (d && plateKey(value) === d.plate ? d : null))
-              }}
-              onPick={pick}
-              onSubmitText={run}
-              disabled={Boolean(result) || lookup.isPending || !locationId}
-            />
-            {!locationId && <p className="text-sm text-slate-500">Choose a parking location first.</p>}
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input type="checkbox" checked={lostTicket} onChange={(event) => setLostTicket(event.target.checked)} />
-                Ticket is lost (type the vehicle number, then press Enter)
-              </label>
-              <Button type="button" variant="secondary" onClick={() => setScanning((on) => !on)}>
-                {scanning ? 'Close camera' : 'Scan QR code'}
-              </Button>
-            </div>
+            {phone && !result && mode === 'plate' && plateReaderAvailable && (
+              <PlateCamera paused={Boolean(result) || lookup.isPending} resetKey={cameraKey} onPlate={onCameraPlate} />
+            )}
+            {phone && !result && (
+              <ModeSwitch
+                value={mode}
+                onChange={(value) => {
+                  setMode(value)
+                  if (value === 'qr') startScan()
+                }}
+                options={[['qr', 'QR Code'], ['plate', 'Vehicle Number']]}
+              />
+            )}
+            {phone && !result && mode === 'qr' && (
+              <div className="rounded-2xl bg-white p-6 text-center shadow-sm ring-1 ring-slate-200">
+                <p className="text-sm text-slate-600">Scan the QR code on the customer's ticket. The fee is shown at once.</p>
+                <Button type="button" className="mt-4 w-full py-3 text-base" loading={lookup.isPending} onClick={startScan}>Scan QR code</Button>
+              </div>
+            )}
+            {(!phone || (mode === 'plate' && !result)) && (
+              <>
+                <VehicleSearch
+                  locationId={locationId}
+                  text={text}
+                  onText={(value) => {
+                    setText(value)
+                    setDetection((d) => (d && plateKey(value) === d.plate ? d : null))
+                  }}
+                  onPick={pick}
+                  onSubmitText={run}
+                  phone={phone}
+                  disabled={Boolean(result) || lookup.isPending || !locationId}
+                />
+                {!locationId && <p className="text-sm text-slate-500">Choose a parking location first.</p>}
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input type="checkbox" checked={lostTicket} onChange={(event) => setLostTicket(event.target.checked)} />
+                    Ticket is lost (type the vehicle number, then press Enter)
+                  </label>
+                  <Button type="button" variant="secondary" className="max-md:hidden" onClick={scanning ? () => setScanning(false) : startScan}>
+                    {scanning ? 'Close camera' : 'Scan QR code'}
+                  </Button>
+                </div>
+              </>
+            )}
             {scanning && <QrScanner onScan={onScan} onClose={() => setScanning(false)} />}
           </div>
 
-          <PlateSuggestions
-            locationId={locationId}
-            direction="EXIT"
-            onUse={applySuggestion}
-            usedId={detection?._id}
-            canFill={!text.trim() && !detection && !result && !lookup.isPending}
-            auto={autoExit}
-            onAuto={autoLookup}
-          />
+          <div className="max-md:hidden">
+            <PlateSuggestions
+              locationId={locationId}
+              direction="EXIT"
+              onUse={applySuggestion}
+              usedId={detection?._id}
+              canFill={!text.trim() && !detection && !result && !lookup.isPending}
+              auto={autoExit}
+              onAuto={autoLookup}
+            />
+          </div>
 
           {session && (
-            <Card title={finished ? 'Exit complete' : 'Fee to collect'}>
+            <Card title={phone ? undefined : finished ? 'Exit complete' : 'Fee to collect'} className={phone ? 'max-md:p-3' : ''}>
               <div className="space-y-5">
                 <PassBanner pass={result.pass} at="exit" />
-                <SessionSummary session={session} />
+                <SessionSummary session={session} phone={phone} />
                 <PhotoPanel key={session._id} sessionId={session._id} kind="EXIT" />
                 {finished ? (
                   <Done
@@ -700,9 +931,10 @@ function ExitForm({ locations, defaultId }) {
                     method={result.method}
                     advance={result.advance}
                     hardware={result.hardware}
-                    onNext={next}
+                    onNext={again}
                     // A location can switch the receipt off for pass holders, who pay nothing.
                     skipReceipt={session.status === 'PASS_EXIT' && !ops.printPassReceipt}
+                    phone={phone}
                   />
                 ) : (
                   <>
@@ -731,8 +963,11 @@ function ExitForm({ locations, defaultId }) {
                       onPaid={done}
                       // Online: the server already released the vehicle; show the finished view.
                       onPaidOnline={done}
+                      phone={phone}
+                      onCancel={again}
+                      cancelDisabled={paymentLocked}
                     />
-                    <Button variant="secondary" className="w-full" disabled={paymentLocked} onClick={next}>Cancel</Button>
+                    {!phone && <Button variant="secondary" className="w-full" disabled={paymentLocked} onClick={next}>Cancel</Button>}
                     {paymentLocked && (
                       <p className="text-center text-xs font-medium text-amber-700" role="status">
                         {session.vehicleNumber} has a payment in progress. Complete or release it before clearing this vehicle.
@@ -745,7 +980,7 @@ function ExitForm({ locations, defaultId }) {
           )}
         </div>
 
-        <div className="space-y-4 lg:col-span-2">
+        <div className="min-w-0 space-y-4 max-md:hidden lg:col-span-2">
           <LivePreview locationId={locationId} direction="EXIT" gate={gate} />
           <GateCameraNote camera={gateCamera} direction="EXIT" gate={gate} fills="the search box" />
           <TodaysExit locationId={locationId} />

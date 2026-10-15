@@ -66,12 +66,14 @@ import BookLocation from './pages/public/BookLocation'
 import BookingStatus from './pages/public/BookingStatus'
 import BookingReturn from './pages/public/BookingReturn'
 import OperatorLayout from './layouts/OperatorLayout'
+import { isNative } from './native/platform'
 import OperatorDashboard from './pages/operator/OperatorDashboard'
 import Entry from './pages/operator/Entry'
 import Entries from './pages/operator/Entries'
 import { EntryList, ExitList } from './pages/operator/SessionList'
 import Exit from './pages/operator/Exit'
 import Receipt from './pages/operator/Receipt'
+import PrinterSetup from './pages/operator/PrinterSetup'
 import Collection from './pages/operator/Collection'
 import OperatorWallets from './pages/operator/Wallets'
 
@@ -79,7 +81,8 @@ function App() {
   return (
     <Routes>
       <Route element={<PublicLayout />}>
-        <Route path="/" element={<Home />} />
+        {/* The phone app is for gate staff: it opens at the sign-in (signed-in staff go on to their own home). */}
+        <Route path="/" element={isNative ? <Navigate to="/login" replace /> : <Home />} />
         <Route path="/aboutus" element={<About />} />
         <Route path="/product" element={<Product />} />
         <Route path="/cart" element={<Cart />} />
@@ -183,6 +186,7 @@ function App() {
           <Route path="entry-list" element={<EntryList />} />
           <Route path="exit-list" element={<ExitList />} />
           <Route path="receipt/:id" element={<Receipt />} />
+          <Route path="printer" element={<PrinterSetup />} />
           <Route element={<ProtectedRoute permission="ENTRY_CREATE" />}>
             <Route path="entry" element={<Entry />} />
           </Route>

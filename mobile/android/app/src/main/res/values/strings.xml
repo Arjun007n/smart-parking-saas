@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Smart Parking</string>
+    <string name="title_activity_main">Smart Parking</string>
+    <string name="package_name">com.smartparking.operator</string>
+    <string name="custom_url_scheme">com.smartparking.operator</string>
+</resources>

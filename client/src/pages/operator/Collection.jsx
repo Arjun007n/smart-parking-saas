@@ -9,6 +9,7 @@ import { Alert, Badge, Button, Card, Field, PageLoader, Select } from '../../com
 import ShiftPanel from '../../components/operator/ShiftPanel'
 import CollectionByType from '../../components/operator/CollectionByType'
 import MoneyTiles from '../../components/operator/MoneyTiles'
+import { PageBar } from '../../components/operator/GateBar'
 
 function ShiftsOfDay({ params }) {
   const { data = [], isLoading, error } = useQuery({ queryKey: ['shifts', params], queryFn: () => shiftApi.list(params) })
@@ -16,8 +17,27 @@ function ShiftsOfDay({ params }) {
   if (error) return <Alert>{errorMessage(error)}</Alert>
   if (data.length === 0) return <p className="text-sm text-slate-500">No shifts were started on this day.</p>
 
+  const gap = (shift) => (shift.status === 'OPEN' ? '—' : shift.difference === 0 ? 'Matches' : `${shift.difference < 0 ? 'Short' : 'Over'} ${money(Math.abs(shift.difference))}`)
   return (
-    <div className="overflow-x-auto">
+    <>
+    <ul className="space-y-3 md:hidden">
+      {data.map((shift) => (
+        <li key={shift._id} className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200">
+          <div className="flex items-center justify-between gap-2">
+            <p className="font-bold text-slate-900">{shift.operatorName}</p>
+            {shift.status === 'OPEN' ? <Badge tone="blue">Open</Badge> : <span className="text-xs text-slate-500">till {timeOnly(shift.closedAt)}</span>}
+          </div>
+          <p className="text-xs text-slate-500">Started {timeOnly(shift.openedAt)}</p>
+          <dl className="mt-2 grid grid-cols-2 gap-2 text-sm">
+            <div><dt className="text-xs text-slate-500">Collected</dt><dd className="font-bold">{money(shift.totals?.collected)}</dd></div>
+            <div><dt className="text-xs text-slate-500">Cash expected</dt><dd className="font-bold">{money(shift.status === 'OPEN' ? shift.totals?.expectedCash : shift.expectedCash)}</dd></div>
+            <div><dt className="text-xs text-slate-500">Cash counted</dt><dd className="font-bold">{shift.status === 'OPEN' ? '—' : money(shift.closingCash)}</dd></div>
+            <div><dt className="text-xs text-slate-500">Difference</dt><dd className="font-bold">{gap(shift)}</dd></div>
+          </dl>
+        </li>
+      ))}
+    </ul>
+    <div className="overflow-x-auto max-md:hidden">
       <table className="w-full min-w-[640px] text-left text-sm">
         <thead className="text-slate-500">
           <tr>
@@ -47,6 +67,7 @@ function ShiftsOfDay({ params }) {
         </tbody>
       </table>
     </div>
+    </>
   )
 }
 
@@ -75,7 +96,8 @@ export default function Collection() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-slate-900">Collection</h1>
+      <h1 className="text-2xl font-bold text-slate-900 max-md:sr-only">Collection</h1>
+      <PageBar title="Total Collection" />
 
       {!locationsLoading && locations.length > 0 && <ShiftPanel locations={locations} defaultId={defaultId} />}
 
@@ -110,7 +132,26 @@ export default function Collection() {
         c && (
           <>
             <MoneyTiles totals={byType.data?.totals} />
-            <div className="grid gap-4 sm:grid-cols-3">
+            <div className="space-y-3 md:hidden">
+              <div className="rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-700 p-5 text-white shadow">
+                <p className="text-sm font-semibold opacity-90">Total collected</p>
+                <p className="mt-1 text-3xl font-extrabold">{money(c.total.amount)}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
+                  <p className="text-xs font-semibold text-slate-500">Payments</p>
+                  <p className="mt-1 text-xl font-extrabold text-slate-900">{c.total.count}</p>
+                </div>
+                <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
+                  <p className="text-xs font-semibold text-slate-500">Tax in total</p>
+                  <p className="mt-1 text-xl font-extrabold text-slate-900">{money(c.total.tax)}</p>
+                </div>
+              </div>
+              {c.passes?.count > 0 && (
+                <p className="text-xs text-slate-500">Pass sales: {c.passes.count} ({money(c.passes.amount)})</p>
+              )}
+            </div>
+            <div className="grid gap-4 sm:grid-cols-3 max-md:hidden">
               <div className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
                 <p className="text-sm text-slate-500">Total collected</p>
                 <p className="mt-1 text-2xl font-bold text-slate-900">{money(c.total.amount)}</p>
@@ -133,7 +174,7 @@ export default function Collection() {
             <Card
               title="Collection List"
               action={
-                <div className="no-print flex gap-2">
+                <div className="no-print flex flex-wrap gap-2">
                   <Button variant="secondary" loading={download.isPending} onClick={() => download.mutate('xlsx')}>Download Excel</Button>
                   <Button variant="secondary" onClick={() => window.print()}>Print</Button>
                 </div>
@@ -210,7 +251,27 @@ export default function Collection() {
         {exits.isLoading ? (
           <PageLoader />
         ) : exits.data && exits.data.sessions.length > 0 ? (
-          <div className="overflow-x-auto">
+          <>
+          <ul className="space-y-3 md:hidden">
+            {exits.data.sessions.map((session) => (
+              <li key={session._id} className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-extrabold text-slate-900">{session.vehicleNumber}</p>
+                    <p className="truncate font-mono text-xs text-slate-500">{session.ticketNumber}</p>
+                  </div>
+                  <p className="text-lg font-extrabold text-emerald-600">{money(session.fee?.total)}</p>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
+                  <span>Out {timeOnly(session.exitTime)}</span>
+                  <span>{session.durationMinutes != null ? duration(session.durationMinutes) : '—'}</span>
+                  <Badge tone={SESSION_STATUS[session.status].tone}>{SESSION_STATUS[session.status].label}</Badge>
+                  <Link to={`/operator/receipt/${session._id}`} className="ml-auto font-bold text-blue-700">Receipt ›</Link>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <div className="overflow-x-auto max-md:hidden">
             <table className="w-full min-w-[640px] text-left text-sm">
               <thead className="text-slate-500">
                 <tr>
@@ -250,6 +311,7 @@ export default function Collection() {
               </p>
             )}
           </div>
+          </>
         ) : (
           !exits.error && <p className="text-sm text-slate-500">No exits on this day.</p>
         )}

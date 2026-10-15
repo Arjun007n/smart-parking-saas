@@ -86,6 +86,7 @@ const fields = (isCreate) => ({
       headerNote: text(120), ticketFooter: text(200), receiptFooter: text(200),
       showAddress: { type: "boolean" }, showGst: { type: "boolean" },
       showQr: { type: "string", enum: ["DEVICE", "ON", "OFF"] },
+      upiId: { type: "string", max: 60, pattern: /^$|^[A-Za-z0-9._-]{2,}@[A-Za-z][A-Za-z0-9.-]{1,}$/, message: "must look like name@bank" },
     },
   },
   reportRecipients: { type: "array", max: 10, of: { type: "string", max: 254, pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, message: "must be an email address" } },

@@ -15,6 +15,7 @@ const stored = (location) => {
     showAddress: r.showAddress !== false,
     showGst: r.showGst !== false,
     showQr: r.showQr || 'DEVICE',
+    upiId: r.upiId || '',
   }
 }
 
@@ -102,6 +103,8 @@ export default function ReceiptPanel({ location, company }) {
             <option key={m.value} value={m.value}>{m.label}</option>
           ))}
         </Select>
+
+        <Field label="UPI id for payments (optional)" name="receipt-upi" maxLength={60} placeholder="yourshop@okaxis" hint="The phone exit screen shows a QR code for this id with the amount to pay when the operator picks UPI." value={form.upiId} onChange={(event) => set({ upiId: event.target.value.trim() })} />
 
         <div className="flex gap-2">
           <Button type="submit" loading={save.isPending}>Save receipt settings</Button>

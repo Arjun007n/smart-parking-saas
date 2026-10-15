@@ -1,0 +1,23 @@
+{
+  "name": "smart-parking-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The Android app for Smart Parking gate staff. It packages the website in ../client with Capacitor.",
+  "scripts": {
+    "web": "node scripts/build-web.mjs",
+    "sync": "node scripts/build-web.mjs && npx cap sync android && node scripts/harden-android.mjs && node scripts/install-native.mjs",
+    "open": "npx cap open android",
+    "android": "npm run sync && npx cap open android",
+    "run:android": "npm run sync && npx cap run android",
+    "test": "node --test tests/mobile.test.mjs tests/escpos.test.mjs tests/plate.test.mjs tests/apibase.test.mjs"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/app": "^8.0.0",
+    "@capacitor/core": "^8.0.0",
+    "capacitor-secure-storage-plugin": "^0.13.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.0.0"
+  }
+}

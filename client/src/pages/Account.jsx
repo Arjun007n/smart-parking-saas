@@ -1,3 +1,4 @@
+import { useLocation } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation } from '@tanstack/react-query'
@@ -7,10 +8,13 @@ import { changePasswordSchema, profileSchema } from '../validators/schemas'
 import { errorMessage } from '../utils/errors'
 import { roleLabel } from '../utils/roles'
 import { Alert, Button, Card, Field, Select } from '../components/ui'
+import { PageBar } from '../components/operator/GateBar'
 
 // The signed-in user's own account: who they are, and changing their password.
 export default function Account() {
   const { user, company, can, setUser } = useAuth()
+  // On a phone the operator area shows this page with its own top bar (the admin area keeps its usual header).
+  const inOperatorArea = useLocation().pathname.startsWith('/operator')
   const {
     register,
     handleSubmit,
@@ -50,7 +54,15 @@ export default function Account() {
 
   return (
     <div className="mx-auto max-w-xl space-y-6">
-      <h1 className="text-2xl font-bold text-slate-900">My profile</h1>
+      <h1 className={`text-2xl font-bold text-slate-900 ${inOperatorArea ? 'max-md:sr-only' : ''}`}>My profile</h1>
+      {inOperatorArea && <PageBar title="My profile" />}
+      {inOperatorArea && <div className="flex items-center gap-3 rounded-2xl bg-gradient-to-br from-[#1d4ed8] to-[#3b82f6] p-4 text-white shadow md:hidden">
+        <span aria-hidden="true" className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-white/20 text-2xl font-extrabold">{(user.name || '?').slice(0, 1).toUpperCase()}</span>
+        <div className="min-w-0 leading-tight">
+          <p className="truncate text-lg font-extrabold">{user.name}</p>
+          <p className="truncate text-sm opacity-90">{roleLabel(user)}{company?.name ? ` · ${company.name}` : ''}</p>
+        </div>
+      </div>}
 
       <Card title="Details">
         <dl className="space-y-2 text-sm">

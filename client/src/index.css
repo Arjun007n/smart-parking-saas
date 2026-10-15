@@ -9,6 +9,20 @@ body {
   font-family: Arial, Helvetica, sans-serif;
   background: #f8fafc;
 }
+/* In the phone app a page never grows wider than the screen (a wide table scrolls inside its own box). */
+html.native-app,
+html.native-app body {
+  overflow-x: hidden;
+}
+
+/* The sign-in screen of the phone app: light blue sky, the logo, a soft card. */
+.auth-logo { display: none; }
+html.native-app .auth-logo { display: block; }
+html.native-app .auth-shell { background: linear-gradient(180deg, #bfe1ff 0%, #eaf4ff 35%, #ffffff 70%); justify-content: flex-start; padding-top: 3rem; }
+html.native-app .auth-title { font-size: 1.6rem; letter-spacing: 0.02em; background: linear-gradient(90deg, #0f1e4a, #2563eb); -webkit-background-clip: text; background-clip: text; color: transparent; }
+html.native-app .auth-card { background: transparent; box-shadow: none; --tw-ring-shadow: 0 0 #0000; padding: 0.5rem; }
+html.native-app .auth-card input:not([type='checkbox']) { border-radius: 0.75rem; padding-top: 0.75rem; padding-bottom: 0.75rem; background: #fff; }
+
 /* Printing a ticket or receipt: everything marked .no-print is left out. */
 @media print {
   .no-print {

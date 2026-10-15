@@ -19,8 +19,31 @@ export default function CollectionByType({ rows, totals }) {
   // A column the admin switched off for this person is missing from the figures, so it is left out.
   const sample = totals || rows[0] || {}
   const COLUMNS = ALL_COLUMNS.filter(([key]) => sample[key] !== undefined)
+  const shown = COLUMNS.filter(([key]) => key !== 'total')
   return (
-    <div className="overflow-x-auto">
+    <>
+    <ul className="space-y-3 md:hidden">
+      {rows.map((row) => (
+        <li key={row.type} className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200">
+          <div className="flex items-center justify-between">
+            <p className="font-extrabold text-slate-900">{VEHICLE_LABELS[row.type] || row.type}</p>
+            {row.total !== undefined && <p className="text-lg font-extrabold text-emerald-600">{money(row.total)}</p>}
+          </div>
+          <dl className="mt-2 grid grid-cols-3 gap-2 text-xs">
+            {shown.map(([key, label]) => (
+              <div key={key}><dt className="text-slate-500">{label}</dt><dd className="text-sm font-bold text-slate-900">{money(row[key])}</dd></div>
+            ))}
+          </dl>
+        </li>
+      ))}
+      {totals && totals.total !== undefined && (
+        <li className="flex items-center justify-between rounded-xl bg-slate-900 px-4 py-3 text-white">
+          <span className="font-bold">Total</span>
+          <span className="text-lg font-extrabold">{money(totals.total)}</span>
+        </li>
+      )}
+    </ul>
+    <div className="overflow-x-auto max-md:hidden">
       <table className="w-full min-w-[640px] text-left text-sm">
         <thead className="text-slate-500">
           <tr>
@@ -54,5 +77,6 @@ export default function CollectionByType({ rows, totals }) {
         )}
       </table>
     </div>
+    </>
   )
 }

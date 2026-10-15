@@ -1,7 +1,7 @@
 # Smart Parking SaaS
 
 Multi-tenant parking management platform. This repository follows the
-30-day master work plan. **Status: Day 29 — release candidate, plus gate hardware (cameras, barriers, printers; `docs/hardware.md`). Phase 2 (passes, QR, online payments, advanced reports, photos, custom roles; `docs/phase2.md`) is built. Days 26-27 (mobile app) and Day 30 (deployment) are not started.**
+30-day master work plan. **Status: Day 29 — release candidate, plus gate hardware (cameras, barriers, printers; `docs/hardware.md`). Phase 2 (passes, QR, online payments, advanced reports, photos, custom roles; `docs/phase2.md`) is built. Days 26-27 (mobile app) are in progress: the Android app shell is in `mobile/` (`docs/mobile.md`). Day 30 (deployment) is not started.**
 
 ```
 client/   React + Vite + Tailwind web app

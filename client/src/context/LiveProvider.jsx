@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { LiveContext } from './LiveContext'
 import { connectLive } from '../services/live'
-import { tokenStore } from '../services/api'
+import { API_ORIGIN, tokenStore } from '../services/api'
 
 // What to reload when the server says something happened.
 const GATE_LISTS = ['locations', 'entries', 'collection', 'exits', 'operator-list', 'operator-summary', 'operator-collection', 'exit-search', 'dashboard']
@@ -17,7 +17,7 @@ const RELOAD = {
   notification: ['notifications'],
 }
 
-const STREAM_URL = `${import.meta.env.VITE_API_URL || ''}/api/live/stream`
+const STREAM_URL = `${API_ORIGIN}/api/live/stream`
 
 // Keeps one live connection while someone is signed in and reloads what changed.
 // Several events in quick succession cause one reload each (a short pause gathers them).

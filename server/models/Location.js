@@ -88,6 +88,8 @@ const locationSchema = new mongoose.Schema(
       showAddress: { type: Boolean },
       showGst: { type: Boolean },
       showQr: { type: String, enum: ["DEVICE", "ON", "OFF"] },
+      // The UPI id customers pay to ("name@bank"). The phone exit screen shows a QR code for it with the amount.
+      upiId: { type: String, trim: true, maxlength: 60 },
     },
     // Who gets this location's own end-of-day report by email (needs the company's daily report switched on).
     reportRecipients: [{ type: String, trim: true, lowercase: true, maxlength: 254 }],

@@ -113,7 +113,7 @@ export function Card({ title, action, children, className = '' }) {
   return (
     <section className={`rounded-xl bg-white p-6 shadow-sm ring-1 ring-slate-200 ${className}`}>
       {(title || action) && (
-        <div className="sp-card-head mb-4 flex items-center justify-between gap-4">
+        <div className="sp-card-head mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
           {action}
         </div>

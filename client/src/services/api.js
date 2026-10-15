@@ -1,15 +1,38 @@
 import axios from 'axios'
+import { isNative } from '../native/platform'
+import { apiOrigin } from '../native/apiBase'
+import { loadSecret, removeSecret, saveSecret } from '../native/storage'
 
 const TOKEN_KEY = 'sp_token'
 
+// In a browser the token is kept in localStorage. In the phone app it is held in memory and saved in the phone's secure
+// storage (see native/storage.js); `load()` reads it once before the first screen.
+let nativeToken = null
+
 export const tokenStore = {
-  get: () => localStorage.getItem(TOKEN_KEY),
-  set: (token) => localStorage.setItem(TOKEN_KEY, token),
-  clear: () => localStorage.removeItem(TOKEN_KEY),
+  get: () => (isNative ? nativeToken : localStorage.getItem(TOKEN_KEY)),
+  set: (token) => {
+    if (isNative) {
+      nativeToken = token
+      saveSecret(TOKEN_KEY, token)
+    } else localStorage.setItem(TOKEN_KEY, token)
+  },
+  clear: () => {
+    if (isNative) {
+      nativeToken = null
+      removeSecret(TOKEN_KEY)
+    } else localStorage.removeItem(TOKEN_KEY)
+  },
+  load: async () => {
+    if (isNative) nativeToken = await loadSecret(TOKEN_KEY)
+  },
 }
 
+// Where the server is (see native/apiBase.js: the phone app's emulator uses its own address for the PC).
+export const API_ORIGIN = apiOrigin(import.meta.env.VITE_API_URL, { native: isNative, userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '' })
+
 const api = axios.create({
-  baseURL: `${import.meta.env.VITE_API_URL || ''}/api`,
+  baseURL: `${API_ORIGIN}/api`,
   timeout: 15000,
 })
 
