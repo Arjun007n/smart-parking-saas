@@ -3,7 +3,9 @@
 # (see docs/security.md). Test the site after deploying: the browser console names anything the policy blocks.
 #
 # script-src / frame-src / font-src / style-src: Google Maps and Google Fonts, the only outside services the pages use.
-# connect-src https: lets the pages call the API on its own https address.
+# connect-src https: lets the pages call the API on its own https address. It is wide only because the API's host is not
+# known in this repository: once it is, replace "https:" with the API origin (docs/security.md, "Narrowing connect-src").
+# style-src 'unsafe-inline' is needed by React's inline style attributes; img-src https: by pictures from the API and Maps.
 # img-src http://127.0.0.1:* is the live camera picture served by the gate agent on the same PC.
 /*
   Content-Security-Policy: default-src 'self'; script-src 'self' https://maps.googleapis.com https://maps.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https: http://127.0.0.1:*; connect-src 'self' https:; frame-src https://www.google.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'

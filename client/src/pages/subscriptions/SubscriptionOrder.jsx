@@ -44,6 +44,7 @@ function InvoiceSheet({ order }) {
           <div>Location : {order.locationName}</div>
         </dl>
       </div>
+      <div className="overflow-x-auto">
       <table className="w-full border-collapse text-left text-xs">
         <thead>
           <tr className="bg-slate-100">
@@ -64,6 +65,7 @@ function InvoiceSheet({ order }) {
           ))}
         </tbody>
       </table>
+      </div>
       <dl className="ml-auto w-64 space-y-0.5 text-xs">
         <div className="flex justify-between"><dt>Subtotal</dt><dd>{money(order.subtotal)}</dd></div>
         <div className="flex justify-between"><dt>Discount</dt><dd>{money(order.discount)}</dd></div>

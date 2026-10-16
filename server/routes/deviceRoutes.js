@@ -12,6 +12,8 @@ hub.install(); // events -> screens and gate agents
 
 // Everything here is called by devices with their own key, never by users.
 router.use(deviceAuth);
+// A generous per-device request limit (DEVICE_MAX_PER_MIN, default 120 a minute).
+router.use(controller.quota);
 
 router.post("/heartbeat", controller.heartbeat);
 // The gate agent keeps this open and is woken the moment a command is queued for the device.

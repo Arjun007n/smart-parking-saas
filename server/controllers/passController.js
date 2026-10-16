@@ -147,6 +147,12 @@ const resolvePassUser = async (req, companyId, body) => {
     if (!mongoose.isValidObjectId(body.passUserId)) throw new AppError("Invalid pass user", 400);
     const found = await PassUser.findOne({ _id: body.passUserId, companyId });
     if (!found) throw new AppError("Pass user not found", 404);
+    // Same rule as the pass-user screens (passUserController.userScope): a location admin may use only the users who hold
+    // a pass in their own locations, or whom they made themselves.
+    if (!isCompanyWide(req.user.role) && String(found.createdBy) !== String(req.user._id)
+      && !(await Pass.exists({ $and: [scopeFilter(req), { passUserId: found._id }] }))) {
+      throw new AppError("Pass user not found", 404);
+    }
     return found;
   }
   const digits = String(body.phone || "").replace(/[\s-]/g, "");
@@ -923,7 +929,7 @@ const bulkUpdate = async (req, res) => {
 
   await audit.record(req, "PASS_BULK_UPDATE", {
     entity: "Pass", companyId: req.companyId,
-    meta: { action, changed: done.length, skipped: skipped.length, ...(days ? { days } : {}), ...(startDate || endDate ? { startDate, endDate } : {}), ...(amount !== undefined ? { amount } : {}), ...(reason ? { reason } : {}) },
+    meta: { action, changed: done.length, skipped: skipped.length, passNumbers: done.slice(0, 200), ...(days ? { days } : {}), ...(startDate || endDate ? { startDate, endDate } : {}), ...(amount !== undefined ? { amount } : {}), ...(reason ? { reason } : {}) },
   });
   res.json({ success: true, data: { changed: done.length, skipped } });
 };

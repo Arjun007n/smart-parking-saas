@@ -81,7 +81,33 @@ The rate limits and the audit log use the caller's IP address, which the server 
 
 The API sets its own headers; the website's pages come from a separate static host. `client/public/_headers` is read by Netlify and Cloudflare Pages. On Render, open the static site's Settings, then Headers, and add each header name and value from that file for the path `/*`. After deploying, open the site with the browser console open: the policy lists anything it blocks (for example a new outside service). The policy allows Google Maps and Google Fonts, the API on https, and the gate agent's live picture on `127.0.0.1`.
 
-## Changes made on Day 29
+### Narrowing `connect-src` to the real API address
+
+`client/public/_headers` has `connect-src 'self' https:` because the repository does not know the API's host name. Once the API has its final address (for example `https://api.your-site.example`), replace the two words after `'self'` so the pages may call only that server:
+
+```
+connect-src 'self' https://api.your-site.example https://maps.googleapis.com
+```
+
+* Keep every API origin the site really calls (if the API is on two hosts, list both). `https://maps.googleapis.com` is for Google Maps; keep it while the maps are used.
+* `img-src` is left wide (`https:`) on purpose: pictures come from the API's upload addresses, Google Maps tiles and other hosts that are not fixed. Narrow it the same way only after listing them in the browser console.
+* `style-src` keeps `'unsafe-inline'` because React sets inline `style` attributes; removing it would break layouts. Do not change it without testing every page.
+* After changing the header, open each main screen with the browser console open; a blocked call is named there ("Refused to connect to ..."). Roll back by putting `https:` back.
+
+The phone app's pages get their own, tighter policy automatically in release builds: `npm run web` adds a `Content-Security-Policy` meta tag to the app's copy of `index.html` (`mobile/scripts/csp.mjs`) with `connect-src` limited to the app itself and the `API_URL` address. The website's `index.html` is never touched. Set `APP_CSP=0` to leave it out; test mode (`APP_DEV=1`) never gets one.
+
+## Hardening of 16 October 2026 (gate agent and phone app)
+
+| Finding | What was done |
+|---|---|
+| Gate-agent listeners (camera port 8081, RFID 8082, FASTag 8083) accepted forged events from anyone on the network | They listen on `127.0.0.1` by default (`options.bind`). A non-local `bind` without `options.secret` stops the agent at start with a clear message. The secret may be sent in the `x-agent-secret` header or, as before, in `?secret=`; it is compared in constant time. **A camera on another machine now needs `"bind": "0.0.0.0"` and a secret** (see `gate-agent/README.md`) |
+| The live-picture token never changed and the picture was sent with `access-control-allow-origin: *` | The token includes a random value picked at each agent start (the agent re-sends its address to the cloud with every heartbeat). No CORS header is sent unless the request's `Origin` is listed in `previewOrigins`; the Entry and Exit screens show the picture in an `<img>`, which needs none |
+| The agent accepted a plain `http://` server address and sent the device key over it | `serverUrl` must be `https://`. Plain `http://` is accepted only for localhost and private LAN addresses, or with `GATE_AGENT_ALLOW_HTTP=1` |
+| The phone app fell back to `localStorage` for the sign-in token when secure storage failed | In a release app the token then stays in memory for that run only; the fallback is kept in test mode (`APP_DEV=1`) and in the website |
+| The plate reader decoded any size of picture | Over 4 MB of base64 is refused, the size is read first and the picture is shrunk to at most 2048 pixels; running out of memory rejects the call instead of crashing the app |
+| A release could be built in test mode or with plain http allowed | `npm run check:release` (in `mobile`) fails when `APP_DEV=1`, when `API_URL` is http or private, or when the Android project allows plain http, backup or debugging. The Android project gets a `network_security_config.xml` (plain http off, on only in test mode) and release builds are minified with R8 |
+| No lock files for `mobile` and `gate-agent` | Not possible without the package registry: run `npm install` in each folder, commit the generated `package-lock.json`, and use `npm ci` from then on (see the two READMEs) |
+
 
 Found while reviewing the code, and fixed:
 

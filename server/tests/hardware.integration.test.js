@@ -875,7 +875,7 @@ it("open barrier by hand: no single barrier means a clear answer, and the rate l
   assert.equal(manualLiftAllowed(user, 1_000_000 + 61_000), true, "a minute later it works again");
 });
 
-it("re-entry: a ticket is swapped for a new one at any age; double tap is one new ticket", async () => {
+it("re-entry: a ticket is swapped for a new one; double tap is one new ticket; an old ticket needs a supervisor", async () => {
   const entry = await api("POST", "/api/parking/entry", {
     token: s.gate, body: { locationId: s.loc._id, vehicleNumber: "MH12RE0001", vehicleType: "CAR", gate: "Gate A" },
   });
@@ -907,9 +907,12 @@ it("re-entry: a ticket is swapped for a new one at any age; double tap is one ne
   const closed = await api("POST", `/api/parking/sessions/${fresh._id}/re-entry`, { token: s.exit, body: {} });
   assert.equal(closed.status, 403, "an exit operator cannot enter vehicles");
 
-  // No age window: an operator can replace a ticket that is 40 minutes old.
+  // After the grace time (30 minutes) the entry operator cannot replace the ticket; a supervisor or admin can.
   await ParkingSession.updateOne({ _id: fresh._id }, { $set: { entryTime: new Date(Date.now() - 40 * 60000) } });
-  const late = await api("POST", `/api/parking/sessions/${fresh._id}/re-entry`, { token: s.gate, body: {} });
+  const tooLate = await api("POST", `/api/parking/sessions/${fresh._id}/re-entry`, { token: s.gate, body: {} });
+  assert.equal(tooLate.status, 403, JSON.stringify(tooLate.body));
+  assert.match(tooLate.body.message, /older than 30 minutes/);
+  const late = await api("POST", `/api/parking/sessions/${fresh._id}/re-entry`, { token: s.site, body: {} });
   assert.equal(late.status, 201, JSON.stringify(late.body));
   const byAdmin = await api("POST", `/api/parking/sessions/${late.body.data.session._id}/re-entry`, { token: s.site, body: { vehicleType: "CAR" } });
   assert.equal(byAdmin.status, 201, JSON.stringify(byAdmin.body));

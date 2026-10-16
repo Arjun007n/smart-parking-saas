@@ -65,6 +65,10 @@ const CLEARABLE = [
 const updateTariff = async (req, res) => {
   const tariff = await findInScope(req);
   const { slabs, ...rest } = req.body;
+  // What the money fields were before the change, so the audit log shows old and new values.
+  const before = {};
+  for (const key of [...Object.keys(rest), ...req.cleared]) before[key] = tariff[key] === undefined ? null : tariff[key];
+  const beforeSlabs = slabs ? JSON.stringify(tariff.slabs || []).slice(0, 2000) : undefined;
 
   Object.assign(tariff, rest);
   if (slabs) tariff.slabs = sortSlabs(slabs);
@@ -75,7 +79,12 @@ const updateTariff = async (req, res) => {
   await tariff.save();
   await audit.record(req, "TARIFF_UPDATE", {
     entity: "Tariff", entityId: tariff._id, companyId: tariff.companyId,
-    meta: { changed: [...Object.keys(req.body), ...req.cleared] },
+    meta: {
+      changed: [...Object.keys(req.body), ...req.cleared],
+      before,
+      after: Object.fromEntries(Object.keys(before).map((key) => [key, tariff[key] === undefined ? null : tariff[key]])),
+      ...(beforeSlabs !== undefined ? { slabsBefore: beforeSlabs, slabsAfter: JSON.stringify(tariff.slabs || []).slice(0, 2000) } : {}),
+    },
   });
 
   res.json({ success: true, data: tariff });

@@ -52,6 +52,42 @@ const normalizeVehicleType = (value) => {
   return Object.keys(VEHICLE_WORDS).find((type) => VEHICLE_WORDS[type].includes(word));
 };
 
+// The address of a detection's picture is shown to operators as a link, so only a plain http(s) address is kept
+// (never javascript:, data: and the like). Anything else is dropped, not rejected: the detection itself still counts.
+const safeImageUrl = (value) => (typeof value === "string" && /^https?:\/\/\S{1,490}$/i.test(value.trim()) ? value.trim() : undefined);
+
+// A camera's live-picture address is fetched by the browser of every operator at the gate. Accepted: any https
+// address, and plain http only for a camera on the local network or the gate PC itself (localhost, 127.x, 10.x,
+// 172.16-31.x, 192.168.x, 169.254.x, 100.64-127.x, names without a dot, .local / .lan / .internal / .home names), for
+// example the gate agent's http://127.0.0.1:<port>/preview/<hex>. Set
+// PREVIEW_ALLOW_PUBLIC_HTTP=true to also accept plain http to public addresses. Returns true / false.
+const LOCAL_NAME = /\.(local|lan|internal|home|localdomain)$/i;
+const isLocalHost = (host) => {
+  const h = host.replace(/^\[|\]$/g, "").toLowerCase();
+  if (h === "localhost" || h === "::1" || LOCAL_NAME.test(h)) return true;
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127);
+  }
+  if (h.includes(":")) return /^(fe80|fc|fd)/.test(h); // IPv6 link-local / unique-local
+  return !h.includes("."); // a single-word name can only be on the local network
+};
+const isSafePreviewUrl = (value) => {
+  if (typeof value !== "string") return false;
+  const text = value.trim();
+  if (text.length > 300 || !/^https?:\/\/\S+$/i.test(text)) return false;
+  let url;
+  try {
+    url = new URL(text);
+  } catch {
+    return false;
+  }
+  if (!url.hostname) return false;
+  if (url.protocol === "https:") return true;
+  return process.env.PREVIEW_ALLOW_PUBLIC_HTTP === "true" || isLocalHost(url.hostname);
+};
+
 const adapters = {
   // Our own standard format: nothing to translate.
   generic: (body) => body,
@@ -91,7 +127,7 @@ const parseDetection = (body, { vendor, minConfidence } = {}) => {
   return {
     plateRaw, plate, confidence,
     capturedAt: input.capturedAt instanceof Date ? input.capturedAt : undefined,
-    imageUrl: input.imageUrl, deviceEventId: input.eventId, direction: input.direction,
+    imageUrl: safeImageUrl(input.imageUrl), deviceEventId: input.eventId, direction: input.direction,
     vehicleType: normalizeVehicleType(input.vehicleType),
     reviewReasons,
   };
@@ -106,5 +142,5 @@ const dedupeKey = ({ locationId, direction, plate }, now = Date.now(), windowSec
 
 module.exports = {
   DEFAULT_MIN_CONFIDENCE, DUPLICATE_WINDOW_SECONDS, PLATE_PATTERN, INDIAN_PLATE,
-  normalizeConfidence, normalizeVehicleType, parseDetection, dedupeKey, adapters,
+  normalizeConfidence, normalizeVehicleType, parseDetection, safeImageUrl, isSafePreviewUrl, dedupeKey, adapters,
 };

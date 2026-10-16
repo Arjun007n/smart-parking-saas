@@ -18,6 +18,8 @@ const rateLimit = ({ windowMs, max, message }) => {
     const key = req.ip || "unknown";
     let entry = hits.get(key);
     if (!entry || entry.resetAt <= now) {
+      // Never let the table grow without limit (many different addresses): drop the expired ones first.
+      if (hits.size >= 100000) for (const [oldKey, old] of hits) if (old.resetAt <= now) hits.delete(oldKey);
       entry = { count: 0, resetAt: now + windowMs };
       hits.set(key, entry);
     }

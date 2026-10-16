@@ -19,6 +19,7 @@
 const http = require("http");
 const net = require("net");
 const { createClient } = require("./api");
+const { checkListenerBind, secretOk } = require("./util");
 const log = require("./log");
 
 const MAX_QUEUE = 200;
@@ -89,6 +90,7 @@ class ReaderListener {
     this.kind = kind;
     this.device = device;
     this.options = { ...DEFAULTS[kind], debounceMs: 5000, ...(device.options || {}) };
+    if ((device.driver || "simulated") === "listener") this.options.bind = checkListenerBind(this.options, device.name);
     this.api = client || createClient({ serverUrl, key: device.key });
     this.log = log.make(device.name);
     this.queue = [];
@@ -186,7 +188,7 @@ class ReaderListener {
       res.end(JSON.stringify(body));
     };
     if (req.method !== "POST" || url.pathname !== this.options.path) return reply(404, { ok: false });
-    if (this.options.secret && url.searchParams.get("secret") !== this.options.secret) return reply(401, { ok: false });
+    if (!secretOk(req, url, this.options.secret)) return reply(401, { ok: false });
 
     const chunks = [];
     let size = 0;
@@ -261,9 +263,9 @@ class ReaderListener {
     const driver = this.device.driver || "simulated";
     if (driver === "listener") {
       this.server = http.createServer((req, res) => this.handleRequest(req, res));
-      this.server.listen(this.options.port, () => {
+      this.server.listen(this.options.port, this.options.bind, () => {
         this.port = this.server.address().port;
-        this.log.info(`listening for ${this.kind} reads on port ${this.port}${this.options.path}`);
+        this.log.info(`listening for ${this.kind} reads on ${this.options.bind}:${this.port}${this.options.path}`);
       });
     } else if (driver === "tcp") this.connectTcp();
     else if (driver === "serial") this.openSerial();

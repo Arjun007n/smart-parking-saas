@@ -10,6 +10,7 @@ const { DeviceWorker } = require("./lib/worker");
 const { AnprListener } = require("./lib/anprListener");
 const { ReaderListener } = require("./lib/readerListener");
 const { PreviewRelay, normalize: normalizePreview } = require("./lib/previewRelay");
+const { checkServerUrl } = require("./lib/api");
 const log = require("./lib/log").make("agent");
 
 const loadConfig = (file) => {
@@ -19,6 +20,7 @@ const loadConfig = (file) => {
   }
   const config = JSON.parse(fs.readFileSync(full, "utf8"));
   if (!config.serverUrl) throw new Error("config.json needs serverUrl");
+  checkServerUrl(config.serverUrl);
   if (!Array.isArray(config.devices) || !config.devices.length) throw new Error("config.json needs at least one device");
   config.devices.forEach((device, i) => {
     if (!device.name || !device.type) throw new Error(`devices[${i}] needs a name and a type`);
@@ -38,7 +40,7 @@ const build = (config) => {
   const parts = [];
   for (const device of config.devices) {
     // A camera with a "preview" block gets its live picture served by this agent (see lib/previewRelay.js).
-    const relay = device.type === "ANPR_CAMERA" && device.preview ? new PreviewRelay({ device, options: device.preview }) : null;
+    const relay = device.type === "ANPR_CAMERA" && device.preview ? new PreviewRelay({ device, options: { previewOrigins: config.previewOrigins, ...device.preview } }) : null;
     parts.push(new DeviceWorker({
       serverUrl: config.serverUrl, device, pollMs: config.pollMs, heartbeatMs: config.heartbeatMs, instant: config.instantWake !== false,
       ...(relay ? { previewUrl: relay.url } : {}),

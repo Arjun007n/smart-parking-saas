@@ -20,6 +20,7 @@ const Vehicle = require("../models/Vehicle");
 const Pass = require("../models/Pass");
 const { ROLES } = require("../config/permissions");
 const { localDateText, utcOffsetMinutes, MINUTE } = require("../utils/time");
+const caps = require("../utils/messageCaps");
 
 const ALERT_LEVELS = ["OFF", "CRITICAL", "IMPORTANT", "ALL"];
 const DEFAULT_ALERT_LEVEL = "CRITICAL";
@@ -41,7 +42,8 @@ const duration = (minutes) => {
   const m = total % 60;
   return h ? `${h}h ${m}m` : `${m}m`;
 };
-const where = (companyName, locationName) => [companyName, locationName].filter(Boolean).join(", ");
+// Names are written by company admins: no links or control characters, and a length limit (see messageCaps.safeName).
+const where = (companyName, locationName) => [caps.safeName(companyName), caps.safeName(locationName)].filter(Boolean).join(", ");
 const clean = (value) => String(value === undefined || value === null ? "" : value).replace(/\s+/g, " ").trim();
 
 const renderAlert = ({ notification, companyName, locationName }) =>
@@ -176,6 +178,11 @@ const sendVisitNotice = ({ session, kind }) => {
 const sendPassNotice = ({ pass, kind, daysLeft }) => {
   if (!messaging.isEnabled() || !pass || !messaging.isPhone(pass.phone)) return null;
   return background(async () => {
+    // Daily limits per company and per number; when one is reached the notice is skipped (the sale is not affected).
+    if (!caps.allowPassNotice(pass.companyId, "sms", messaging.normalizePhone(pass.phone))) {
+      console.error(`Pass message skipped for company ${pass.companyId}: daily limit of pass messages reached`);
+      return;
+    }
     const names = await namesOf(pass.companyId, pass.locationIds && pass.locationIds.length === 1 ? pass.locationIds[0] : null);
     await messaging.send({
       to: pass.phone, body: renderPass({ kind, pass, ...names, daysLeft }),
@@ -184,9 +191,12 @@ const sendPassNotice = ({ pass, kind, daysLeft }) => {
   }, "Pass message");
 };
 
-const sendBookingNotice = ({ booking }) => {
+// publicPage: the booking was made on the public page (no login), so the number is limited to a few
+// messages a day and an optional country list (ALLOWED_SMS_COUNTRIES); when refused, no message is sent.
+const sendBookingNotice = ({ booking, publicPage = false }) => {
   if (!messaging.isEnabled() || !booking || !messaging.isPhone(booking.phone)) return null;
   return background(async () => {
+    if (publicPage && !caps.allowBookingSms(messaging.normalizePhone(booking.phone))) return;
     const names = await namesOf(booking.companyId, booking.locationId);
     await messaging.send({ to: booking.phone, body: renderBooking({ booking, ...names }), key: `booking:${booking._id}` });
   }, "Booking message");

@@ -24,7 +24,8 @@ const anprDetectionSchema = new mongoose.Schema(
     plate: { type: String, default: "" }, // cleaned up; empty = nothing could be read
     confidence: { type: Number, min: 0, max: 1 }, // 0..1
     capturedAt: { type: Date, default: Date.now },
-    imageUrl: { type: String, maxlength: 500 },
+    // Only a plain http(s) address is kept (it is shown to operators as a link); anything else is dropped.
+    imageUrl: { type: String, maxlength: 500, set: (v) => (typeof v === "string" && /^https?:\/\/\S+$/i.test(v.trim()) ? v.trim() : undefined) },
     deviceEventId: String, // the camera's own id for this event, if it has one
     // RFID / FASTAG readers: the tag that was read, and the pass it belongs to (RFID).
     tagId: { type: String, maxlength: 48 },

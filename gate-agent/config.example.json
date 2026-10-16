@@ -3,6 +3,8 @@
   "pollMs": 2000,
   "heartbeatMs": 15000,
   "instantWake": true,
+  "_note_listener": "Cameras / readers with \"driver\": \"listener\" listen on 127.0.0.1 only. If the camera is on another machine add to that device: \"options\": { \"bind\": \"0.0.0.0\", \"secret\": \"<long random text>\" } (the agent refuses a non-local bind without a secret; the camera sends it in the x-agent-secret header or as ?secret=). Remove this _note line if you like.",
+  "_note_serverUrl": "serverUrl must be https:// (plain http only for localhost / a private LAN address, or set GATE_AGENT_ALLOW_HTTP=1).",
   "devices": [
     {
       "name": "Gate 1 barrier",

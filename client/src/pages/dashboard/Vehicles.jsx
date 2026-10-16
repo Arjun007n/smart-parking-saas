@@ -164,7 +164,7 @@ export default function Vehicles() {
           <PageLoader />
         ) : data && data.vehicles.length > 0 ? (
           <>
-            <div className="overflow-x-auto">
+            <div className="relative overflow-x-auto">
               <table className="w-full min-w-[640px] text-left text-sm">
                 <thead className="text-slate-500">
                   <tr>

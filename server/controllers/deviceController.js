@@ -7,6 +7,7 @@ const anpr = require("../services/anprService");
 const { publish, EVENTS } = require("../services/eventBus");
 const storage = require("../services/photoStorage");
 const { MAX_PHOTOS } = require("../services/photoService");
+const { isSafePreviewUrl } = require("../integrations/anpr");
 const ParkingSession = require("../models/ParkingSession");
 const HardwareCommand = require("../models/HardwareCommand");
 const Hardware = require("../models/Hardware");
@@ -16,14 +17,43 @@ const POLL_MS = 2000;
 // POST /api/device/heartbeat
 // "I am alive." Authenticating already recorded it; the answer tells the
 // device who it is and how often to ask for work.
-const PREVIEW_URL = /^https?:\/\/\S{1,290}$/;
+
+// A small token bucket per device (in memory, one server): DEVICE_MAX_PER_MIN requests a minute (default 120), with
+// a short burst allowed. A compromised or runaway device key then cannot flood the database. Answers 429.
+const makeQuota = (perMinute, now = () => Date.now()) => {
+  const buckets = new Map(); // deviceId -> { tokens, at }
+  const sweep = setInterval(() => {
+    const t = now();
+    for (const [id, b] of buckets) if (t - b.at > 5 * 60 * 1000) buckets.delete(id);
+  }, 5 * 60 * 1000);
+  sweep.unref();
+  const take = (id) => {
+    const t = now();
+    const b = buckets.get(id) || { tokens: perMinute, at: t };
+    b.tokens = Math.min(perMinute, b.tokens + ((t - b.at) / 60000) * perMinute);
+    b.at = t;
+    const ok = b.tokens >= 1;
+    if (ok) b.tokens -= 1;
+    buckets.set(id, b);
+    return ok ? 0 : Math.max(1, Math.ceil((1 - b.tokens) * (60 / perMinute)));
+  };
+  const middleware = (req, res, next) => {
+    const wait = req.device ? take(String(req.device._id)) : 0;
+    if (!wait) return next();
+    res.set("Retry-After", String(wait));
+    return next(new AppError("This device is sending too many requests. Please slow down.", 429));
+  };
+  middleware.take = take;
+  return middleware;
+};
+const quota = makeQuota(Math.max(10, Number(process.env.DEVICE_MAX_PER_MIN) || 120));
 
 const heartbeat = async (req, res) => {
   const device = req.device;
   // An ANPR camera (or the gate agent for it) may tell where its live picture is, so the Entry and Exit screens find
-  // it without anyone pasting the address. Only the camera's own key can set it, and only http(s).
+  // it without anyone pasting the address. Only the camera's own key can set it, and only an https address or one on the local network.
   const url = req.body && req.body.previewUrl;
-  if (device.type === "ANPR_CAMERA" && typeof url === "string" && PREVIEW_URL.test(url) && (device.config || {}).previewUrl !== url) {
+  if (device.type === "ANPR_CAMERA" && isSafePreviewUrl(url) && (device.config || {}).previewUrl !== url) {
     await Hardware.updateOne({ _id: device._id }, { $set: { "config.previewUrl": url } });
   }
   res.json({
@@ -185,4 +215,4 @@ const uploadSnapshot = async (req, res) => {
   res.status(201).json({ success: true, data: { photo: updated.photos.id(photo._id), repeated: false } });
 };
 
-module.exports = { heartbeat, nextCommands, acknowledge, reportEvent, reportPlate, reportTag, reportFastag, uploadSnapshot, POLL_MS };
+module.exports = { heartbeat, nextCommands, acknowledge, reportEvent, reportPlate, reportTag, reportFastag, uploadSnapshot, POLL_MS, quota, makeQuota };

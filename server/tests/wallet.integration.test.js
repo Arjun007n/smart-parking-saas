@@ -187,6 +187,8 @@ it("shift: a fee paid from a wallet is shown, but is not new money", async () =>
 });
 
 it("exit: not enough balance is refused, the vehicle stays inside and nothing is taken", async () => {
+  // The wallet must be linked to the vehicle for an exit operator to charge it (a supervisor or admin may charge any).
+  assert.equal((await api("PUT", `/api/wallets/${s.w2._id}`, { token: s.a.token, body: { vehicles: ["RJ14WL0003"] } })).status, 200);
   const entry = await enter("RJ14WL0003");
   s.v2 = entry.body.data.session;
   await backdate(s.v2._id, STAY);
@@ -214,10 +216,14 @@ it("exit: another company's wallet, a blocked wallet and a wrong amount are refu
   assert.equal((await quote("RJ14WL0004")).status, 200);
   const other = await Wallet.findOne({ companyId: s.b.company._id });
   assert.equal((await pay({ sessionId: s.v3._id, method: "WALLET", amount: FEE, walletId: String(other._id) })).status, 404);
-  assert.equal((await pay({ sessionId: s.v3._id, method: "WALLET", amount: 1, walletId: s.w1._id })).status, 409, "wrong amount");
+  // RJ14WL0004 is not linked to w1: an exit operator may not charge it; a supervisor or admin may.
+  const unlinked = await pay({ sessionId: s.v3._id, method: "WALLET", amount: FEE, walletId: s.w1._id });
+  assert.equal(unlinked.status, 403, JSON.stringify(unlinked.body));
+  assert.match(unlinked.body.message, /not linked to this vehicle/);
+  assert.equal((await pay({ sessionId: s.v3._id, method: "WALLET", amount: 1, walletId: s.w1._id }, s.a.token)).status, 409, "wrong amount");
 
   await api("PUT", `/api/wallets/${s.w1._id}`, { token: s.a.token, body: { status: "BLOCKED", statusReason: "Suspected misuse" } });
-  const blocked = await pay({ sessionId: s.v3._id, method: "WALLET", amount: FEE, walletId: s.w1._id });
+  const blocked = await pay({ sessionId: s.v3._id, method: "WALLET", amount: FEE, walletId: s.w1._id }, s.a.token);
   assert.equal(blocked.status, 409, JSON.stringify(blocked.body));
   assert.match(blocked.body.message, /blocked/);
   // RJ14WL0002 is linked to w1: while w1 is blocked the exit screen must not offer it.

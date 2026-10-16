@@ -51,14 +51,14 @@ export default function LocationDetail() {
         </div>
       </div>
 
-      <div role="tablist" aria-label="Location sections" className="flex gap-1 border-b border-slate-300">
+      <div role="tablist" aria-label="Location sections" className="flex gap-1 overflow-x-auto border-b border-slate-300">
         {tabs.map((t) => (
           <button
             key={t.key}
             role="tab"
             aria-selected={current === t.key}
             onClick={() => setTab(t.key)}
-            className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${
+            className={`-mb-px whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium ${
               current === t.key
                 ? 'border-blue-600 text-blue-700'
                 : 'border-transparent text-slate-600 hover:text-slate-900'

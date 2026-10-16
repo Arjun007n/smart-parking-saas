@@ -38,7 +38,35 @@ const statusOf = (device, now = new Date()) => {
   return fresh ? "ONLINE" : "OFFLINE";
 };
 
-const withStatus = (device, now = new Date()) => ({ ...device.toJSON(), status: statusOf(device, now) });
+// `reveal`: the caller may manage the location, so it also sees the camera's live-picture address (it carries a
+// secret token) and the device's last IP. Read-only roles get neither. Without the option nothing private is shown.
+const withStatus = (device, now = new Date(), { reveal = false } = {}) => {
+  const out = { ...device.toJSON(), status: statusOf(device, now) };
+  if (!reveal) {
+    delete out.lastIp;
+    if (out.config && typeof out.config === "object") {
+      out.config = { ...out.config };
+      delete out.config.previewUrl;
+    }
+  }
+  return out;
+};
+
+// The server address written into the gate agent's config. PUBLIC_API_URL is used when it is set; otherwise the
+// address the browser used (Host header) is trusted outside production only, because a forged Host header must not
+// decide where a gate agent sends its device key. In production plain http is turned into https unless the server is on
+// this same computer. Returns { url } or { error } (the message is safe to show).
+const isLoopbackName = (host) => /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/i.test(String(host).replace(/:\d{1,5}$/, ""));
+const agentServerUrl = ({ configured, host, protocol, isProduction }) => {
+  const set = String(configured || "").trim().replace(/\/+$/, "");
+  const hostName = String(host || "");
+  let url;
+  if (/^https?:\/\/[\w.\-:]+$/i.test(set)) url = set;
+  else if (isProduction) return { error: "The server's public address is not set (PUBLIC_API_URL), so the gate agent cannot be prepared safely. Ask the administrator to set it." };
+  else url = /^[\w.\-]+(:\d{1,5})?$/.test(hostName) ? `${protocol}://${hostName}` : "http://localhost:5000";
+  if (isProduction && /^http:\/\//i.test(url) && !isLoopbackName(url.replace(/^http:\/\//i, ""))) url = url.replace(/^http:/i, "https:");
+  return { url };
+};
 
 // Records something worth knowing about a device. Never throws.
 const recordEvent = async (device, type, { severity = "info", message, data } = {}) => {
@@ -481,7 +509,7 @@ const sweep = async (now = new Date()) => {
 };
 
 module.exports = {
-  KEY_PREFIX, hashKey, generateDeviceKey, statusOf, withStatus, recordEvent, touchDevice,
+  KEY_PREFIX, hashKey, generateDeviceKey, statusOf, withStatus, agentServerUrl, recordEvent, touchDevice,
   createCommand, claimCommands, completeCommand, pickDevice, devicesAt,
   requestBarrierOpen, requestManualBarrier, requestTicketPrint, requestReceiptPrint, requestSnapshot, afterEntry, afterExit, summaryForSession, sweep,
 };

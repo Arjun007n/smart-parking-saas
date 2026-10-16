@@ -107,7 +107,7 @@ export default function PassReceiptsPanel() {
             <p className="mb-3 text-sm text-slate-600">
               {data.total} receipts · taxable {money(data.totals.taxable)} · tax {money(data.totals.tax)} · <strong>total {money(data.totals.total)}</strong>
             </p>
-            <div className="overflow-x-auto">
+            <div className="relative overflow-x-auto">
               <table className="w-full min-w-[820px] text-left text-sm">
                 <thead className="text-slate-500">
                   <tr>

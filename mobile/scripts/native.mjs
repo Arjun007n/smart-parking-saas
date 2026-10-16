@@ -79,3 +79,25 @@ export const patchNativeManifest = (xml) => {
 // Current Android build tools refuse the old "proguard-android.txt" file name. One of the plugins (the secure storage
 // plugin) still uses it in its own build file, so it is changed to the name the build tools accept.
 export const patchProguard = (source) => source.replaceAll("getDefaultProguardFile('proguard-android.txt')", "getDefaultProguardFile('proguard-android-optimize.txt')");
+
+// Release builds are shrunk and obfuscated by R8 (minifyEnabled true in the release build type). Only the release
+// build type is changed; debug builds (what you run from Android Studio while testing) are not.
+export const patchMinify = (source) => source.replace(/(\brelease\s*\{[^}]*?minifyEnabled\s+)false/, "$1true");
+
+// Keep rules so R8 does not remove or rename what Capacitor finds by name: its own classes, every plugin class and
+// its @PluginMethod methods, and this app's own classes. Added once, marked so running again changes nothing.
+export const PROGUARD_MARK = "# smart-parking: keep rules for R8";
+export const patchProguardRules = (source, appId) => {
+  if (source.includes(PROGUARD_MARK)) return source;
+  const rules = [
+    PROGUARD_MARK,
+    "-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod,SourceFile,LineNumberTable",
+    "-keep class com.getcapacitor.** { *; }",
+    "-keep @com.getcapacitor.annotation.CapacitorPlugin public class * { @com.getcapacitor.annotation.PermissionCallback <methods>; @com.getcapacitor.annotation.ActivityCallback <methods>; @com.getcapacitor.PluginMethod public <methods>; }",
+    `-keep class ${appId}.** { *; }`,
+    "-dontwarn com.google.android.gms.**",
+    "-dontwarn com.google.mlkit.**",
+    "",
+  ].join("\n");
+  return `${source}${source.endsWith("\n") || source === "" ? "" : "\n"}${rules}`;
+};

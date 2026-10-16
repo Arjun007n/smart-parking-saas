@@ -139,7 +139,7 @@ const barrierDevice = { name: "B", key: "hwk_x", type: "BARRIER", driver: "simul
 test("worker: carries out a barrier command once and confirms it", async () => {
   const opened = [];
   const client = fakeClient({ commands: () => [{ id: "c1", type: "BARRIER_OPEN", payload: { pulseMs: 500 } }] });
-  const worker = new DeviceWorker({ serverUrl: "http://x", device: barrierDevice, client });
+  const worker = new DeviceWorker({ serverUrl: "http://localhost:5000", device: barrierDevice, client });
   worker.driver = { open: async (o) => opened.push(o), close: async () => {} };
 
   await worker.pollOnce();
@@ -150,7 +150,7 @@ test("worker: carries out a barrier command once and confirms it", async () => {
 test("worker: a command the server offers again is confirmed, not repeated", async () => {
   let opens = 0;
   const client = fakeClient({ commands: () => [{ id: "c1", type: "BARRIER_OPEN", payload: {} }] });
-  const worker = new DeviceWorker({ serverUrl: "http://x", device: barrierDevice, client });
+  const worker = new DeviceWorker({ serverUrl: "http://localhost:5000", device: barrierDevice, client });
   worker.driver = { open: async () => { opens += 1; }, close: async () => {} };
 
   await worker.pollOnce();
@@ -162,7 +162,7 @@ test("worker: a command the server offers again is confirmed, not repeated", asy
 
 test("worker: a driver failure is reported as failed with the reason", async () => {
   const client = fakeClient({ commands: () => [{ id: "c9", type: "BARRIER_OPEN", payload: {} }] });
-  const worker = new DeviceWorker({ serverUrl: "http://x", device: barrierDevice, client });
+  const worker = new DeviceWorker({ serverUrl: "http://localhost:5000", device: barrierDevice, client });
   worker.driver = { open: async () => { throw new Error("relay board not answering"); } };
   worker.log = quiet;
 
@@ -179,7 +179,7 @@ test("worker: printer prints decoded bytes; unsupported formats fail clearly", a
       { id: "p2", type: "PRINT_RECEIPT", payload: { format: "pdf" } },
     ],
   });
-  const worker = new DeviceWorker({ serverUrl: "http://x", device: { name: "P", key: "hwk_x", type: "PRINTER", driver: "simulated" }, client });
+  const worker = new DeviceWorker({ serverUrl: "http://localhost:5000", device: { name: "P", key: "hwk_x", type: "PRINTER", driver: "simulated" }, client });
   worker.driver = { print: async (buffer, text) => printed.push([buffer.toString(), text]) };
   worker.log = quiet;
 
@@ -196,7 +196,7 @@ test("worker: a lost confirmation is retried and does not stop the loop", async 
     commands: () => [{ id: "c1", type: "BARRIER_OPEN", payload: {} }],
     ackFails: () => failures-- > 0,
   });
-  const worker = new DeviceWorker({ serverUrl: "http://x", device: barrierDevice, client });
+  const worker = new DeviceWorker({ serverUrl: "http://localhost:5000", device: barrierDevice, client });
   worker.log = quiet;
   await worker.pollOnce();
   assert.equal(client.calls.ack.length, 1, "third attempt got through");
@@ -204,7 +204,7 @@ test("worker: a lost confirmation is retried and does not stop the loop", async 
 
 test("worker: cameras take no commands", async () => {
   const worker = new DeviceWorker({
-    serverUrl: "http://x", device: { name: "C", key: "hwk_x", type: "ANPR_CAMERA", driver: "listener" }, client: fakeClient(),
+    serverUrl: "http://localhost:5000", device: { name: "C", key: "hwk_x", type: "ANPR_CAMERA", driver: "listener" }, client: fakeClient(),
   });
   assert.equal(worker.driver, null);
 });
@@ -213,7 +213,7 @@ test("camera listener: forwards a plate, keeps events while the server is down, 
   let down = true;
   const client = fakeClient({ plateFails: () => down });
   const listener = new AnprListener({
-    serverUrl: "http://x", client,
+    serverUrl: "http://localhost:5000", client,
     device: { name: "Cam", key: "hwk_x", type: "ANPR_CAMERA", driver: "listener", options: { port: 0, direction: "ENTRY" } },
   });
   listener.log = quiet;
@@ -241,7 +241,7 @@ test("camera listener: forwards a plate, keeps events while the server is down, 
 
 test("camera listener: optional shared secret", async () => {
   const listener = new AnprListener({
-    serverUrl: "http://x", client: fakeClient(),
+    serverUrl: "http://localhost:5000", client: fakeClient(),
     device: { name: "Cam", key: "hwk_x", type: "ANPR_CAMERA", options: { port: 0, secret: "s3" } },
   });
   listener.log = quiet;
@@ -261,12 +261,12 @@ test("config: placeholder keys and missing parts are refused with a clear messag
   };
   assert.throws(() => loadConfig(path.join(dir, "missing.json")), /Config file not found/);
   assert.throws(() => loadConfig(write({ devices: [] })), /serverUrl/);
-  assert.throws(() => loadConfig(write({ serverUrl: "http://x", devices: [] })), /at least one device/);
+  assert.throws(() => loadConfig(write({ serverUrl: "http://localhost:5000", devices: [] })), /at least one device/);
   assert.throws(
-    () => loadConfig(write({ serverUrl: "http://x", devices: [{ name: "A", type: "BARRIER", key: "hwk_PASTE_THE_KEY" }] })),
+    () => loadConfig(write({ serverUrl: "http://localhost:5000", devices: [{ name: "A", type: "BARRIER", key: "hwk_PASTE_THE_KEY" }] })),
     /no real key/
   );
-  const ok = loadConfig(write({ serverUrl: "http://x", devices: [{ name: "A", type: "BARRIER", key: "hwk_abcdef0123" }] }));
+  const ok = loadConfig(write({ serverUrl: "http://localhost:5000", devices: [{ name: "A", type: "BARRIER", key: "hwk_abcdef0123" }] }));
   assert.equal(ok.devices.length, 1);
 });
 
@@ -325,7 +325,7 @@ test("splitCommand keeps quoted paths with spaces together", () => {
 
 test("worker: a CCTV snapshot command takes a picture, uploads it for that command and confirms", async () => {
   const client = fakeClient({ commands: () => [{ id: "s1", type: "CAPTURE_SNAPSHOT", payload: { kind: "ENTRY", sessionId: "x" } }] });
-  const worker = new DeviceWorker({ serverUrl: "http://x", device: { name: "Cam", key: "hwk_x", type: "CCTV_CAMERA", driver: "simulated" }, client });
+  const worker = new DeviceWorker({ serverUrl: "http://localhost:5000", device: { name: "Cam", key: "hwk_x", type: "CCTV_CAMERA", driver: "simulated" }, client });
   worker.log = quiet;
   worker.driver = { capture: async () => TINY_JPEG };
   await worker.pollOnce();
@@ -337,7 +337,7 @@ test("worker: a CCTV snapshot command takes a picture, uploads it for that comma
 
 test("worker: a snapshot test takes a picture but uploads nothing; failures are reported", async () => {
   const client = fakeClient({ commands: () => [{ id: "t1", type: "SNAPSHOT_TEST", payload: {} }, { id: "t2", type: "CAPTURE_SNAPSHOT", payload: {} }] });
-  const worker = new DeviceWorker({ serverUrl: "http://x", device: { name: "Cam", key: "hwk_x", type: "CCTV_CAMERA" }, client });
+  const worker = new DeviceWorker({ serverUrl: "http://localhost:5000", device: { name: "Cam", key: "hwk_x", type: "CCTV_CAMERA" }, client });
   worker.log = quiet;
   let n = 0;
   worker.driver = { capture: async () => { n += 1; if (n === 2) throw new Error("camera unreachable"); return TINY_JPEG; } };
@@ -347,7 +347,7 @@ test("worker: a snapshot test takes a picture but uploads nothing; failures are 
   assert.deepEqual(client.calls.ack[1], { id: "t2", ok: false, error: "camera unreachable" });
 
   const bad = fakeClient({ commands: () => [{ id: "t3", type: "CAPTURE_SNAPSHOT", payload: {} }] });
-  const w2 = new DeviceWorker({ serverUrl: "http://x", device: { name: "Cam", key: "hwk_x", type: "CCTV_CAMERA" }, client: bad });
+  const w2 = new DeviceWorker({ serverUrl: "http://localhost:5000", device: { name: "Cam", key: "hwk_x", type: "CCTV_CAMERA" }, client: bad });
   w2.log = quiet;
   w2.driver = { capture: async () => Buffer.from("not a picture at all") };
   await w2.pollOnce();
@@ -356,11 +356,11 @@ test("worker: a snapshot test takes a picture but uploads nothing; failures are 
 
 test("worker: readers take no commands, and a printer cannot be asked for a snapshot", async () => {
   for (const type of ["RFID_READER", "FASTAG_READER"]) {
-    const worker = new DeviceWorker({ serverUrl: "http://x", device: { name: "R", key: "hwk_x", type, driver: "listener" }, client: fakeClient() });
+    const worker = new DeviceWorker({ serverUrl: "http://localhost:5000", device: { name: "R", key: "hwk_x", type, driver: "listener" }, client: fakeClient() });
     assert.equal(worker.driver, null);
   }
   const client = fakeClient({ commands: () => [{ id: "x1", type: "CAPTURE_SNAPSHOT", payload: {} }] });
-  const worker = new DeviceWorker({ serverUrl: "http://x", device: { name: "B", key: "hwk_x", type: "BARRIER", driver: "simulated" }, client });
+  const worker = new DeviceWorker({ serverUrl: "http://localhost:5000", device: { name: "B", key: "hwk_x", type: "BARRIER", driver: "simulated" }, client });
   worker.log = quiet;
   await worker.pollOnce();
   assert.equal(client.calls.ack[0].ok, false);
@@ -385,7 +385,7 @@ test("RFID listener: forwards a tag, ignores repeats of the same tag, keeps read
   let down = true;
   const client = fakeClient({ readFails: () => down });
   const listener = new ReaderListener({
-    serverUrl: "http://x", client, kind: "rfid",
+    serverUrl: "http://localhost:5000", client, kind: "rfid",
     device: { name: "Rfid", key: "hwk_x", type: "RFID_READER", driver: "listener", options: { direction: "ENTRY", debounceMs: 60000 } },
   });
   listener.log = quiet;
@@ -413,7 +413,7 @@ test("RFID listener: forwards a tag, ignores repeats of the same tag, keeps read
 test("FASTag listener: secret is checked; lines from a TCP reader arrive as reads", async () => {
   const client = fakeClient();
   const listener = new ReaderListener({
-    serverUrl: "http://x", client, kind: "fastag",
+    serverUrl: "http://localhost:5000", client, kind: "fastag",
     device: { name: "Ft", key: "hwk_x", type: "FASTAG_READER", driver: "listener", options: { secret: "s3", debounceMs: 0 } },
   });
   listener.log = quiet;
@@ -428,7 +428,7 @@ test("FASTag listener: secret is checked; lines from a TCP reader arrive as read
   // A reader that sends one read per line on a TCP port.
   const reads = fakeClient();
   const tcp = new ReaderListener({
-    serverUrl: "http://x", client: reads, kind: "rfid",
+    serverUrl: "http://localhost:5000", client: reads, kind: "rfid",
     device: { name: "Tcp", key: "hwk_x", type: "RFID_READER", driver: "tcp", options: { debounceMs: 0 } },
   });
   tcp.log = quiet;
@@ -443,7 +443,7 @@ test("agent: readers and cameras are accepted in config.json", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-agent-cfg2-"));
   const file = path.join(dir, "c.json");
   fs.writeFileSync(file, JSON.stringify({
-    serverUrl: "http://x",
+    serverUrl: "http://localhost:5000",
     devices: [
       { name: "R", type: "RFID_READER", key: "hwk_abcdef0123", driver: "simulated" },
       { name: "F", type: "FASTAG_READER", key: "hwk_abcdef0124", driver: "simulated" },

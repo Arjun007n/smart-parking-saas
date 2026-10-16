@@ -87,7 +87,7 @@ export default function PassCompaniesPanel() {
           {list.data.companies.length === 0 ? (
             <p className="text-sm text-slate-500">No companies yet. Add one, then choose it when you sell a pass.</p>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="relative overflow-x-auto">
               <table className="w-full min-w-[760px] text-left text-sm">
                 <thead className="text-slate-500">
                   <tr>

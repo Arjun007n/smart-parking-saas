@@ -1,5 +1,6 @@
 const AppError = require("../utils/AppError");
-const { ROLES } = require("../config/permissions");
+const { ROLES, PERMISSIONS: P } = require("../config/permissions");
+const { can } = require("../middleware/permission");
 const audit = require("../services/auditService");
 const reports = require("../services/dailyReportService");
 const email = require("../integrations/email");
@@ -10,6 +11,18 @@ const User = require("../models/User");
 const { VEHICLE_KEYS } = require("../models/constants");
 
 const isSuperAdmin = (req) => req.user.role === ROLES.SUPER_ADMIN;
+
+// People without company-management rights (operators, viewers...) get the company's name, code, plan and status
+// only; billing contact, tax numbers, address and report recipients stay with those who manage the company.
+const REDUCED_FIELDS = [
+  "_id", "name", "code", "logoUrl", "isActive", "subscriptionStatus", "plan", "trialEndsAt", "subscription",
+  "onboarding", "passGstPercent", "createdAt", "updatedAt",
+];
+const view = (req, company) => {
+  if (can(req, P.COMPANY_MANAGE) || can(req, P.PLATFORM_MANAGE)) return company;
+  const full = company.toJSON();
+  return Object.fromEntries(REDUCED_FIELDS.filter((key) => full[key] !== undefined).map((key) => [key, full[key]]));
+};
 
 // A company can be read by its own users and by Super Admin only.
 const findAccessible = async (req) => {
@@ -25,12 +38,12 @@ const findAccessible = async (req) => {
 const listCompanies = async (req, res) => {
   const filter = isSuperAdmin(req) ? {} : { _id: req.user.companyId };
   const companies = await Company.find(filter).sort({ createdAt: -1 }).limit(500);
-  res.json({ success: true, data: companies });
+  res.json({ success: true, data: companies.map((c) => view(req, c)) });
 };
 
 // GET /api/companies/:id
 const getCompany = async (req, res) => {
-  res.json({ success: true, data: await findAccessible(req) });
+  res.json({ success: true, data: view(req, await findAccessible(req)) });
 };
 
 // POST /api/companies  (Super Admin)

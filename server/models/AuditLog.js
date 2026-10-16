@@ -28,6 +28,9 @@ const blockChange = function blockChange() {
   "updateOne", "updateMany", "findOneAndUpdate", "replaceOne", "findOneAndReplace",
   "deleteOne", "deleteMany", "findOneAndDelete",
 ].forEach((op) => auditLogSchema.pre(op, blockChange));
+// The same for a document's own deleteOne() and for bulk writes, which skip the query hooks above.
+auditLogSchema.pre("deleteOne", { document: true, query: false }, blockChange);
+auditLogSchema.pre("bulkWrite", blockChange);
 auditLogSchema.pre("save", function onlyNew() {
   if (!this.isNew) blockChange();
 });

@@ -4,7 +4,9 @@ const audit = require("../services/auditService");
 const wallets = require("../services/walletService");
 const { parsePlate, escapeRegex } = require("../utils/plate");
 const { getAccessibleLocation } = require("../utils/scope");
-const { isCompanyWide } = require("../config/permissions");
+const { isCompanyWide, PERMISSIONS: P } = require("../config/permissions");
+const { can } = require("../middleware/permission");
+const { maskPhone } = require("./vehicleController");
 const Wallet = require("../models/Wallet");
 const WalletTxn = require("../models/WalletTxn");
 const Shift = require("../models/Shift");
@@ -18,7 +20,12 @@ const findInScope = async (req) => {
   return wallet;
 };
 
-const view = (wallet) => ({ ...wallet.toJSON(), low: wallets.isLow(wallet) });
+// The holder's phone is shown in full to people who manage wallets or see reports; counter staff see the last digits.
+const view = (wallet, req) => {
+  const out = { ...wallet.toJSON(), low: wallets.isLow(wallet) };
+  if (req && out.phone && !can(req, P.WALLET_MANAGE) && !can(req, P.REPORT_VIEW)) out.phone = maskPhone(out.phone);
+  return out;
+};
 
 // GET /api/wallets?q=&status=&low=&page=
 const listWallets = async (req, res) => {
@@ -36,7 +43,7 @@ const listWallets = async (req, res) => {
     Wallet.find(filter).sort({ createdAt: -1 }).skip((page - 1) * PAGE_SIZE).limit(PAGE_SIZE),
     Wallet.countDocuments(filter),
   ]);
-  res.json({ success: true, data: { wallets: items.map(view), total, page, pageSize: PAGE_SIZE } });
+  res.json({ success: true, data: { wallets: items.map((w) => view(w, req)), total, page, pageSize: PAGE_SIZE } });
 };
 
 // GET /api/wallets/lookup?number= | plate= | phone=
@@ -50,7 +57,7 @@ const lookupWallet = async (req, res) => {
 const getWallet = async (req, res) => {
   const wallet = await findInScope(req);
   const recent = await WalletTxn.find({ walletId: wallet._id }).sort({ createdAt: -1 }).limit(PAGE_SIZE).populate("by", "name");
-  res.json({ success: true, data: { wallet: view(wallet), transactions: recent } });
+  res.json({ success: true, data: { wallet: view(wallet, req), transactions: recent } });
 };
 
 // GET /api/wallets/:id/transactions?page=
@@ -71,7 +78,7 @@ const createWallet = async (req, res) => {
     companyId: req.companyId, holderName, phone, vehicles, notes, lowBalanceAlert, createdBy: req.user._id,
   });
   await audit.record(req, "WALLET_CREATE", { entity: "Wallet", entityId: wallet._id, companyId: wallet.companyId, meta: { number: wallet.number } });
-  res.status(201).json({ success: true, data: view(wallet) });
+  res.status(201).json({ success: true, data: view(wallet, req) });
 };
 
 // PUT /api/wallets/:id   (details, vehicles, block / unblock)
@@ -94,7 +101,7 @@ const updateWallet = async (req, res) => {
     entity: "Wallet", entityId: wallet._id, companyId: wallet.companyId,
     meta: { number: wallet.number, changed: Object.keys(req.body) },
   });
-  res.json({ success: true, data: view(wallet) });
+  res.json({ success: true, data: view(wallet, req) });
 };
 
 // POST /api/wallets/:id/topup   (whoever collects payments)
@@ -105,6 +112,15 @@ const topUp = async (req, res) => {
   if (method === "CASH" && reference) throw new AppError("Cash has no payment reference", 400);
   const location = await getAccessibleLocation(req, locationId, { mustBeActive: true });
   if (String(location.companyId) !== String(wallet.companyId)) throw new AppError("Wallet not found", 404);
+  // A UPI or card reference can fund one top-up only (the same request sent again is fine).
+  if (method !== "CASH" && reference) {
+    const ref = String(reference).trim();
+    const sameRequestKey = requestId ? `topup:${wallet._id}:${requestId}` : null;
+    const used = await WalletTxn.exists({
+      companyId: wallet.companyId, type: "TOPUP", reference: ref, ...(sameRequestKey ? { idempotencyKey: { $ne: sameRequestKey } } : {}),
+    });
+    if (used) throw new AppError("This payment reference was already used for a top-up", 409);
+  }
   const shift = await Shift.findOne({ operatorId: req.user._id, locationId: location._id, status: "OPEN" });
 
   const result = await wallets.topUp({
@@ -116,7 +132,7 @@ const topUp = async (req, res) => {
       meta: { number: wallet.number, amount, method, locationId: location._id },
     });
   }
-  res.status(result.repeated ? 200 : 201).json({ success: true, data: { wallet: view(result.wallet), transaction: result.txn, repeated: result.repeated } });
+  res.status(result.repeated ? 200 : 201).json({ success: true, data: { wallet: view(result.wallet, req), transaction: result.txn, repeated: result.repeated } });
 };
 
 // POST /api/wallets/:id/adjust   (company admin; a correction needs a reason)
@@ -133,7 +149,7 @@ const adjust = async (req, res) => {
       meta: { number: wallet.number, amount, reason },
     });
   }
-  res.json({ success: true, data: { wallet: view(result.wallet), transaction: result.txn, repeated: result.repeated } });
+  res.json({ success: true, data: { wallet: view(result.wallet, req), transaction: result.txn, repeated: result.repeated } });
 };
 
 // GET /api/wallets/:id/verify   (admins) does the balance match the ledger?

@@ -52,7 +52,7 @@ const none = {
 const simulated = {
   name: "simulated",
   simulated: true,
-  isConfigured: () => process.env.NODE_ENV !== "production",
+  isConfigured: () => require("../../config/env").isDevLike,
   problems: () => [],
   // Tag ids that end in U answer "unknown" at first and are confirmed a few seconds later
   // (FASTAG_SIM_DELAY_MS, default 5000), however often the app asks in between.
@@ -84,7 +84,7 @@ const http = {
     const out = [];
     if (!/^https?:\/\//i.test(baseUrl())) out.push("FASTAG_API_URL must be an http(s) address");
     if (!process.env.FASTAG_API_KEY) out.push("FASTAG_API_KEY is missing");
-    if (process.env.NODE_ENV === "production" && baseUrl().startsWith("http://")) out.push("FASTAG_API_URL must be https in production");
+    if (require("../../config/env").isProduction && baseUrl().startsWith("http://")) out.push("FASTAG_API_URL must be https in production");
     return out;
   },
   async call(method, path, body) {

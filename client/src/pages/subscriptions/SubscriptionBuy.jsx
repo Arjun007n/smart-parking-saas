@@ -81,7 +81,7 @@ export default function SubscriptionBuy() {
       <p className="text-sm font-semibold text-slate-700">{location.data.location.name}</p>
       {!c.ready && <Alert type="info">Buying online is not available yet: {c.notReady.join('; ')}. Please contact support.</Alert>}
 
-      <div className="grid gap-5 lg:grid-cols-[1fr_380px]">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_380px]">
         <div className="space-y-5">
           <Card title="Build Your Parking Subscription">
             <p className="mb-4 text-sm text-slate-600">Personalize your plan by selecting duration, users, and additional features.</p>

@@ -74,7 +74,10 @@ it("exit amount edit: needs the switch, a reason, and is recorded", async () => 
   const original = calc.body.data.session.fee.total;
   assert.ok(original > 20, `tariff fee ${original}`);
 
-  const edited = await startExit(s.exit, ticket, { editedAmount: 20, editReason: "Regular customer" });
+  // Charging less than the calculated fee needs a supervisor or admin; the exit operator may only raise it.
+  const operatorCut = await startExit(s.exit, ticket, { editedAmount: 20, editReason: "Regular customer" });
+  assert.equal(operatorCut.status, 403, JSON.stringify(operatorCut.body));
+  const edited = await startExit(s.super, ticket, { editedAmount: 20, editReason: "Regular customer" });
   assert.equal(edited.status, 200, JSON.stringify(edited.body));
   assert.equal(edited.body.data.session.fee.total, 20);
   assert.equal(edited.body.data.session.feeEdit.calculated, original);
@@ -94,7 +97,7 @@ it("exit amount edit: needs the switch, a reason, and is recorded", async () => 
   // A calculation without a change clears an earlier one.
   const e2 = await enter(s.entry, "RJ14EDIT02");
   await backdate(e2.body.data.session._id, 90);
-  await startExit(s.exit, e2.body.data.session.ticketNumber, { editedAmount: 10, editReason: "Regular customer" });
+  await startExit(s.super, e2.body.data.session.ticketNumber, { editedAmount: 10, editReason: "Regular customer" });
   const again = await startExit(s.exit, e2.body.data.session.ticketNumber);
   assert.equal(again.body.data.session.feeEdit.reason, null);
   assert.equal(again.body.data.session.fee.total, original);
@@ -123,9 +126,9 @@ it("reprints are counted on the ticket and in the audit log", async () => {
   assert.equal((await api("POST", `/api/parking/sessions/${id}/reprint`, {})).status, 401);
 });
 
-it("re-entry and reprint have no limit; the admin sees the count per operator on the dashboard and in the reports", async () => {
+it("re-entry (within the grace time) and reprint have no daily limit; the admin sees the count per operator on the dashboard and in the reports", async () => {
   const reenter = () => api("POST", `/api/parking/sessions/${s.reentered._id}/re-entry`, { token: s.entry, body: {} });
-  // No daily limit, no age window: nothing stops the operator.
+  // No daily limit: the operator may repeat it while the ticket is young.
   for (let i = 0; i < 3; i += 1) {
     const ok = await reenter();
     assert.equal(ok.status, 201, JSON.stringify(ok.body));

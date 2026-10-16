@@ -47,6 +47,11 @@ const planOrderSchema = new mongoose.Schema(
     periodStart: Date,
     periodEnd: Date,
     invoiceId: { type: mongoose.Schema.Types.ObjectId, ref: "Invoice" },
+    // UPDATE orders: the subscription's end date when the order was quoted. An update is priced for the rest of
+    // that period, so if the period has changed by the time it is paid (a renewal), it is not applied.
+    quotedPeriodEnd: Date,
+    // Paid, but not applied because the subscription changed since the quote (the money is to be refunded).
+    superseded: Boolean,
   },
   { timestamps: true }
 );

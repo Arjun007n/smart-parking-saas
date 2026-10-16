@@ -34,4 +34,10 @@ const purgeExpired = async (now = new Date()) => {
   return { removed };
 };
 
-module.exports = { MAX_PHOTOS, maxBytes, retentionDays, purgeExpired };
+// The per-company storage limit lives in photoStorage.save (every upload path goes through it).
+const { companyCapBytes, companyUsage, assertCompanyPhotoRoom, clearUsageCache } = storage;
+
+module.exports = {
+  MAX_PHOTOS, maxBytes, retentionDays, purgeExpired,
+  companyCapBytes, companyUsage, assertCompanyPhotoRoom, clearUsageCache,
+};

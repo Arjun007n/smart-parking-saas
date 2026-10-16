@@ -28,6 +28,7 @@ const AddonPrice = require("../models/AddonPrice");
 const Invoice = require("../models/Invoice");
 
 const OPEN = ["PENDING", "FAILED", "CANCELLED"];
+const SYSTEM_REQ = Object.freeze({ headers: {}, ip: "system" });
 const linkHours = () => Math.min(72, Math.max(1, Number(process.env.BILLING_LINK_HOURS) || 24));
 const billing = () => require("./billingService"); // loaded when used: billingService calls back into this file
 
@@ -208,6 +209,16 @@ const companyAllows = (company, now) => {
   return false;
 };
 
+// What the old company-wide paid plan (POST /api/billing/checkout) includes: the users, and none of the paid add-ons
+// (those are bought per location under Manage Subscriptions). Orders made before this rule carry no `addons`; a
+// company with such a paid order keeps every add-on, exactly as before. Returns null for "every add-on".
+const legacyPlanAddons = async (companyId) => {
+  const paid = { companyId, locationId: { $exists: false }, status: "PAID" };
+  if (await PlanOrder.exists({ ...paid, addons: { $exists: false } })) return null;
+  if (await PlanOrder.exists(paid)) return { ...NOTHING };
+  return null;
+};
+
 // { state: ACTIVE | ENDED | NONE, addons, users, source }
 const entitlement = async (companyId, locationId, now = new Date()) => {
   const all = await running(companyId, locationId, now);
@@ -220,7 +231,10 @@ const entitlement = async (companyId, locationId, now = new Date()) => {
   if (await Subscription.exists({ companyId, locationId })) return { state: "ENDED", addons: { ...NOTHING }, users: 0, source: "SUBSCRIPTION" };
   if (await Subscription.exists({ companyId, legacy: false })) return { state: "NONE", addons: { ...NOTHING }, users: 0, source: "NONE" };
   const company = await Company.findById(companyId).select("subscriptionStatus trialEndsAt subscription").lean();
-  if (companyAllows(company, now)) return { state: "ACTIVE", addons: { ...EVERYTHING }, users: 0, source: "COMPANY" };
+  if (companyAllows(company, now)) {
+    const limited = company.subscriptionStatus === "ACTIVE" ? await legacyPlanAddons(companyId) : null;
+    return { state: "ACTIVE", addons: limited || { ...EVERYTHING }, users: 0, source: "COMPANY" };
+  }
   return { state: "ENDED", addons: { ...NOTHING }, users: 0, source: "COMPANY" };
 };
 
@@ -284,6 +298,9 @@ const grandfather = async (company, now = new Date()) => {
   }
   if (end <= now) return 0;
   const locations = await Location.find({ companyId: company._id }).select("name userLicence").lean();
+  // The trial has every add-on; a paid company-wide plan only what it includes (see legacyPlanAddons).
+  const included = company.subscriptionStatus === "ACTIVE" ? await legacyPlanAddons(company._id) : null;
+  const addons = included || { pass: true, photo: true, anpr: 1000, fastag: 1000, gateway: true, dataBackup: 12, photoBackup: 12 };
   let made = 0;
   for (const location of locations) {
     if (await Subscription.exists({ companyId: company._id, locationId: location._id })) continue;
@@ -291,7 +308,7 @@ const grandfather = async (company, now = new Date()) => {
     await createSub(company, {
       locationId: location._id, planName, users: limit || 0, months: company.subscription && company.subscription.months ? company.subscription.months : 0,
       periodStart: start, periodEnd: end, legacy: true,
-      addons: { pass: true, photo: true, anpr: 1000, fastag: 1000, gateway: true, dataBackup: 12, photoBackup: 12 },
+      addons: { ...addons },
     });
     made += 1;
   }
@@ -341,6 +358,7 @@ const startOrder = async ({ company, user, location, kind, subscription, quote, 
   const same = await PlanOrder.findOne({
     companyId: company._id, locationId: location._id, kind, subscriptionId: subscription ? subscription._id : { $exists: false },
     status: "PENDING", total: quote.total, months: quote.months, payUrl: { $exists: true }, expiresAt: { $gt: new Date() },
+    ...(kind === "UPDATE" && subscription ? { quotedPeriodEnd: subscription.periodEnd } : {}),
   });
   if (same && JSON.stringify(same.addons || null) === JSON.stringify(quote.addons || null)) return { order: same, repeated: true };
 
@@ -350,6 +368,7 @@ const startOrder = async ({ company, user, location, kind, subscription, quote, 
     orderNumber: orderNumber(), users: quote.users, months: kind === "UPDATE" ? 0 : quote.months,
     subtotal: quote.subtotal, discount: quote.discount, discountPercent: quote.discountPercent, gross: quote.gross, gst: quote.gst, total: quote.total,
     lines: quote.lines, addons: kind === "UPDATE" ? { ...quote.extra, resulting: quote.addons } : quote.addons,
+    ...(kind === "UPDATE" && subscription ? { quotedPeriodEnd: subscription.periodEnd } : {}),
     buyerState: buyer.state, buyerStateCode: buyer.stateCode,
   });
   const expiresAt = new Date(Date.now() + linkHours() * 3600 * 1000);
@@ -406,8 +425,42 @@ const refreshCompany = async (companyId, now = new Date()) => {
 // The seats of a location follow its subscription's users.
 const setLicence = (locationId, users) => Location.updateOne({ _id: locationId }, { $set: { "userLicence.limit": users } });
 
-// Applies a paid order to the location's subscription. Safe to repeat.
-const applyOrder = async (order, company) => {
+// An UPDATE order is priced for the rest of the period it was quoted in. True when it was paid after that period
+// changed (a renewal moved the end date), so its absolute add-on numbers must not be applied.
+const isStaleUpdate = (order, sub) => {
+  if (!order || order.kind !== "UPDATE" || !order.quotedPeriodEnd || !sub) return false;
+  const applied = (sub.appliedOrders || []).some((id) => String(id) === String(order._id));
+  return !applied && new Date(order.quotedPeriodEnd).getTime() !== new Date(sub.periodEnd).getTime();
+};
+
+// Marks a paid order as not applied and tells the admins, so the money can be refunded in the gateway.
+const supersedeOrder = async (order, req) => {
+  const why = "The subscription was renewed or changed after this update was quoted, so it was not applied.";
+  const marked = await PlanOrder.updateOne({ _id: order._id, superseded: { $ne: true } }, { $set: { superseded: true, failureReason: why } });
+  if (marked.modifiedCount > 0) {
+    await audit.record(req, "SUBSCRIPTION_ORDER_SUPERSEDED", { entity: "PlanOrder", entityId: order._id, companyId: order.companyId, meta: { orderNumber: order.orderNumber, total: order.total } });
+  }
+  await notify({
+    companyId: order.companyId, locationId: order.locationId, type: "PAYMENT_ISSUE", severity: "critical",
+    title: "A subscription update was paid but not applied",
+    message: `Order ${order.orderNumber} was paid after the subscription was renewed, so the update was not applied. Make a new update, and ask support to refund order ${order.orderNumber}.`,
+    dedupeKey: `plan-superseded:${order._id}`,
+  });
+};
+
+// A renewal is applied: payment links for updates quoted in the old period are closed.
+const cancelOpenUpdates = async (subscriptionId) => {
+  const open = await PlanOrder.find({ subscriptionId, kind: "UPDATE", status: "PENDING" });
+  for (const old of open) {
+    await PlanOrder.updateOne({ _id: old._id, status: "PENDING" }, { $set: { status: "CANCELLED", failureReason: "The subscription was renewed. Make a new update." } });
+    const owner = gateway.PROVIDERS[old.provider];
+    if (owner && owner.cancel && old.gatewayRef) owner.cancel(old).catch(() => {});
+  }
+};
+
+// Applies a paid order to the location's subscription. Safe to repeat. Returns { superseded: true } when an UPDATE
+// order was not applied because the subscription's period changed since the quote.
+const applyOrder = async (order, company, req = SYSTEM_REQ) => {
   if (order.kind === "PURCHASE") {
     await grandfather(company);
     let sub = await Subscription.findOne({ createdByOrderId: order._id });
@@ -429,9 +482,15 @@ const applyOrder = async (order, company) => {
       const set = { periodEnd: order.periodEnd, months: order.months };
       // A subscription that had already ended starts again at the order's first day.
       if (order.periodStart > sub.periodEnd) set.periodStart = order.periodStart;
-      await Subscription.updateOne({ _id: sub._id, appliedOrders: { $ne: order._id } }, { $set: set, $push: { appliedOrders: order._id } });
+      const renewed = await Subscription.updateOne({ _id: sub._id, appliedOrders: { $ne: order._id } }, { $set: set, $push: { appliedOrders: order._id } });
+      if (renewed.modifiedCount > 0) await cancelOpenUpdates(sub._id);
     }
   } else if (order.kind === "UPDATE") {
+    const current = await Subscription.findById(order.subscriptionId).select("+appliedOrders periodEnd").lean();
+    if (isStaleUpdate(order, current)) {
+      await supersedeOrder(order, req);
+      return { superseded: true };
+    }
     const result = (order.addons && order.addons.resulting) || {};
     const set = { users: order.users };
     for (const key of KEYS) if (result[key] !== undefined) set[`addons.${key}`] = result[key];
@@ -477,7 +536,9 @@ const invoiceFor = async (order, company) => {
 const finalize = async (order, req) => {
   const company = await Company.findById(order.companyId);
   if (!company) return { company: null };
-  await applyOrder(order, company);
+  const applied = await applyOrder(order, company, req);
+  // Paid but not applied (see isStaleUpdate): no invoice for something that was not supplied; the money is refunded.
+  if (applied && applied.superseded) return { company, applied: false };
   const { invoice, created } = await invoiceFor(order, company);
   if (!order.invoiceId || String(order.invoiceId) !== String(invoice._id)) {
     await PlanOrder.updateOne({ _id: order._id }, { $set: { invoiceId: invoice._id } });
@@ -518,5 +579,5 @@ const stateOf = (sub, now = new Date()) => {
 
 module.exports = {
   OPEN, priceList, priceMap, cleanAddons, chargedMonths, rowsFor, totals, quoteNew, quoteRenew, quoteUpdate, daysLeft,
-  entitlement, assertAddon, grandfather, periodForOrder, startOrder, finalize, applyOrder, refreshCompany, cancel, stateOf, running, mergeAddons, companyAllows, createSub,
+  entitlement, assertAddon, grandfather, periodForOrder, startOrder, finalize, applyOrder, refreshCompany, cancel, stateOf, running, mergeAddons, companyAllows, createSub, legacyPlanAddons, isStaleUpdate,
 };

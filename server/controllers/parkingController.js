@@ -24,6 +24,7 @@ const ParkingSession = require("../models/ParkingSession");
 const Vehicle = require("../models/Vehicle");
 const messageService = require("../services/messageService");
 const { resolveOperations, editedFee } = require("../utils/operations");
+const { lowersFee, reEntryNeedsSupervisor, reEntryGraceMinutes } = require("../utils/feeRules");
 const Location = require("../models/Location");
 
 const PAGE_SIZE = 50;
@@ -75,7 +76,14 @@ const createEntry = async (req, res) => {
   // A repeated request (double tap, network retry) returns the first ticket.
   const findRepeat = () => (idempotencyKey ? ParkingSession.findOne({ companyId, idempotencyKey }) : null);
   const repeat = await findRepeat();
-  if (repeat) return res.json({ success: true, data: { session: repeat, repeated: true } });
+  if (repeat) {
+    // The key is only a "same request again" marker. It must belong to this location and this vehicle, otherwise
+    // it is another entry (or a guess) and must not hand back that ticket.
+    if (String(repeat.locationId) !== String(location._id) || repeat.vehicleNumber !== vehicleNumber) {
+      throw new AppError("This request key was already used for a different entry. Try again.", 409);
+    }
+    return res.json({ success: true, data: { session: repeat, repeated: true } });
+  }
 
   if (!location.vehicleTypes.includes(vehicleType)) {
     throw new AppError(`This location does not accept ${vehicleType.toLowerCase()} vehicles`, 400);
@@ -332,6 +340,10 @@ const startExit = async (req, res) => {
     }
     if (!editReason || String(editReason).trim().length < 5) throw new AppError("Give a reason (at least 5 letters) for changing the amount", 400);
     if (passHere) throw new AppError("A pass holder leaves without paying, so there is no amount to change", 409);
+    // Raising the amount is allowed for the exit operator; charging LESS than the calculated fee needs a supervisor or admin.
+    if (lowersFee(editedAmount, calculated.total) && !can(req, P.SESSION_OVERRIDE)) {
+      throw new AppError("Only a supervisor or admin can charge less than the calculated fee", 403);
+    }
     if (Math.abs(editedAmount - calculated.total) > 0.004) {
       fee = editedFee(calculated, editedAmount);
       feeEdit = { calculated: calculated.total, reason: String(editReason).trim().slice(0, 200), by: req.user._id, at: new Date() };
@@ -452,8 +464,8 @@ const cancelSession = async (req, res) => {
 // POST /api/parking/sessions/:id/re-entry   { gate?, vehicleType? }
 // "Re-entry": the vehicle is on the books as inside but is entering again (a misread plate that was
 // corrected, a wrong vehicle type, a car that was turned back at the gate). The old ticket is
-// cancelled and a new one issued in one step. There is no daily limit, no age window and no advance rule
-// (only the location's on/off switch). Every one is recorded against the operator (entryOperatorId, reEntry: true) and shows in the
+// cancelled and a new one issued in one step. There is no daily limit and no advance rule; the location's on/off switch
+// applies, and a ticket older than the grace time (REENTRY_GRACE_MINUTES, default 30) needs SESSION_OVERRIDE. Every one is recorded against the operator (entryOperatorId, reEntry: true) and shows in the
 // admin's Re-entries report. An advance taken on the old ticket is given back, as for any cancelled entry.
 const reEntry = async (req, res) => {
   const session = await findInScope(req);
@@ -461,6 +473,11 @@ const reEntry = async (req, res) => {
   const reEntryLocation = await getAccessibleLocation(req, session.locationId);
   if (!resolveOperations(reEntryLocation.operations).allowReEntry) {
     throw new AppError("Re-entry is switched off for this location. Ask an admin to cancel the ticket and make a new entry.", 403);
+  }
+  // A ticket made a moment ago can be re-entered by the entry operator (a driver who turned around). An older
+  // one needs a supervisor or admin, who hold the "Correct tickets" permission.
+  if (reEntryNeedsSupervisor(session.entryTime) && !can(req, P.SESSION_OVERRIDE)) {
+    throw new AppError(`This ticket is older than ${reEntryGraceMinutes()} minutes. Ask a supervisor or admin to re-enter it.`, 403);
   }
   const key = `reentry-${session._id}`;
   // A double tap returns the ticket the first tap made.
@@ -648,7 +665,7 @@ const assertMayReprint = (req) => {
 const countReprint = async (req, res) => {
   assertMayReprint(req);
   const session = await findInScope(req);
-  const updated = await ParkingSession.findByIdAndUpdate(session._id, { $inc: { reprints: 1 } }, { returnDocument: "after" });
+  const updated = await ParkingSession.findByIdAndUpdate(session._id, { $inc: { reprints: 1 } }, { returnDocument: "after", timestamps: false });
   await recordReprint(req, session, session.isOpen ? "ticket" : "receipt");
   res.json({ success: true, data: { reprints: updated.reprints } });
 };
@@ -666,7 +683,7 @@ const printSlip = async (req, res) => {
         session, receipt: () => buildReceipt(session), requestedBy: req.user._id, ...(gate ? { gate } : {}),
       });
   if (!result) throw new AppError("No single printer is set up for this gate", 404);
-  await ParkingSession.updateOne({ _id: session._id }, { $inc: { reprints: 1 } });
+  await ParkingSession.updateOne({ _id: session._id }, { $inc: { reprints: 1 } }, { timestamps: false });
   await recordReprint(req, session, session.isOpen ? "ticket" : "receipt");
 
   res.status(201).json({

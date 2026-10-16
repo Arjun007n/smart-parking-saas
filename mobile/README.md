@@ -19,6 +19,10 @@ npm install
 copy app.env.example app.env
 ```
 
+**Lock the package versions (once).** There is no `package-lock.json` yet, and `package.json` uses `^` ranges, so two installs can
+give two different versions. After the first `npm install` works, commit the `package-lock.json` it wrote, and from then on
+install with `npm ci` (it installs exactly what the lock file says and fails if it does not match `package.json`).
+
 Open `app.env` and set the server address:
 
 * **Testing, server running on this PC** (`npm run dev` in `server`):
@@ -54,7 +58,8 @@ This builds the website for the app, copies it into the Android project, applies
 | `npm run web` | Builds `../client` into `web/` with `API_URL` built in. The website's own `dist` folder is not touched |
 | `npm run sync` | `web`, then `cap sync android`, then the safe Android settings, then the phone features (Bluetooth printer, QR scanner) |
 | `npm run android` | `sync`, then opens Android Studio |
-| `npm test` | Tests of the helper scripts and the printer code |
+| `npm run check:release` | Stops (exit 1) if the project is still set up for testing. Run it before every release build |
+| `npm test` | Tests of the helper scripts, the printer code, the release check and the token storage |
 
 ## The Bluetooth printer
 
@@ -68,9 +73,14 @@ If nothing prints: the printer must be on, close, and not connected to another p
 
 * The phone may not copy the app's saved data to a cloud backup (`allowBackup=false`).
 * A real app talks only to `https` addresses. Plain `http` is switched on only with `APP_DEV=1`, and the build refuses a plain `http` address without it.
-* The sign-in token is kept in the phone's secure storage (Android Keystore) through `capacitor-secure-storage-plugin`. If that plugin cannot be installed, the app still works and keeps the token in the app's own private storage.
+* The sign-in token is kept in the phone's secure storage (Android Keystore) through `capacitor-secure-storage-plugin`. If secure storage fails in a **release** app, the token is kept in memory only: the person stays signed in until the app is closed, then signs in again (it is never copied to the WebView's `localStorage`). In **test mode** (`APP_DEV=1`) the app's private storage is still used as a fallback so testing keeps working.
+* `res/xml/network_security_config.xml` is written into the Android project and named in the manifest: plain `http` is off, and on only with `APP_DEV=1`. The manifest never sets `android:debuggable`, and the web inspector is on only in test mode.
+* Release builds are shrunk with R8 (`minifyEnabled true` for the release build type only, with keep rules for Capacitor and this app's plugins added to `proguard-rules.pro`). Set `APP_MINIFY=0` when running `npm run sync` to leave it off if a release build misbehaves. Try a release build on a phone before you publish.
+* `npm run web` adds a content security policy to the app's copy of `index.html` in release builds (see `scripts/csp.mjs` and `docs/security.md`); `APP_CSP=0` turns it off. Test mode gets none.
 
 ## Before you publish
+
+**Run `npm run check:release` first**, with `APP_DEV` cleared and the public `https` address in `API_URL`, then `npm run sync`, then generate the signed bundle. The check fails if `APP_DEV=1` is set, `API_URL` is `http` or a private address, or the generated Android project allows plain `http`, backup or debugging (it also warns if the release build is not minified). Never upload a bundle built after a test-mode `sync`: sync again in release mode first.
 
 * **App ID**: `com.smartparking.operator` (in `capacitor.config.js`). It cannot be changed after the app is published. Choose it now.
 * **Target Android version**: Google Play asks for a recent one. Check Play's current requirement and, if needed, raise `targetSdkVersion` and `compileSdkVersion` in `android/variables.gradle`.
@@ -85,5 +95,5 @@ If nothing prints: the printer must be on, close, and not connected to another p
 | The website build fails | Run `npm install` in `../client` once, then try again |
 | The app opens but sign-in says network error | The server is not reachable from the phone: check `API_URL`, that the server runs, and (real phone) that the PC firewall allows port 5000 |
 | Sign-in fails with a CORS message in the log | Add the app's address to `CLIENT_URL` (see above) and restart the server |
-| `npm install` says `capacitor-secure-storage-plugin` does not match Capacitor | Remove that line from `package.json` and run `npm install` again. The app works without it (the token is then in the app's private storage); tell me and I will change the plugin |
+| `npm install` says `capacitor-secure-storage-plugin` does not match Capacitor | Remove that line from `package.json` and run `npm install` again. The app still works without it, but in a release app the token is then kept in memory only (the person signs in again after closing the app); tell me and I will change the plugin |
 | Android Studio asks to update Gradle or the plugin | Accept; Capacitor 8 works with current versions |

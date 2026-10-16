@@ -113,6 +113,7 @@ const checkout = async ({ company, user, users, months, req }) => {
   const price = pricing.planPrice({ users, months });
   const waiting = await PlanOrder.findOne({
     companyId: company._id, locationId: { $exists: false }, status: "PENDING", users, months, total: price.total, payUrl: { $exists: true }, expiresAt: { $gt: new Date() },
+    addons: { $exists: true },
   });
   if (waiting) return { order: waiting, repeated: true };
 
@@ -128,6 +129,9 @@ const checkout = async ({ company, user, users, months, req }) => {
     gross: price.gross,
     gst: price.gst,
     total: price.total,
+    // This plan is priced by users only, so it includes none of the paid add-ons (they are bought per location).
+    // The mark also tells subscriptionService.legacyPlanAddons that this order is not one of the older all-inclusive ones.
+    addons: { pass: false, photo: false, anpr: 0, fastag: 0, gateway: false, dataBackup: 1, photoBackup: 0 },
     buyerState: buyer.state,
     buyerStateCode: buyer.stateCode,
   });
@@ -362,7 +366,7 @@ const settle = async (event, req = SYSTEM_REQ) => {
     return { outcome: "unmatched", order: paid };
   }
   const done = await finalize(paid, req);
-  paid.invoiceId = done.invoice._id; // finalize saved it; the copy we hand back must show it too
+  if (done.invoice) paid.invoiceId = done.invoice._id; // finalize saved it; the copy we hand back must show it too
   return { outcome: "success", order: paid, invoice: done.invoice };
 };
 

@@ -23,6 +23,11 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
 @CapacitorPlugin(name = "PlateReader")
 public class PlateReaderPlugin extends Plugin {
 
+    // The page sends a small cropped JPEG (under 1000 pixels wide). Anything much bigger is refused or shrunk so a
+    // huge picture can never run the phone out of memory.
+    private static final int MAX_BASE64_CHARS = 4 * 1024 * 1024;
+    private static final int MAX_DIMENSION = 2048;
+
     private TextRecognizer recognizer;
 
     @Override
@@ -37,14 +42,34 @@ public class PlateReaderPlugin extends Plugin {
             call.reject("There is no picture to read.", "FAILED");
             return;
         }
+        if (data.length() > MAX_BASE64_CHARS) {
+            call.reject("The picture is too large.", "FAILED");
+            return;
+        }
         int comma = data.indexOf(',');
         if (data.startsWith("data:") && comma >= 0) data = data.substring(comma + 1);
         Bitmap bitmap;
         try {
             byte[] bytes = Base64.decode(data, Base64.DEFAULT);
-            bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+            // Read only the size first, then decode at a reduced size (largest side at most MAX_DIMENSION).
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+                call.reject("The picture could not be opened.", "FAILED");
+                return;
+            }
+            int sample = 1;
+            int longest = Math.max(bounds.outWidth, bounds.outHeight);
+            while ((longest + sample - 1) / sample > MAX_DIMENSION) sample *= 2;
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inSampleSize = sample;
+            bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length, options);
         } catch (IllegalArgumentException e) {
             call.reject("The picture is not valid.", "FAILED");
+            return;
+        } catch (OutOfMemoryError e) {
+            call.reject("The picture is too large.", "FAILED");
             return;
         }
         if (bitmap == null) {

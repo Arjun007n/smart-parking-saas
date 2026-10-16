@@ -9,7 +9,8 @@
     "open": "npx cap open android",
     "android": "npm run sync && npx cap open android",
     "run:android": "npm run sync && npx cap run android",
-    "test": "node --test tests/mobile.test.mjs tests/escpos.test.mjs tests/plate.test.mjs tests/apibase.test.mjs"
+    "check:release": "node scripts/check-release.mjs",
+    "test": "node --test tests/mobile.test.mjs tests/escpos.test.mjs tests/plate.test.mjs tests/apibase.test.mjs tests/release.test.mjs tests/storage.test.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.0.0",

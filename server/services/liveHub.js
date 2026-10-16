@@ -23,8 +23,17 @@ const { subscribe, EVENTS } = require("./eventBus");
 const HEARTBEAT_MS = 25 * 1000;
 const MAX_PER_USER = 6;
 const MAX_TOTAL = Number(process.env.LIVE_MAX_STREAMS) || 500;
+// One company cannot use more than this many screens' streams (the others would be starved), and screens can
+// never take the last DEVICE_RESERVE places, which stay free for gate agents.
+const MAX_PER_COMPANY = Number(process.env.LIVE_MAX_PER_COMPANY) || 60;
+const DEVICE_RESERVE = Math.min(
+  Math.max(0, process.env.LIVE_DEVICE_RESERVE === undefined || process.env.LIVE_DEVICE_RESERVE === "" ? Math.floor(MAX_TOTAL / 5) : Number(process.env.LIVE_DEVICE_RESERVE) || 0),
+  MAX_TOTAL - 1
+);
+// An open stream is checked again this often: is the person still active, and which locations may they see now?
+const RECHECK_MS = Number(process.env.LIVE_RECHECK_MS) || 10 * 60 * 1000;
 
-const people = new Set(); // { res, userId, companyId, locationIds }
+const people = new Set(); // { res, userId, companyId, locationIds, recheck, checkedAt, checking }
 const devices = new Map(); // hardwareId -> { res }
 let timer = null;
 let unsubscribers = [];
@@ -53,10 +62,32 @@ const drop = (client) => {
   }
 };
 
+// Asks each screen's `recheck` (when it has one) whether the person may still listen. false = close the stream;
+// { locationIds } = the places they may see now. A failing check (database down) changes nothing.
+const sweepPeople = async (now = Date.now()) => {
+  for (const client of [...people]) {
+    if (!client.recheck || client.checking || now - client.checkedAt < RECHECK_MS) continue;
+    client.checking = true;
+    client.checkedAt = now;
+    try {
+      const verdict = await client.recheck();
+      if (verdict === false) drop(client);
+      else if (verdict && typeof verdict === "object" && "locationIds" in verdict) {
+        client.locationIds = verdict.locationIds ? verdict.locationIds.map(String) : null;
+      }
+    } catch {
+      // keep the stream; it is checked again next time
+    } finally {
+      client.checking = false;
+    }
+  }
+};
+
 const startTimer = () => {
   if (timer) return;
   timer = setInterval(() => {
     for (const client of [...people]) if (!write(client.res, ": ping\n\n")) drop(client);
+    sweepPeople().catch(() => {});
     for (const [id, entry] of [...devices]) {
       if (!write(entry.res, ": ping\n\n")) {
         devices.delete(id);
@@ -92,8 +123,11 @@ const total = () => people.size + devices.size;
 // locationIds: null = every location of the company; otherwise the ones allowed.
 // companyId: null = every company (a platform admin who has not picked one).
 // Returns the client, or null when the server is full.
-const addPerson = (req, res, { userId, companyId, locationIds }) => {
-  if (total() >= MAX_TOTAL) return null;
+const addPerson = (req, res, { userId, companyId, locationIds, recheck }) => {
+  // Screens may not take the places kept for gate agents.
+  if (total() >= MAX_TOTAL - DEVICE_RESERVE) return null;
+  const company = companyId ? String(companyId) : null;
+  if (company && [...people].filter((c) => c.companyId === company).length >= MAX_PER_COMPANY) return null;
   const mine = [...people].filter((c) => c.userId === String(userId));
   // Someone with too many tabs open loses the oldest stream; the page reconnects by itself.
   while (mine.length >= MAX_PER_USER) drop(mine.shift());
@@ -102,8 +136,11 @@ const addPerson = (req, res, { userId, companyId, locationIds }) => {
   const client = {
     res,
     userId: String(userId),
-    companyId: companyId ? String(companyId) : null,
+    companyId: company,
     locationIds: locationIds ? locationIds.map(String) : null,
+    recheck: typeof recheck === "function" ? recheck : null,
+    checkedAt: Date.now(),
+    checking: false,
   };
   people.add(client);
   write(res, frame("hello", { ok: true }));
@@ -112,8 +149,22 @@ const addPerson = (req, res, { userId, companyId, locationIds }) => {
   return client;
 };
 
+// Closes every screen stream of one person (for example when their account is switched off).
+const closeUser = (userId) => {
+  let closed = 0;
+  for (const client of [...people]) {
+    if (client.userId === String(userId)) {
+      drop(client);
+      closed += 1;
+    }
+  }
+  return closed;
+};
+
 const hears = (client, event) => {
-  if (client.companyId && event.companyId && client.companyId !== String(event.companyId)) return false;
+  // An event that does not say which company it belongs to is heard by nobody (never by everybody).
+  if (!event || !event.companyId) return false;
+  if (client.companyId && client.companyId !== String(event.companyId)) return false;
   if (client.locationIds && event.locationId && !client.locationIds.includes(String(event.locationId))) return false;
   return true;
 };
@@ -217,6 +268,6 @@ const closeAll = () => {
 const stats = () => ({ people: people.size, devices: devices.size });
 
 module.exports = {
-  HEARTBEAT_MS, MAX_PER_USER, MAX_TOTAL,
-  frame, addPerson, addDevice, broadcast, wakeDevice, hears, install, uninstall, closeAll, stats,
+  HEARTBEAT_MS, MAX_PER_USER, MAX_TOTAL, MAX_PER_COMPANY, DEVICE_RESERVE, RECHECK_MS,
+  frame, addPerson, closeUser, sweepPeople, addDevice, broadcast, wakeDevice, hears, install, uninstall, closeAll, stats,
 };

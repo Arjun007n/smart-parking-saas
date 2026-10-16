@@ -2,8 +2,22 @@ const AppError = require("../utils/AppError");
 const audit = require("../services/auditService");
 const { parsePlate, normalizePlate, escapeRegex } = require("../utils/plate");
 const Vehicle = require("../models/Vehicle");
+const { can } = require("../middleware/permission");
+const { PERMISSIONS: P } = require("../config/permissions");
 
 const PAGE_SIZE = 50;
+
+// Phone numbers are shown in full only to people who manage vehicles or see reports; gate staff see the last digits.
+const maskPhone = (phone) => {
+  if (typeof phone !== "string" || !phone) return phone;
+  const keep = phone.length > 6 ? 4 : 2;
+  return phone.length <= keep ? phone.replace(/./g, "*") : `${"*".repeat(phone.length - keep)}${phone.slice(-keep)}`;
+};
+const canSeePhones = (req) => can(req, P.VEHICLE_MANAGE) || can(req, P.REPORT_VIEW);
+const shown = (req, vehicle) => {
+  if (canSeePhones(req) || !vehicle || !vehicle.phone) return vehicle;
+  return { ...vehicle.toJSON(), phone: maskPhone(vehicle.phone) };
+};
 
 const findInTenant = async (req) => {
   const vehicle = await Vehicle.findOne({ _id: req.params.id, ...req.tenantFilter });
@@ -30,12 +44,12 @@ const listVehicles = async (req, res) => {
     Vehicle.countDocuments(filter),
   ]);
 
-  res.json({ success: true, data: { vehicles, total, page, pageSize: PAGE_SIZE } });
+  res.json({ success: true, data: { vehicles: vehicles.map((v) => shown(req, v)), total, page, pageSize: PAGE_SIZE } });
 };
 
 // GET /api/vehicles/:id
 const getVehicle = async (req, res) => {
-  res.json({ success: true, data: await findInTenant(req) });
+  res.json({ success: true, data: shown(req, await findInTenant(req)) });
 };
 
 // POST /api/vehicles
@@ -80,4 +94,4 @@ const updateVehicle = async (req, res) => {
   res.json({ success: true, data: vehicle });
 };
 
-module.exports = { listVehicles, getVehicle, createVehicle, updateVehicle };
+module.exports = { maskPhone, listVehicles, getVehicle, createVehicle, updateVehicle };

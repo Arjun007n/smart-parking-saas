@@ -127,11 +127,12 @@ export default function TrendsPanel({ locationId }) {
               </Card>
             </div>
 
-            <div className="grid gap-6 lg:grid-cols-2">
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
               <Card title="How people pay">
                 {payments.data.rows.length === 0 ? (
                   <p className="text-sm text-slate-500">No payments in this period.</p>
                 ) : (
+                  <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
                     <thead className="text-slate-500">
                       <tr>
@@ -152,6 +153,7 @@ export default function TrendsPanel({ locationId }) {
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 )}
               </Card>
               <Card title="Pass usage">

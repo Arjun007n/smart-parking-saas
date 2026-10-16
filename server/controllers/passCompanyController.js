@@ -3,6 +3,7 @@ const AppError = require("../utils/AppError");
 const audit = require("../services/auditService");
 const mail = require("../integrations/email");
 const { round2 } = require("../services/collectionService");
+const { isCompanyWide } = require("../config/permissions");
 const PassCompany = require("../models/PassCompany");
 const Pass = require("../models/Pass");
 const PassPayment = require("../models/PassPayment");
@@ -34,7 +35,8 @@ const findInScope = async (req) => {
 };
 
 // What each company holds: passes, vehicles, how many are valid now, and what it has paid.
-const statsFor = async (companyId, ids) => {
+// `locationIds`: for a location admin, the only locations whose payments count towards revenue (omit = all).
+const statsFor = async (companyId, ids, locationIds) => {
   const now = new Date();
   const objectIds = ids.map((id) => new mongoose.Types.ObjectId(String(id)));
   const [passRows, moneyRows, userRows] = await Promise.all([
@@ -51,7 +53,7 @@ const statsFor = async (companyId, ids) => {
       },
     ]),
     PassPayment.aggregate([
-      { $match: { companyId: new mongoose.Types.ObjectId(String(companyId)), amount: { $gt: 0 } } },
+      { $match: { companyId: new mongoose.Types.ObjectId(String(companyId)), amount: { $gt: 0 }, ...(locationIds ? { locationId: { $in: locationIds.map((id) => new mongoose.Types.ObjectId(String(id))) } } : {}) } },
       { $lookup: { from: Pass.collection.name, localField: "passId", foreignField: "_id", as: "p", pipeline: [{ $project: { passCompanyId: 1 } }] } },
       { $unwind: "$p" },
       { $match: { "p.passCompanyId": { $in: objectIds } } },
@@ -78,7 +80,7 @@ const listPassCompanies = async (req, res) => {
   if (q) filter.name = { $regex: q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" };
   if (req.query.active === "true") filter.isActive = true;
   const companies = await PassCompany.find(filter).sort({ name: 1 }).limit(500);
-  const stats = await statsFor(req.companyId, companies.map((c) => c._id));
+  const stats = await statsFor(req.companyId, companies.map((c) => c._id), isCompanyWide(req.user.role) ? undefined : Array.from(req.user.locationIds));
   const data = companies.map((c) => ({ ...c.toJSON(), stats: stats.get(String(c._id)) }));
   const totals = data.reduce(
     (t, c) => ({ companies: t.companies + 1, users: t.users + c.stats.users, passes: t.passes + c.stats.passes, vehicles: t.vehicles + c.stats.vehicles, active: t.active + c.stats.active, revenue: round2(t.revenue + c.stats.revenue) }),

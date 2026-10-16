@@ -14,6 +14,7 @@ const AppError = require("../utils/AppError");
 const env = require("../config/env");
 const messaging = require("../integrations/messaging");
 const Otp = require("../models/Otp");
+const caps = require("../utils/messageCaps");
 
 const PURPOSE = "SIGNUP";
 const CODE_MINUTES = 10;
@@ -35,11 +36,19 @@ const phoneOf = (value) => {
   return phone;
 };
 
-const send = async (value) => {
+// `showDevCode`: the practice code may be put in the answer (only the developer at this computer gets it).
+const send = async (value, { showDevCode = true } = {}) => {
   if (!required() || !messaging.isEnabled()) throw new AppError("Mobile verification is not switched on", 409);
   const phone = phoneOf(value);
   const now = Date.now();
   const code = newCode();
+
+  // A platform-wide budget for verification texts per hour (stops a flood of sign-up requests from running up
+  // the text-message bill). Generous by default: OTP_SENDS_PER_HOUR_TOTAL.
+  const hourlyTotal = Number(process.env.OTP_SENDS_PER_HOUR_TOTAL) >= 1 ? Math.floor(Number(process.env.OTP_SENDS_PER_HOUR_TOTAL)) : 300;
+  if (!caps.take("otp:total", hourlyTotal, 3600 * 1000)) {
+    throw new AppError("Too many codes are being requested right now. Please try again in a few minutes.", 429);
+  }
 
   let record = await Otp.findOne({ phone, purpose: PURPOSE });
   if (record) {
@@ -51,15 +60,28 @@ const send = async (value) => {
     if (!freshWindow && record.sentCount >= SENDS_PER_HOUR) {
       throw new AppError("Too many codes were sent to this number. Please try again in an hour.", 429);
     }
-    record.codeHash = hashCode(phone, code);
-    record.attempts = 0;
-    record.expiresAt = new Date(now + CODE_MINUTES * 60000);
-    record.lastSentAt = new Date(now);
-    record.sentCount = freshWindow ? 1 : record.sentCount + 1;
-    if (freshWindow) record.windowStartedAt = new Date(now);
-    await record.save();
+    // One step that only succeeds if nobody else asked for a code since we read the record. Two requests sent at
+    // the same moment therefore cannot both pass the waiting time or the hourly count.
+    const updated = await Otp.findOneAndUpdate(
+      { _id: record._id, lastSentAt: record.lastSentAt, sentCount: record.sentCount },
+      {
+        $set: {
+          codeHash: hashCode(phone, code), attempts: 0, expiresAt: new Date(now + CODE_MINUTES * 60000), lastSentAt: new Date(now),
+          sentCount: freshWindow ? 1 : record.sentCount + 1, ...(freshWindow ? { windowStartedAt: new Date(now) } : {}),
+        },
+      },
+      { new: true }
+    );
+    if (!updated) throw new AppError(`Please wait ${RESEND_SECONDS} seconds before asking for another code`, 429);
+    record = updated;
   } else {
-    record = await Otp.create({ phone, purpose: PURPOSE, codeHash: hashCode(phone, code), expiresAt: new Date(now + CODE_MINUTES * 60000) });
+    try {
+      record = await Otp.create({ phone, purpose: PURPOSE, codeHash: hashCode(phone, code), expiresAt: new Date(now + CODE_MINUTES * 60000) });
+    } catch (error) {
+      // Another request created the record a moment before this one.
+      if (error && error.code === 11000) throw new AppError(`Please wait ${RESEND_SECONDS} seconds before asking for another code`, 429);
+      throw error;
+    }
   }
 
   const result = await messaging.send({
@@ -72,7 +94,7 @@ const send = async (value) => {
     await Otp.deleteOne({ _id: record._id });
     throw new AppError("We could not send the text message. Check the number and try again.", 502);
   }
-  const showCode = env.isDevLike && messaging.providerName() === "simulated";
+  const showCode = showDevCode && env.isDevLike && messaging.providerName() === "simulated";
   return { phone, expiresInMinutes: CODE_MINUTES, resendInSeconds: RESEND_SECONDS, ...(showCode ? { devCode: code } : {}) };
 };
 
@@ -82,17 +104,18 @@ const verify = async (value, code) => {
   const wrong = new AppError("That code is not right, or it has expired. Ask for a new one.", 400);
   const record = await Otp.findOne({ phone, purpose: PURPOSE });
   if (!record || record.expiresAt <= new Date()) throw wrong;
-  if (record.attempts >= MAX_TRIES) {
+  // Count this try first, in one step, so many tries sent at the same moment cannot all slip under the limit.
+  const counted = await Otp.findOneAndUpdate({ _id: record._id, attempts: { $lt: MAX_TRIES } }, { $inc: { attempts: 1 } }, { new: true });
+  if (!counted) {
     await Otp.deleteOne({ _id: record._id });
     throw new AppError("Too many wrong codes. Ask for a new one.", 429);
   }
   const given = Buffer.from(hashCode(phone, String(code || "").trim()));
   const real = Buffer.from(record.codeHash);
-  if (given.length !== real.length || !crypto.timingSafeEqual(given, real)) {
-    await Otp.updateOne({ _id: record._id }, { $inc: { attempts: 1 } });
-    throw wrong;
-  }
-  await Otp.deleteOne({ _id: record._id }); // a code works once
+  if (given.length !== real.length || !crypto.timingSafeEqual(given, real)) throw wrong;
+  // A code works once: only the request that removes it gets the proof.
+  const removed = await Otp.deleteOne({ _id: record._id, codeHash: record.codeHash });
+  if (!removed || removed.deletedCount !== 1) throw wrong;
   const phoneToken = jwt.sign({ purpose: "phone-verified", phone }, env.jwtSecret, { algorithm: "HS256", expiresIn: `${PROOF_MINUTES}m` });
   return { phone, phoneToken };
 };

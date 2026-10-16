@@ -11,6 +11,10 @@ const { locationScopedFilter, getAccessibleLocation, locationIdFromQuery } = req
 const Hardware = require("../models/Hardware");
 const HardwareEvent = require("../models/HardwareEvent");
 const HardwareCommand = require("../models/HardwareCommand");
+const env = require("../config/env");
+const { can } = require("../middleware/permission");
+const { PERMISSIONS: P } = require("../config/permissions");
+const { isSafePreviewUrl } = require("../integrations/anpr");
 const { HARDWARE_TYPES } = require("../models/Hardware");
 
 const findInScope = async (req) => {
@@ -27,6 +31,17 @@ const configPaths = (config = {}) => {
   }
   return out;
 };
+
+// Only the camera's own live-picture address kinds are accepted (see isSafePreviewUrl); an empty text clears it.
+const assertPreviewUrl = (config) => {
+  const url = config && config.previewUrl;
+  if (typeof url === "string" && url.trim() && !isSafePreviewUrl(url)) {
+    throw new AppError("The live picture address must be https://, or http:// for a camera on your own network (for example http://192.168.1.50/video.mjpg)", 400);
+  }
+};
+
+// Camera addresses and device IPs are shown to people who manage the location only.
+const revealFor = (req) => ({ reveal: can(req, P.LOCATION_MANAGE) });
 
 // An entry-only device cannot sit at an exit gate, and the other way round.
 const assertGateFits = (location, gate, direction) => {
@@ -51,13 +66,14 @@ const listDevices = async (req, res) => {
   }
   const devices = await Hardware.find({ $and: conditions }).sort({ locationId: 1, name: 1 }).limit(500);
   const now = new Date();
-  res.json({ success: true, data: devices.map((d) => hardware.withStatus(d, now)) });
+  res.json({ success: true, data: devices.map((d) => hardware.withStatus(d, now, revealFor(req))) });
 };
 
 // POST /api/hardware
 // The device key is in the answer ONCE. It cannot be shown again.
 const createDevice = async (req, res) => {
   const { locationId, gate, config, ...fields } = req.body;
+  assertPreviewUrl(config);
   const location = await getAccessibleLocation(req, locationId);
   if (gate && location.gates.length && !location.gates.some((g) => g.name === gate)) {
     throw new AppError("That gate does not exist at this location", 400);
@@ -91,7 +107,7 @@ const createDevice = async (req, res) => {
     meta: { name: device.name, type: device.type, locationId: device.locationId },
   });
   noStore(res);
-  res.status(201).json({ success: true, data: { device: hardware.withStatus(device), deviceKey: key.raw } });
+  res.status(201).json({ success: true, data: { device: hardware.withStatus(device, new Date(), revealFor(req)), deviceKey: key.raw } });
 };
 
 // GET /api/hardware/:id
@@ -101,13 +117,14 @@ const getDevice = async (req, res) => {
     HardwareEvent.find({ hardwareId: device._id }).sort({ createdAt: -1 }).limit(20),
     HardwareCommand.find({ hardwareId: device._id }).sort({ createdAt: -1 }).limit(10).select("-payload"),
   ]);
-  res.json({ success: true, data: { device: hardware.withStatus(device), events, commands } });
+  res.json({ success: true, data: { device: hardware.withStatus(device, new Date(), revealFor(req)), events, commands } });
 };
 
 // PUT /api/hardware/:id
 const updateDevice = async (req, res) => {
   const device = await findInScope(req);
   const { config, gate, ...fields } = req.body;
+  assertPreviewUrl(config);
 
   if ((gate !== undefined && gate) || fields.direction !== undefined || gate !== undefined) {
     const location = await getAccessibleLocation(req, device.locationId);
@@ -115,6 +132,13 @@ const updateDevice = async (req, res) => {
       throw new AppError("That gate does not exist at this location", 400);
     }
     assertGateFits(location, gate !== undefined ? gate : device.gate, fields.direction || device.direction);
+  }
+  // Switching a device back on counts against the add-on limit like adding it (otherwise a limit can be passed by
+  // switching a second device off and on again).
+  const counted = { ANPR_CAMERA: "anpr", FASTAG_READER: "fastag" }[device.type];
+  if (counted && fields.isActive === true && device.isActive === false) {
+    const already = await Hardware.countDocuments({ locationId: device.locationId, type: device.type, isActive: { $ne: false }, _id: { $ne: device._id } });
+    await subscriptions.assertAddon(device.companyId, device.locationId, counted, already + 1);
   }
   device.set({ ...fields, ...(gate !== undefined ? { gate } : {}), ...configPaths(config) });
   if (fields.isActive === false) device.isOnline = false;
@@ -129,7 +153,7 @@ const updateDevice = async (req, res) => {
     entity: "Hardware", entityId: device._id, companyId: device.companyId,
     meta: { changed: Object.keys(req.body) },
   });
-  res.json({ success: true, data: hardware.withStatus(device) });
+  res.json({ success: true, data: hardware.withStatus(device, new Date(), revealFor(req)) });
 };
 
 // POST /api/hardware/:id/rotate-key
@@ -148,7 +172,7 @@ const rotateKey = async (req, res) => {
   });
   await hardware.recordEvent(device, "KEY_ROTATED", { message: "A new device key was issued" });
   noStore(res);
-  res.json({ success: true, data: { device: hardware.withStatus(device), deviceKey: key.raw } });
+  res.json({ success: true, data: { device: hardware.withStatus(device, new Date(), revealFor(req)), deviceKey: key.raw } });
 };
 
 // GET /api/hardware/:id/events
@@ -204,11 +228,11 @@ const getCommand = async (req, res) => {
 
 // GET /api/hardware/agent-package   (zip of the gate agent, with this server's address filled in)
 const downloadAgent = (req, res) => {
-  const configured = String(process.env.PUBLIC_API_URL || "").trim().replace(/\/+$/, "");
-  const host = String(req.get("host") || "");
-  const serverUrl = /^https?:\/\/[\w.\-:]+$/i.test(configured)
-    ? configured
-    : /^[\w.\-]+(:\d{1,5})?$/.test(host) ? `${req.protocol}://${host}` : "http://localhost:5000";
+  const resolved = hardware.agentServerUrl({
+    configured: process.env.PUBLIC_API_URL, host: req.get("host"), protocol: req.protocol, isProduction: env.isProduction,
+  });
+  if (resolved.error) throw new AppError(resolved.error, 500);
+  const serverUrl = resolved.url;
   let built;
   try {
     built = agentPackage.build({ serverUrl });

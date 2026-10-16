@@ -8,6 +8,9 @@ const Operator = require("../models/Operator");
 const Role = require("../models/Role");
 const { findAssignable, accessOf, withinActor } = require("../services/roleService");
 const account = require("../services/accountService");
+const liveHub = require("../services/liveHub");
+const { targetWithinLocations } = require("../utils/userRules");
+const { assertNotCommon } = require("../utils/passwordPolicy");
 const lanesService = require("../services/laneService");
 const licences = require("../services/licenceService");
 const { buildReportFile, formatOf } = require("../services/reportExport");
@@ -119,6 +122,7 @@ const getUser = async (req, res) => {
 // POST /api/users
 const createUser = async (req, res) => {
   const { name, email, phone, password, customRoleId } = req.body;
+  if (password) assertNotCommon(password);
   const loginId = cleanLoginId(req.body.loginId);
   if (!email && !loginId) throw new AppError("Give the user an email or a Login ID to sign in with", 400);
 
@@ -177,6 +181,15 @@ const createUser = async (req, res) => {
   res.status(201).json({ success: true, data: await withProfile(user) });
 };
 
+// Password, role and on/off changes hand over or remove someone's access, so they are limited to users whose
+// locations all belong to the actor (company-wide admins are not limited).
+const assertWholeUserIsInScope = (req, user) => {
+  if (isCompanyWide(req.user.role)) return;
+  if (!targetWithinLocations(req.user.locationIds, user.locationIds)) {
+    throw new AppError("This user also works at a location you do not manage. Ask a company admin to make this change.", 403);
+  }
+};
+
 // PUT /api/users/:id
 const updateUser = async (req, res) => {
   const user = await findManageable(req);
@@ -188,10 +201,13 @@ const updateUser = async (req, res) => {
   // Changing a user's role or password hands over their access. That is only
   // allowed when the user's present permissions are all ones the actor holds
   // (a custom-role actor must not upgrade or take over a richer user).
-  const touchesAccess = customRoleId !== undefined || clearRole || role !== undefined || password !== undefined;
+  const switchesActive = isActive !== undefined && isActive !== user.isActive;
+  const touchesAccess = customRoleId !== undefined || clearRole || role !== undefined || password !== undefined || switchesActive;
   if (touchesAccess && !withinActor(req, (await accessOf(user)).permissions)) {
-    throw new AppError("This user has permissions you do not have yourself, so you cannot change their role or password", 403);
+    throw new AppError("This user has permissions you do not have yourself, so you cannot change their role, password or status", 403);
   }
+  // A user who also works at a location the actor does not manage can be changed only by a company-wide admin.
+  if (touchesAccess) assertWholeUserIsInScope(req, user);
   const mayGive = (builtInRole) => {
     if (!withinActor(req, permissionsFor(builtInRole))) {
       throw new AppError("This role has permissions you do not have yourself", 403);
@@ -289,6 +305,7 @@ const updateUser = async (req, res) => {
     await licences.assertRoom(user.companyId, user.locationIds, { user: before });
   }
   if (password !== undefined) {
+    assertNotCommon(password);
     user.password = password; // "reset access"
     changed.push("password");
   }
@@ -298,6 +315,8 @@ const updateUser = async (req, res) => {
   }
 
   await user.save();
+  // A user switched off or given another role stops receiving live gate events at once.
+  if (changed.some((f) => ["isActive", "role", "customRoleId", "locationIds", "password"].includes(f))) liveHub.closeUser(user._id);
   if (req.body.operator) {
     await saveOperatorProfile(user, req.body.operator);
     changed.push("operator");
@@ -313,9 +332,14 @@ const updateUser = async (req, res) => {
 // Users are deactivated, not removed, so history and audit records stay valid.
 const deactivateUser = async (req, res) => {
   const user = await findManageable(req);
+  if (!withinActor(req, (await accessOf(user)).permissions)) {
+    throw new AppError("This user has permissions you do not have yourself, so you cannot switch them off", 403);
+  }
+  assertWholeUserIsInScope(req, user);
   user.isActive = false;
   user.tokenVersion += 1;
   await user.save();
+  liveHub.closeUser(user._id);
   await audit.record(req, "USER_DEACTIVATE", {
     entity: "User", entityId: user._id, companyId: user.companyId,
   });

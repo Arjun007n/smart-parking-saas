@@ -252,14 +252,14 @@ export default function Passes() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-slate-900">Parking passes</h1>
       <SummaryTiles />
-      <div role="tablist" aria-label="Pass sections" className="flex gap-1 border-b border-slate-300">
+      <div role="tablist" aria-label="Pass sections" className="flex gap-1 overflow-x-auto border-b border-slate-300">
         {TABS.map(([key, label]) => (
           <button
             key={key}
             role="tab"
             aria-selected={tab === key}
             onClick={() => setTab(key)}
-            className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${tab === key ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-600 hover:text-slate-900'}`}
+            className={`-mb-px whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium ${tab === key ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-600 hover:text-slate-900'}`}
           >
             {label}
           </button>
@@ -396,7 +396,7 @@ function PassList() {
           <PageLoader />
         ) : data && data.passes.length > 0 ? (
           <>
-            <div className="overflow-x-auto">
+            <div className="relative overflow-x-auto">
               <table className="w-full min-w-[640px] text-left text-sm">
                 <thead className="text-slate-500">
                   <tr>

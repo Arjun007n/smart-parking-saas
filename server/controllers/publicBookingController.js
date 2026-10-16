@@ -12,10 +12,12 @@ const online = require("../services/onlineBookingService");
 const { parsePlate } = require("../utils/plate");
 
 const LIST_LIMIT = 100;
+// The same list the login check uses (middleware/auth.js): suspended or cancelled companies take no bookings.
+const BLOCKED_SUBSCRIPTIONS = ["SUSPENDED", "CANCELLED"];
 
 const companyIsActive = async (companyId) => {
-  const company = await Company.findById(companyId).select("isActive").lean();
-  return Boolean(company && company.isActive !== false);
+  const company = await Company.findById(companyId).select("isActive subscriptionStatus").lean();
+  return Boolean(company && company.isActive !== false && !BLOCKED_SUBSCRIPTIONS.includes(company.subscriptionStatus));
 };
 
 // GET /api/public/booking/locations?q=
@@ -28,7 +30,7 @@ const listLocations = async (req, res) => {
   }
   const found = await Location.find(filter).sort({ name: 1 }).limit(LIST_LIMIT).lean();
   const active = new Set(
-    (await Company.find({ _id: { $in: [...new Set(found.map((l) => String(l.companyId)))] }, isActive: { $ne: false } }).select("_id").lean())
+    (await Company.find({ _id: { $in: [...new Set(found.map((l) => String(l.companyId)))] }, isActive: { $ne: false }, subscriptionStatus: { $nin: BLOCKED_SUBSCRIPTIONS } }).select("_id").lean())
       .map((c) => String(c._id))
   );
   const items = found.filter((l) => active.has(String(l.companyId))).map(online.offerOf);

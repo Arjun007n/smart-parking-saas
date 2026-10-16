@@ -19,6 +19,8 @@ module.exports = {
   },
   android: {
     allowMixedContent: false,
+    // Chrome's remote inspector can read the page and the sign-in: only in test mode.
+    webContentsDebuggingEnabled: dev,
     // Keep the page out from under the phone's status and navigation bars.
     adjustMarginsForEdgeToEdge: "force",
   },

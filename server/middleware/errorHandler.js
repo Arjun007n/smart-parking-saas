@@ -1,5 +1,6 @@
-const env = require("../config/env");
+const { devAccess } = require("../utils/devAccess");
 const AppError = require("../utils/AppError");
+const { redactUrl } = require("../utils/redactUrl");
 const { reportError } = require("../utils/monitor");
 
 const notFound = (req, res, next) =>
@@ -33,7 +34,7 @@ const errorHandler = (err, req, res, next) => {
   const statusCode = error.isOperational ? error.statusCode : 500;
 
   if (statusCode >= 500) {
-    reportError(err, { method: req.method, path: req.originalUrl, userId: req.user ? String(req.user._id) : undefined });
+    reportError(err, { method: req.method, path: redactUrl(req.originalUrl), userId: req.user ? String(req.user._id) : undefined });
   }
 
   const body = {
@@ -44,7 +45,7 @@ const errorHandler = (err, req, res, next) => {
   // Extra facts a screen can act on (for example the ticket a vehicle already has).
   if (error.isOperational && error.data) body.data = error.data;
   // Internal error details are shown only in development and test.
-  if (!error.isOperational && env.isDevLike) body.debug = err.message;
+  if (!error.isOperational && devAccess(req)) body.debug = err.message;
 
   res.status(statusCode).json(body);
 };

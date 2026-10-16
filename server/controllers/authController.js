@@ -1,5 +1,7 @@
 const AppError = require("../utils/AppError");
 const env = require("../config/env");
+const { devAccess } = require("../utils/devAccess");
+const { assertNotCommon } = require("../utils/passwordPolicy");
 const { signToken, hashToken, createResetToken } = require("../utils/token");
 const { ROLES } = require("../config/permissions");
 const { accessOf } = require("../services/roleService");
@@ -42,6 +44,7 @@ const register = async (req, res) => {
     phone = otp.assertProof(phoneToken, phone);
   }
 
+  assertNotCommon(password);
   if (await User.exists({ email })) {
     throw new AppError("An account with this email already exists", 409);
   }
@@ -100,7 +103,7 @@ const signupOptions = (req, res) => {
 
 // POST /api/auth/otp/send   { phone }
 const sendOtp = async (req, res) => {
-  const result = await otp.send(req.body.phone);
+  const result = await otp.send(req.body.phone, { showDevCode: devAccess(req) });
   res.json({ success: true, data: result });
 };
 
@@ -199,6 +202,7 @@ const changePassword = async (req, res) => {
     throw new AppError("Choose a password that is different from the current one", 400);
   }
 
+  assertNotCommon(newPassword);
   user.password = newPassword;
   user.tokenVersion += 1; // other devices are logged out
   await user.save();
@@ -273,8 +277,14 @@ const forgotPassword = async (req, res) => {
     }
     if (env.isDevLike) {
       console.log(`Password reset link for ${user.email}: ${resetUrl}`);
-      body.devResetToken = raw;
+      // The token goes into the answer only for the developer at this computer, never for another device on the network.
+      if (devAccess(req)) body.devResetToken = raw;
     }
+  } else {
+    // Do about the same database work as the real case (a write and an audit write), so the time the answer
+    // takes does not tell a stranger whether the address is registered.
+    await User.exists({ email: req.body.email });
+    await User.exists({ email: req.body.email });
   }
 
   res.json(body);
@@ -289,6 +299,7 @@ const resetPassword = async (req, res) => {
   });
   if (!user) throw new AppError("Reset link is invalid or has expired", 400);
 
+  assertNotCommon(req.body.password);
   user.password = req.body.password;
   user.passwordResetToken = undefined;
   user.passwordResetExpires = undefined;

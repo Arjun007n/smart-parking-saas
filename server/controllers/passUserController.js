@@ -76,7 +76,8 @@ const stats = async (req, res) => {
       },
     ]),
     PassPayment.aggregate([
-      { $match: { companyId: toId(req.companyId), amount: { $gt: 0 } } },
+      // A location admin's revenue covers only the payments taken at their own locations.
+      { $match: { companyId: toId(req.companyId), amount: { $gt: 0 }, ...(isCompanyWide(req.user.role) ? {} : { locationId: { $in: Array.from(req.user.locationIds).map(toId) } }) } },
       { $lookup: { from: Pass.collection.name, localField: "passId", foreignField: "_id", as: "p", pipeline: [{ $project: { status: 1, startDate: 1, endDate: 1, locationIds: 1, isCurrent: 1 } }] } },
       { $unwind: "$p" },
       { $match: { "p.status": "ACTIVE", "p.startDate": { $lte: now }, "p.endDate": { $gt: now } } },
@@ -352,6 +353,8 @@ const createOrRenew = async (req, res) => {
   const [row] = await checkRows(req, [{ ...req.body, vehicleNumber: vehicle.plateNumber, vehicleType: vehicle.vehicleType }]);
 
   const existing = await passes.findCurrentPass(user.companyId, vehicle.plateNumber);
+  // A location admin may only re-date a pass that is within their own locations (see passService.scopeFilter).
+  if (existing && !(await Pass.exists({ $and: [{ _id: existing._id }, passes.scopeFilter(req)] }))) throw new AppError("Pass not found", 404);
   if (!existing) {
     const { pass, payment } = await passController.sellPass(req, saleBody(user, row, { method, transactionId }));
     return res.status(201).json({ success: true, data: { pass: passController.withState(pass), payment, renewed: false } });

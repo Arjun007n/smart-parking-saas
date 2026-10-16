@@ -5,6 +5,7 @@
 const http = require("http");
 const { createClient } = require("./api");
 const { translate } = require("./translators");
+const { checkListenerBind, secretOk } = require("./util");
 const log = require("./log");
 
 const MAX_QUEUE = 200;
@@ -14,6 +15,7 @@ class AnprListener {
   constructor({ serverUrl, device, client }) {
     this.device = device;
     this.options = { port: 8081, path: "/anpr", vendor: "generic", ...(device.options || {}) };
+    this.options.bind = checkListenerBind(this.options, device.name);
     this.api = client || createClient({ serverUrl, key: device.key });
     this.log = log.make(device.name);
     this.queue = [];
@@ -65,7 +67,7 @@ class AnprListener {
       res.end(JSON.stringify(body));
     };
     if (req.method !== "POST" || url.pathname !== this.options.path) return reply(404, { ok: false });
-    if (this.options.secret && url.searchParams.get("secret") !== this.options.secret) return reply(401, { ok: false });
+    if (!secretOk(req, url, this.options.secret)) return reply(401, { ok: false });
 
     const chunks = [];
     let size = 0;
@@ -88,8 +90,8 @@ class AnprListener {
 
   start() {
     this.server = http.createServer((req, res) => this.handleRequest(req, res));
-    this.server.listen(this.options.port, () =>
-      this.log.info(`listening for camera events on port ${this.options.port}${this.options.path} (vendor: ${this.options.vendor})`)
+    this.server.listen(this.options.port, this.options.bind, () =>
+      this.log.info(`listening for camera events on ${this.options.bind}:${this.options.port}${this.options.path} (vendor: ${this.options.vendor})`)
     );
     this.timer = setInterval(() => this.flush().catch(() => {}), 5000);
     this.timer.unref();

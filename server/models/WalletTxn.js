@@ -38,6 +38,7 @@ const walletTxnSchema = new mongoose.Schema(
 walletTxnSchema.index({ walletId: 1, createdAt: -1 });
 walletTxnSchema.index({ shiftId: 1, type: 1 });
 walletTxnSchema.index({ companyId: 1, locationId: 1, type: 1, createdAt: -1 });
+walletTxnSchema.index({ companyId: 1, type: 1, reference: 1 }, { sparse: true }); // a UPI or card reference funds one top-up only
 walletTxnSchema.index(
   { idempotencyKey: 1 },
   { unique: true, partialFilterExpression: { idempotencyKey: { $type: "string" } } }

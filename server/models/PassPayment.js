@@ -32,8 +32,11 @@ const passPaymentSchema = new mongoose.Schema(
 passPaymentSchema.index({ companyId: 1, locationId: 1, paidAt: -1 });
 passPaymentSchema.index({ passId: 1, paidAt: -1 });
 passPaymentSchema.index({ shiftId: 1 });
+// A payment reference is unique within a company (not across companies: one company must not be able to
+// learn or block another's references). Databases made before this change still hold the old global index
+// `transactionId_1`; scripts/migrate_passpayment_index.js drops it. Until then the old index keeps working.
 passPaymentSchema.index(
-  { transactionId: 1 },
+  { companyId: 1, transactionId: 1 },
   { unique: true, partialFilterExpression: { transactionId: { $type: "string" } } }
 );
 

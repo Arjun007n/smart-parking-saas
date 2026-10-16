@@ -83,7 +83,7 @@ test("snapshot mode: the camera's still picture becomes a video stream; Basic au
     const res = await fetch(url);
     assert.equal(res.status, 200);
     assert.match(res.headers.get("content-type"), /^multipart\/x-mixed-replace; boundary=frame$/);
-    assert.equal(res.headers.get("access-control-allow-origin"), "*");
+    assert.equal(res.headers.get("access-control-allow-origin"), null, "no CORS header by default");
     assert.equal(res.headers.get("access-control-allow-private-network"), "true");
     assert.equal(res.headers.get("cache-control"), "no-store");
     const text = await readSome(res, (buffer) => buffer.toString("latin1").split("--frame").length >= 3); // two pictures
@@ -204,9 +204,9 @@ test("at most four screens watch at once; the fifth is told to wait", async () =
 test("worker: the heartbeat carries the picture address of a camera, and only a camera", async () => {
   const sent = [];
   const client = { heartbeat: async (extra) => sent.push(extra), commands: async () => ({ commands: [] }), ack: async () => {} };
-  const withPicture = new DeviceWorker({ serverUrl: "http://x", device, client, previewUrl: "http://127.0.0.1:8090/preview/abc" });
+  const withPicture = new DeviceWorker({ serverUrl: "http://localhost:5000", device, client, previewUrl: "http://127.0.0.1:8090/preview/abc" });
   await withPicture.heartbeatOnce();
-  const without = new DeviceWorker({ serverUrl: "http://x", device: { ...device, name: "Other" }, client });
+  const without = new DeviceWorker({ serverUrl: "http://localhost:5000", device: { ...device, name: "Other" }, client });
   await without.heartbeatOnce();
   assert.deepEqual(sent, [{ previewUrl: "http://127.0.0.1:8090/preview/abc" }, {}]);
 });
@@ -214,7 +214,7 @@ test("worker: the heartbeat carries the picture address of a camera, and only a 
 test("agent: a camera with a preview block gets a relay and tells the cloud its address", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-agent-preview-"));
   const file = path.join(dir, "c.json");
-  const write = (devices) => fs.writeFileSync(file, JSON.stringify({ serverUrl: "http://x", devices }));
+  const write = (devices) => fs.writeFileSync(file, JSON.stringify({ serverUrl: "http://localhost:5000", devices }));
 
   write([{ ...device, preview: { url: "http://192.168.1.64/video.mjpg", port: 8123 } }, { name: "B", type: "BARRIER", key: "hwk_abcdef0124", driver: "simulated" }]);
   const parts = build(loadConfig(file));

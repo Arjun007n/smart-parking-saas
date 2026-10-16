@@ -11,6 +11,7 @@
 //  * If the ledger row cannot be written, the balance change is undone.
 
 const crypto = require("crypto");
+const mongoose = require("mongoose");
 const AppError = require("../utils/AppError");
 const { parsePlate, escapeRegex } = require("../utils/plate");
 const Wallet = require("../models/Wallet");
@@ -161,6 +162,26 @@ const topUp = ({ wallet, amount, method, reference, requestId, locationId, shift
   });
 };
 
+// Whether a wallet may pay this vehicle's fee. A wallet pays automatically for the vehicles linked to it. Paying
+// for any other vehicle (a card handed over at the counter) needs a supervisor or admin, so an exit operator
+// cannot charge a customer's wallet for a fee someone else owes.
+const mayPayFor = (wallet, plate, { allowUnlinked = false } = {}) => {
+  const linked = Boolean(wallet) && Array.isArray(wallet.vehicles) && wallet.vehicles.includes(plate);
+  return { ok: linked || allowUnlinked, linked };
+};
+
+// Loads the wallet and applies mayPayFor. Throws 403 with a message the operator can act on.
+const assertMayPay = async ({ walletId, companyId, session, allowUnlinked }) => {
+  if (!mongoose.isValidObjectId(walletId)) throw new AppError("Wallet not found", 404);
+  const wallet = await Wallet.findOne({ _id: walletId, companyId }).select("vehicles").lean();
+  if (!wallet) throw new AppError("Wallet not found", 404);
+  const result = mayPayFor(wallet, session.vehicleNumber, { allowUnlinked });
+  if (!result.ok) {
+    throw new AppError("This wallet is not linked to this vehicle. Ask a supervisor to take this payment, or use another payment mode.", 403);
+  }
+  return result;
+};
+
 // A parking fee paid from the wallet. One live debit per session: retrying the same payment
 // finds the first debit instead of taking the money twice. A debit that was undone (reversed)
 // no longer counts, so the customer can try again.
@@ -256,5 +277,5 @@ const isLow = (wallet) => wallet.lowBalanceAlert > 0 && wallet.balancePaise < to
 module.exports = {
   NUMBER_PATTERN, MIN_TOPUP, MAX_TOPUP, maxBalance, toPaise, toRupees, hasWholePaise, generateWalletNumber,
   cleanVehicles, duplicateVehicleError, createWallet, applyChange, topUp, debitForSession, reverseDebit,
-  refundPayment, adjust, verify, findForVehicle, lookup, brief, isLow, escapeRegex,
+  refundPayment, adjust, verify, findForVehicle, lookup, brief, isLow, escapeRegex, mayPayFor, assertMayPay,
 };

@@ -29,6 +29,9 @@ const ParkingSession = require("../models/ParkingSession");
 
 const SYSTEM_REQ = Object.freeze({ headers: {}, ip: "system" });
 const EXPIRED_REASON = "Not paid in time";
+// One message for "already inside" and "already booked": the public page must not tell a stranger
+// whether a plate is parked here or has a booking.
+const PLATE_UNAVAILABLE = "This vehicle cannot be booked right now. Please contact the parking if you need help.";
 
 const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 const sameAmount = (a, b) => Math.abs(a - b) <= 0.005;
@@ -122,12 +125,12 @@ const createOnline = async ({ location, vehicleNumber, vehicleType, customerName
 
   const companyId = location.companyId;
   if (await ParkingSession.exists({ companyId, vehicleNumber, isOpen: true })) {
-    throw new AppError(`Vehicle ${vehicleNumber} is already inside`, 409);
+    throw new AppError(PLATE_UNAVAILABLE, 409);
   }
   await bookings.expireOld({ companyId, locationId: location._id, vehicleNumber }, now);
   await expireUnpaid({ companyId, locationId: location._id, vehicleNumber }, now);
   if (await Booking.exists({ locationId: location._id, vehicleNumber, status: { $in: ["BOOKED", "AWAITING_PAYMENT"] } })) {
-    throw new AppError(`Vehicle ${vehicleNumber} already has a booking here`, 409);
+    throw new AppError(PLATE_UNAVAILABLE, 409);
   }
 
   const token = newToken();
@@ -140,7 +143,7 @@ const createOnline = async ({ location, vehicleNumber, vehicleType, customerName
   if (amount <= 0) {
     const booking = await createBooking({ ...base, status: "BOOKED" });
     await audit.record(SYSTEM_REQ, "BOOKING_CREATED", { entity: "Booking", entityId: booking._id, companyId, meta: { vehicleNumber, expectedAt, source: "ONLINE" } });
-    messageService.sendBookingNotice({ booking });
+    messageService.sendBookingNotice({ booking, publicPage: true });
     return { booking, token };
   }
 
@@ -173,7 +176,7 @@ const createBooking = async (data) => {
   try {
     return await Booking.create(data);
   } catch (error) {
-    if (error.code === 11000) throw new AppError(`Vehicle ${data.vehicleNumber} already has a booking here`, 409);
+    if (error.code === 11000) throw new AppError(PLATE_UNAVAILABLE, 409);
     throw error;
   }
 };
@@ -289,7 +292,7 @@ const settle = async (event, req = SYSTEM_REQ) => {
   }
   if (paid) {
     await audit.record(req, "BOOKING_PAID", { entity: "Booking", entityId: paid._id, companyId: paid.companyId, meta });
-    messageService.sendBookingNotice({ booking: paid });
+    messageService.sendBookingNotice({ booking: paid, publicPage: true });
     await notify({
       companyId: paid.companyId, locationId: paid.locationId, type: "BOOKING", severity: "info",
       title: `Online booking paid: ${paid.vehicleNumber}`, message: `${codeOf(paid)} · Rs ${paid.amount} · expected ${paid.expectedAt.toISOString()}`,

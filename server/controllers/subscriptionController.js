@@ -45,7 +45,12 @@ const subView = (sub, now = new Date()) => {
 
 // "Vehicle Pass Management", "ANPR Camera Service (ANPR cameras: 1)" ... the add-ons that are on.
 const itemsOf = (sub, addons) => {
-  if (sub.legacy) return ["All features included (free trial or earlier plan)"];
+  if (sub.legacy) {
+    const a = sub.addons || {};
+    // The free trial and earlier all-inclusive plans have every add-on; a newer company-wide plan only the users.
+    if (a.pass && a.gateway && a.anpr >= 1000) return ["All features included (free trial or earlier plan)"];
+    return ["Users only (add pass, photos, gateway, cameras and backups for this location under Manage Subscriptions)"];
+  }
   const out = [];
   for (const a of ADDONS) {
     const value = addons[a.key];

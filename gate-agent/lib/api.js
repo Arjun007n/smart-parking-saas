@@ -9,7 +9,36 @@ class ApiError extends Error {
   }
 }
 
+// The device key travels in a header on every call, so a plain http:// serverUrl is only accepted when the
+// server is on this PC or on the local network (or GATE_AGENT_ALLOW_HTTP=1 is set on purpose).
+const isLocalHost = (host) => {
+  const h = String(host).toLowerCase().replace(/^\[|\]$/g, "");
+  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".local") || h === "::1") return true;
+  if (/^fe80:|^f[cd][0-9a-f]{2}:/.test(h)) return true; // IPv6 link-local / unique-local
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (!m) return false;
+  const [a, b] = [Number(m[1]), Number(m[2])];
+  return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+};
+
+// Throws a clear message when serverUrl would send the device key over plain http across the internet.
+const checkServerUrl = (serverUrl, env = process.env) => {
+  let url;
+  try {
+    url = new URL(String(serverUrl));
+  } catch {
+    throw new Error(`serverUrl "${serverUrl}" is not a valid web address (use https://your-site.example)`);
+  }
+  if (url.protocol === "https:") return;
+  if (url.protocol === "http:" && (isLocalHost(url.hostname) || env.GATE_AGENT_ALLOW_HTTP === "1")) return;
+  throw new Error(
+    `serverUrl "${serverUrl}" is not allowed: the device key would be sent unencrypted. Use an https:// address. ` +
+      "Plain http:// is only accepted for localhost or a private LAN address; set the environment variable GATE_AGENT_ALLOW_HTTP=1 to override."
+  );
+};
+
 const createClient = ({ serverUrl, key, version = "gate-agent/1.0.0", timeoutMs = 8000 }) => {
+  checkServerUrl(serverUrl);
   const base = serverUrl.replace(/\/+$/, "");
 
   const call = async (method, path, body) => {
@@ -78,4 +107,4 @@ const createClient = ({ serverUrl, key, version = "gate-agent/1.0.0", timeoutMs 
   };
 };
 
-module.exports = { createClient, ApiError };
+module.exports = { createClient, ApiError, checkServerUrl, isLocalHost };

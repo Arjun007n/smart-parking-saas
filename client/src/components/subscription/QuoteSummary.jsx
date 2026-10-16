@@ -8,7 +8,8 @@ export default function QuoteSummary({ quote, error, loading }) {
   if (!quote) return <p className="text-sm text-slate-500">{loading ? 'Working out the price…' : 'Choose what you want to see the price.'}</p>
   return (
     <div className={`space-y-3 text-sm ${loading ? 'opacity-60' : ''}`} aria-busy={loading}>
-      <table className="w-full text-left">
+      <div className="overflow-x-auto">
+      <table className="w-full text-left text-xs sm:text-sm">
         <thead className="text-xs text-slate-500">
           <tr><th className="py-1 pr-2 font-medium">Item</th><th className="pr-2 text-right font-medium">Qty</th><th className="pr-2 text-right font-medium">Rate</th><th className="text-right font-medium">Amount</th></tr>
         </thead>
@@ -16,13 +17,14 @@ export default function QuoteSummary({ quote, error, loading }) {
           {quote.lines.map((l) => (
             <tr key={l.key} className="border-t border-slate-100">
               <td className="py-1.5 pr-2 text-slate-800">{l.label}</td>
-              <td className="pr-2 text-right">{l.qty}</td>
-              <td className="pr-2 text-right">{money(l.rate)}</td>
-              <td className="text-right">{money(l.amount)}</td>
+              <td className="whitespace-nowrap pr-2 text-right">{l.qty}</td>
+              <td className="whitespace-nowrap pr-2 text-right">{money(l.rate)}</td>
+              <td className="whitespace-nowrap text-right">{money(l.amount)}</td>
             </tr>
           ))}
         </tbody>
       </table>
+      </div>
       <dl className="space-y-1 border-t border-slate-200 pt-2">
         <div className="flex justify-between"><dt>Sub Total</dt><dd>{money(quote.subtotal)}</dd></div>
         {quote.discount > 0 && <div className="flex justify-between text-emerald-700"><dt>Discount ({quote.discountPercent}%)</dt><dd>- {money(quote.discount)}</dd></div>}

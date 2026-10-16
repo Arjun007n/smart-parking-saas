@@ -15,6 +15,7 @@ const Company = require("../models/Company");
 const Location = require("../models/Location");
 const { ROLES } = require("../config/permissions");
 const { localDateText } = require("../utils/time");
+const caps = require("../utils/messageCaps");
 
 const ALERT_LEVELS = ["OFF", "CRITICAL", "IMPORTANT", "ALL"];
 const DEFAULT_ALERT_LEVEL = "CRITICAL";
@@ -72,7 +73,7 @@ const renderPassNotice = ({ kind, pass, companyName, locationName, daysLeft }) =
     `Vehicle${vehicles.includes(",") ? "s" : ""}: ${vehicles}`,
     `Valid from ${longDate(pass.startDate)} to ${lastDay}`,
   ];
-  const where = [companyName, locationName].filter(Boolean).join(" · ");
+  const where = [caps.safeName(companyName), caps.safeName(locationName)].filter(Boolean).join(" · ");
   const base = { footer: `You get this because this email address was given for parking pass ${pass.passNumber}. Ask the parking office to remove it if it is not yours.` };
   if (kind === "EXPIRING") {
     return {
@@ -195,6 +196,11 @@ const sendPasswordReset = ({ user, url, minutes }) => {
 const sendPassNotice = ({ pass, kind, daysLeft }) => {
   if (!email.isEnabled() || !pass || !email.isEmail(pass.email)) return null;
   return background(async () => {
+    // Daily limits per company and per address; when one is reached the notice is skipped (the sale is not affected).
+    if (!caps.allowPassNotice(pass.companyId, "email", pass.email)) {
+      console.error(`Pass email skipped for company ${pass.companyId}: daily limit of pass emails reached`);
+      return;
+    }
     const [company, location] = await Promise.all([
       Company.findById(pass.companyId).select("name").lean(),
       pass.locationIds && pass.locationIds.length === 1 ? Location.findById(pass.locationIds[0]).select("name").lean() : null,

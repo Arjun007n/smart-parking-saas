@@ -78,7 +78,7 @@ const simulated = {
   send: async (message) => {
     outbox.push({ ...message, at: new Date() });
     if (outbox.length > OUTBOX_LIMIT) outbox.shift();
-    if (process.env.NODE_ENV !== "test") console.log(`[simulated ${message.channel}] to ${message.to}: ${message.body}`);
+    if (process.env.NODE_ENV === "development") console.log(`[simulated ${message.channel}] to ${message.to}: ${message.body}`);
     return { id: `sim-${outbox.length}` };
   },
 };

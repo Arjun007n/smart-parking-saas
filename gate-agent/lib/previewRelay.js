@@ -16,7 +16,9 @@
 //     "username": "admin", "password": "...",   optional, sent as Basic authentication
 //     "intervalMs": 500,                  snapshot mode only (200 to 5000)
 //     "port": 8090, "bind": "127.0.0.1",  where the picture is served (default: this PC only)
-//     "advertiseHost": "127.0.0.1"        the host name the screens use (when `bind` is a LAN address)
+//     "advertiseHost": "127.0.0.1",       the host name the screens use (when `bind` is a LAN address)
+//     "previewOrigins": ["https://parking.example.com"]   optional; websites allowed to read the picture with a
+//                                          script (CORS). Not needed for a normal <img> on the Entry / Exit screens.
 //   }
 
 const crypto = require("crypto");
@@ -31,9 +33,13 @@ const BOUNDARY = "frame";
 const FAILURES_BEFORE_ENDING = 3;
 const CONNECT_MS = 8000;
 
-// The same token every time the agent starts (the cloud keeps the address between restarts), and
-// not guessable without the device key.
-const tokenFor = (key) => crypto.createHmac("sha256", String(key)).update("preview-v1").digest("hex").slice(0, 32);
+// A random value picked each time the agent starts. The token changes with every start, so an old address
+// stops working; the agent sends its current address to the cloud with every heartbeat (see worker.js
+// heartbeatOnce), so the Entry and Exit screens pick up the new one by themselves.
+const PROCESS_SALT = crypto.randomBytes(16).toString("hex");
+
+// The same token for the same key within one agent run, and not guessable without the device key.
+const tokenFor = (key, salt = PROCESS_SALT) => crypto.createHmac("sha256", String(key)).update(`preview-v2:${salt}`).digest("hex").slice(0, 32);
 
 // Checks the "preview" block of a device and fills in the defaults. Throws a message for config.json.
 const normalize = (raw, where = "preview") => {
@@ -46,7 +52,12 @@ const normalize = (raw, where = "preview") => {
   const intervalMs = raw.intervalMs === undefined ? 500 : Number(raw.intervalMs);
   if (!Number.isFinite(intervalMs) || intervalMs < 200 || intervalMs > 5000) throw new Error(`${where}.intervalMs must be from 200 to 5000`);
   const bind = raw.bind || "127.0.0.1";
+  const origins = raw.previewOrigins === undefined ? [] : [].concat(raw.previewOrigins);
+  if (origins.some((o) => typeof o !== "string" || !/^https?:\/\/[^/\s]+$/.test(o))) {
+    throw new Error(`${where}.previewOrigins must be website origins such as "https://parking.example.com" (no path)`);
+  }
   return {
+    previewOrigins: origins.map((o) => o.toLowerCase()),
     mode, url: raw.url, username: raw.username || "", password: raw.password || "", intervalMs, port, bind,
     advertiseHost: raw.advertiseHost || (bind === "0.0.0.0" ? "127.0.0.1" : bind),
   };
@@ -78,12 +89,14 @@ class PreviewRelay {
     return username ? { authorization: `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}` } : {};
   }
 
-  // The answer headers. The picture is shown by an <img> on another website, so it must say that is allowed
-  // (and, for browsers that ask before reaching a private address, that this PC agrees).
-  headers(extra = {}) {
+  // The answer headers. The picture is shown by an <img> on another website: that needs no CORS header, only
+  // "cross-origin-resource-policy" (and, for browsers that ask before reaching a private address, that this PC agrees).
+  // A script (fetch) from a website may read the picture only when its Origin is listed in `previewOrigins`.
+  headers(extra = {}, origin = "") {
+    const allowed = origin && this.options.previewOrigins.includes(String(origin).toLowerCase());
     return {
       "cache-control": "no-store",
-      "access-control-allow-origin": "*",
+      ...(allowed ? { "access-control-allow-origin": origin, vary: "Origin" } : {}),
       "access-control-allow-private-network": "true",
       "cross-origin-resource-policy": "cross-origin",
       ...extra,
@@ -92,17 +105,19 @@ class PreviewRelay {
 
   handleRequest(req, res) {
     const path = new URL(req.url, "http://localhost").pathname;
+    const origin = req.headers.origin || "";
+    res.requestOrigin = origin;
     if (req.method === "OPTIONS") {
-      res.writeHead(204, this.headers({ "access-control-allow-methods": "GET", "access-control-max-age": "600" }));
+      res.writeHead(204, this.headers({ "access-control-allow-methods": "GET", "access-control-max-age": "600" }, origin));
       return res.end();
     }
     const prefix = "/preview/";
     if (req.method !== "GET" || !path.startsWith(prefix) || !sameToken(path.slice(prefix.length), this.token)) {
-      res.writeHead(404, this.headers());
+      res.writeHead(404, this.headers({}, origin));
       return res.end();
     }
     if (this.viewers >= MAX_VIEWERS) {
-      res.writeHead(503, this.headers({ "retry-after": "5" }));
+      res.writeHead(503, this.headers({ "retry-after": "5" }, origin));
       return res.end();
     }
     this.viewers += 1;
@@ -119,7 +134,7 @@ class PreviewRelay {
     work.catch((error) => {
       if (!controller.signal.aborted) this.log.warn(`picture stopped: ${error.message}`);
       if (!res.headersSent) {
-        res.writeHead(502, this.headers());
+        res.writeHead(502, this.headers({}, origin));
         res.end();
       } else {
         res.end();
@@ -138,7 +153,7 @@ class PreviewRelay {
       clearTimeout(giveUp);
     }
     if (!upstream.ok || !upstream.body) throw new Error(`the camera answered HTTP ${upstream.status}`);
-    res.writeHead(200, this.headers({ "content-type": upstream.headers.get("content-type") || `multipart/x-mixed-replace; boundary=${BOUNDARY}` }));
+    res.writeHead(200, this.headers({ "content-type": upstream.headers.get("content-type") || `multipart/x-mixed-replace; boundary=${BOUNDARY}` }, res.requestOrigin));
     const body = Readable.fromWeb(upstream.body);
     body.on("error", () => res.end());
     body.pipe(res);
@@ -149,7 +164,7 @@ class PreviewRelay {
     const camera = createCameraDriver("http", {
       url: this.options.url, username: this.options.username, password: this.options.password,
     }, this.log);
-    res.writeHead(200, this.headers({ "content-type": `multipart/x-mixed-replace; boundary=${BOUNDARY}` }));
+    res.writeHead(200, this.headers({ "content-type": `multipart/x-mixed-replace; boundary=${BOUNDARY}` }, res.requestOrigin));
     let failures = 0;
     while (!controller.signal.aborted && !res.writableEnded) {
       const started = Date.now();

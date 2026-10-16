@@ -5,6 +5,7 @@ const audit = require("../services/auditService");
 const { dayRange } = require("../utils/time");
 const { locationScopedFilter, locationIdFromQuery } = require("../utils/scope");
 const { isCompanyWide } = require("../config/permissions");
+const { can } = require("../middleware/permission");
 const gateway = require("../integrations/payment");
 const ParkingSession = require("../models/ParkingSession");
 const Payment = require("../models/Payment");
@@ -216,6 +217,14 @@ const createPayment = async (req, res) => {
   if (method === "WALLET") {
     if (!walletId) throw new AppError("Choose the wallet to pay from", 400);
     if (transactionId) throw new AppError("A wallet payment has no payment reference", 400);
+    // A wallet pays for its own vehicles. Another vehicle's fee needs a supervisor or admin.
+    const allowUnlinked = can(req, "SESSION_OVERRIDE") || can(req, "WALLET_MANAGE");
+    const eligibility = await wallets.assertMayPay({ walletId, companyId: session.companyId, session, allowUnlinked });
+    if (!eligibility.linked) {
+      await audit.record(req, "WALLET_PAID_UNLINKED_VEHICLE", {
+        entity: "ParkingSession", entityId: session._id, companyId: session.companyId, meta: { walletId, vehicleNumber: session.vehicleNumber },
+      });
+    }
     walletDebit = await wallets.debitForSession({
       walletId, companyId: session.companyId, session, amount: owed, by: req.user._id, shiftId: shift ? shift._id : undefined,
     });
@@ -372,8 +381,15 @@ const paymentFilter = (req) => {
   return { conditions, start, end };
 };
 
+// A user an admin switched off from "Show total collection" (Users > Edit) must not get the money figures from these
+// calls either, not only from the operator screens.
+const totalsHiddenFor = (req) => Boolean(req.user && req.user.access && req.user.access.showTotalCollection === false);
+
 // GET /api/payments?locationId=&date=&page=
 const listPayments = async (req, res) => {
+  if (totalsHiddenFor(req)) {
+    return res.json({ success: true, data: { payments: [], total: 0, page: 1, pageSize: PAGE_SIZE, hidden: true } });
+  }
   const { conditions, start, end } = paymentFilter(req);
   const filter = { $and: [...conditions, { createdAt: { $gte: start, $lt: end } }] };
   const page = Math.min(1000, Math.max(1, Number.parseInt(req.query.page, 10) || 1));
@@ -526,6 +542,17 @@ const walletTopupFilter = (req) => {
 // Money of one day: collected (by the day it was paid), refunded (by the day
 // it was given back) and the net. Also split by payment method and operator.
 const collectionSummary = async (req, res) => {
+  if (totalsHiddenFor(req)) {
+    const { start: hiddenStart, end: hiddenEnd } = dayRange(req.query.date);
+    const none = { key: null, amount: 0, tax: 0, count: 0 };
+    return res.json({
+      success: true,
+      data: {
+        from: hiddenStart, to: hiddenEnd, total: none, refunded: { amount: 0, count: 0 }, net: 0,
+        walletTopups: { amount: 0, count: 0, byMethod: [] }, passes: none, byMethod: [], byOperator: [], hidden: true,
+      },
+    });
+  }
   const { conditions, start, end } = paymentFilter(req);
   const sum = { amount: { $sum: "$amount" }, tax: { $sum: "$tax" }, count: { $sum: 1 } };
 

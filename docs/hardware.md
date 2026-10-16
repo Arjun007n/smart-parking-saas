@@ -174,6 +174,11 @@ The platform accepts one standard format at `POST /api/device/anpr`:
   the camera device `"driver": "listener"` and point the camera's HTTP notification at
   `http://<agent-pc>:8081/anpr`. The agent translates the payload and forwards it, keeping events
   for up to 5 minutes if the internet is down.
+  **The listener only accepts calls from the gate PC itself by default** (`"bind": "127.0.0.1"`). A camera on
+  another machine needs `"bind": "0.0.0.0"` (or the PC's network address) together with a `"secret"` in the same
+  `options`; the agent refuses to start with a network address and no secret. Send the secret in the
+  `x-agent-secret` header, or as `?secret=` if the camera cannot set headers. The same applies to the RFID
+  (port 8082) and FASTag (port 8083) listeners below.
 * To support a specific brand, add a translator to `gate-agent/lib/translators.js` (it returns the
   standard format above). Brands that post XML or multipart pictures need the translator to parse
   that body first; that is the only code that differs between brands.

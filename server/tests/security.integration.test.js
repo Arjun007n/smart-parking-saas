@@ -243,6 +243,12 @@ it("a location admin's edit keeps a user's assignments at other locations", asyn
   assert.equal(edit.status, 200, JSON.stringify(edit.body));
   assert.deepEqual([...edit.body.data.locationIds].sort(), [s.roomy._id, s.tight._id].sort());
 
+  // The user also works at a location the admin does not manage: password, role and on/off stay with a company admin.
+  const takeover = await api("PUT", `/api/users/${s.operator._id}`, { token: s.locAdmin, body: { password: "TakenOver123" } });
+  assert.equal(takeover.status, 403, JSON.stringify(takeover.body));
+  assert.match(takeover.body.message, /also works at a location you do not manage/);
+  assert.equal((await api("DELETE", `/api/users/${s.operator._id}`, { token: s.locAdmin })).status, 403);
+
   // They still cannot hand out a location they do not manage.
   assert.equal((await api("PUT", `/api/users/${s.operator._id}`, { token: s.locAdmin, body: { locationIds: [s.tight._id] } })).status, 403);
   s.opToken = await login("sec-op@example.com"); // the edit ended the old session

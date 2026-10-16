@@ -54,7 +54,7 @@ const simulated = {
     const { attachments, ...rest } = message;
     outbox.push({ ...rest, ...(attachments && attachments.length ? { attachments: attachments.map((a) => ({ filename: a.filename, bytes: Buffer.from(a.content).length })) } : {}), at: new Date() });
     if (outbox.length > OUTBOX_LIMIT) outbox.shift();
-    if (process.env.NODE_ENV !== "test") console.log(`[simulated email] to ${message.to.join(", ")}: ${message.subject}\n${message.text}`);
+    if (process.env.NODE_ENV === "development") console.log(`[simulated email] to ${message.to.join(", ")}: ${message.subject}\n${message.text}`);
     return { id: `sim-${outbox.length}` };
   },
 };

@@ -160,7 +160,7 @@ test("worker: wake-ups never make two polls run at the same time; one more run f
     },
     ack: async () => {},
   };
-  const worker = new DeviceWorker({ serverUrl: "http://x", device: barrier, client, pollMs: 60000, heartbeatMs: 60000 });
+  const worker = new DeviceWorker({ serverUrl: "http://localhost:5000", device: barrier, client, pollMs: 60000, heartbeatMs: 60000 });
   worker.start();
   try {
     await new Promise((r) => setTimeout(r, 5)); // first poll is running

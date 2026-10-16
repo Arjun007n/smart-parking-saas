@@ -4,7 +4,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFi
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { packagePath, patchGradle, patchMainActivity, patchNativeManifest, patchProguard, withPackage } from "./native.mjs";
+import { packagePath, patchGradle, patchMainActivity, patchMinify, patchNativeManifest, patchProguard, patchProguardRules, withPackage } from "./native.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
@@ -44,6 +44,12 @@ edit(path.join(main, "AndroidManifest.xml"), patchNativeManifest);
 
 // The plugins' own Android build files (in node_modules) and the app's.
 edit(gradle, patchProguard);
+// Release builds are shrunk with R8 (the keep rules go in proguard-rules.pro). Set APP_MINIFY=0 to leave it off.
+if (process.env.APP_MINIFY !== "0") {
+  edit(gradle, patchMinify);
+  const rules = path.join(root, "android", "app", "proguard-rules.pro");
+  if (existsSync(rules)) edit(rules, (text) => patchProguardRules(text, appId));
+}
 const modules = path.join(root, "node_modules");
 const pluginFiles = [];
 if (existsSync(modules)) {
